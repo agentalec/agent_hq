@@ -83,7 +83,12 @@ def _run(args: argparse.Namespace, repo_root: Path) -> None:
         args.run_id, args.phase, config, taskdefs, _store(args),
         execute_outcome=args.execute_outcome,
     )
-    print(json.dumps(result))
+    if args.phase == "prepare":
+        # scripts/run-phases.sh greps the last stdout line for this; keep it
+        # a single deterministic token, not the (multiline) prompt bundle.
+        print(f"claimed={'true' if result.get('claimed') else 'false'}")
+    else:
+        print(json.dumps(result))
 
 
 def _config_validate(args: argparse.Namespace, repo_root: Path) -> None:

@@ -1,0 +1,40 @@
+name: Dispatch
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  repository_dispatch:
+    types: [agent-hq-dispatch]
+  workflow_dispatch: {}
+
+permissions:
+  actions: write
+  contents: write
+  issues: write
+
+concurrency:
+  group: agent-hq-state
+  cancel-in-progress: false
+
+env:
+  AGENT_HQ_TOKEN: ${{ secrets.AGENT_HQ_TOKEN }}
+  AGENT_HQ_ENGINE_REPO: ${{ github.repository }}
+  AGENT_HQ_KILL_SWITCH: ${{ vars.AGENT_HQ_KILL_SWITCH }}
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: bash scripts/checkout-state.sh
+      - run: agent-hq dispatch --state ./_state
+      - name: Refresh the dashboard
+        run: |
+          curl -s -X POST \
+            -H "Authorization: Bearer $AGENT_HQ_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/pages.yml/dispatches" \
+            -d '{"ref":"main"}' || true

@@ -1,0 +1,26 @@
+name: Setup agent-hq
+description: Install Python + agent-hq (optionally with dev extras)
+
+inputs:
+  dev:
+    description: "'true' to install the '.[dev]' extras (ruff, pytest); otherwise just '.'"
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+        cache: pip
+
+    - name: Install agent-hq (dev extras)
+      if: inputs.dev == 'true'
+      shell: bash
+      run: pip install '.[dev]'
+
+    - name: Install agent-hq
+      if: inputs.dev != 'true'
+      shell: bash
+      run: pip install .

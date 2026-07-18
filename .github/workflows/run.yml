@@ -1,0 +1,39 @@
+name: Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Run identifier (matches a QUEUED run in the state store)"
+        required: true
+        type: string
+
+run-name: "agent-hq/${{ inputs.run_id }}"
+
+concurrency:
+  group: "run-${{ inputs.run_id }}"
+  cancel-in-progress: false
+
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: agent-hq-state
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: devcontainers/ci@v0.3
+        with:
+          push: never
+          runCmd: bash scripts/run-phases.sh "${{ inputs.run_id }}"
+          env: |
+            AGENT_HQ_TOKEN=${{ secrets.AGENT_HQ_TOKEN }}
+            ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+            AGENT_HQ_ENGINE_REPO=${{ github.repository }}
