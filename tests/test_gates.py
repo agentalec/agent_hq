@@ -152,10 +152,42 @@ def test_status_latest_per_reviewer_supersedes_changes_requested_with_approval(m
     )
     gate = _gate()
     decision = gate.status(
-        {"gate_request_id": "5", "gate_requested_at": "2026-07-16T09:00:00Z"}
+        {
+            "gate_request_id": "5",
+            "gate_requested_at": "2026-07-16T09:00:00Z",
+            "approver_group": "product-owners",
+        }
     )
     assert decision.status == GateStatus.APPROVED
     assert fake.calls[0]["url"].endswith("/repos/o/r/pulls/5/reviews")
+
+
+def test_status_ignores_approval_from_non_group_member(monkeypatch):
+    _install(
+        monkeypatch,
+        [
+            FakeResponse(
+                200,
+                [
+                    {
+                        "user": {"login": "some-random-user"},
+                        "state": "APPROVED",
+                        "submitted_at": "2026-07-16T10:00:00Z",
+                        "body": "",
+                    }
+                ],
+            )
+        ],
+    )
+    gate = _gate()
+    decision = gate.status(
+        {
+            "gate_request_id": "5",
+            "gate_requested_at": "2026-07-16T09:00:00Z",
+            "approver_group": "product-owners",
+        }
+    )
+    assert decision.status == GateStatus.PENDING
 
 
 def test_status_changes_requested_carries_review_body(monkeypatch):
@@ -177,7 +209,11 @@ def test_status_changes_requested_carries_review_body(monkeypatch):
     )
     gate = _gate()
     decision = gate.status(
-        {"gate_request_id": "5", "gate_requested_at": "2026-07-16T09:00:00Z"}
+        {
+            "gate_request_id": "5",
+            "gate_requested_at": "2026-07-16T09:00:00Z",
+            "approver_group": "architects",
+        }
     )
     assert decision.status == GateStatus.CHANGES_REQUESTED
     assert "please rework the migration" in decision.comments

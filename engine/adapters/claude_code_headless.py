@@ -17,7 +17,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from engine.adapters._github import git_credential_args
+from engine.adapters._github import GitHubClient, git_credential_args, open_draft_pr, request_reviewers
 from engine.models import TaskRun
 
 _BOT_NAME = "agent-hq[bot]"
@@ -189,6 +189,22 @@ class ClaudeCodeHeadless:
         self._commit_if_dirty(worktree, f"agent-hq: run {run_id}")
         self._git("push", "-u", "origin", branch, cwd=worktree)
         return self._git("rev-parse", branch, cwd=worktree).strip()
+
+    # -- PR lifecycle (repo-side effects owned by this adapter, same as
+    # build_pr_branch's push -- runner.py calls these through the
+    # agent-session port so swapping the executor swaps PR behavior too) ----
+
+    def open_draft_pr(self, repo: str, branch: str, base: str, title: str, body: str) -> str:
+        pr = open_draft_pr(GitHubClient(), repo, branch, base, title, body)
+        return f"{repo}#{pr['number']}"
+
+    def mark_pr_ready(self, pr_ref: str) -> None:
+        repo, _, number = pr_ref.rpartition("#")
+        GitHubClient().patch(f"/repos/{repo}/pulls/{number}", json={"draft": False})
+
+    def request_reviewers(self, pr_ref: str, members: list[str]) -> None:
+        repo, _, number = pr_ref.rpartition("#")
+        request_reviewers(GitHubClient(), repo, number, members)
 
     # -- executor (thin passthrough; see module docstring) --------------------
 

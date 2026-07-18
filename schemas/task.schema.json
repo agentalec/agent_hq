@@ -107,6 +107,10 @@
         }
       }
     },
+    "opens_pr": {
+      "type": "boolean",
+      "description": "Open (or reuse) a draft PR for agent-hq/<run_id> on success, independent of any approval gate."
+    },
     "on_success": {
       "type": "object",
       "additionalProperties": false,

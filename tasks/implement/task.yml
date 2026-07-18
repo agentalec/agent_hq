@@ -4,6 +4,7 @@ description: Implement the ticket per specs/{ticket}/tasks.md, committing as you
 trigger: enqueued_by
 skills:
   - prompts/implement.md
+opens_pr: true
 outputs:
   artifacts: []
 on_success:

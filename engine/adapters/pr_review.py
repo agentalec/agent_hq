@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from engine.adapters._github import GitHubClient
+from engine.adapters._github import GitHubClient, open_draft_pr, request_reviewers
 from engine.models import GateDecision, GateRequest, GateStatus
 
 _DAY_ABBR = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -91,39 +91,17 @@ class PrReviewGate:
         if not repo:
             raise ValueError("pr-review request needs subject['repo'] or settings['repo']")
         branch = subject["branch"]
-        org = repo.split("/", 1)[0]
-        existing = (
-            self._client.get(
-                f"/repos/{repo}/pulls", params={"head": f"{org}:{branch}", "state": "open"}
-            )
-            or []
+        pr = open_draft_pr(
+            self._client,
+            repo,
+            branch,
+            self.default_base,
+            subject.get("title") or f"hq: {subject.get('ticket_id', '')}",
+            subject.get("body", ""),
         )
-        if existing:
-            pr = existing[0]
-        else:
-            pr = self._client.post(
-                f"/repos/{repo}/pulls",
-                json={
-                    "title": subject.get("title") or f"hq: {subject.get('ticket_id', '')}",
-                    "body": subject.get("body", ""),
-                    "head": branch,
-                    "base": self.default_base,
-                    "draft": True,
-                },
-            )
 
         members = self.approvers.get("groups", {}).get(group, {}).get("members", [])
-        if members:
-            try:
-                self._client.post(
-                    f"/repos/{repo}/pulls/{pr['number']}/requested_reviewers",
-                    json={"reviewers": members},
-                )
-            except RuntimeError as exc:
-                if "-> 422" not in str(exc):
-                    raise
-                # ponytail: a member who can't review (e.g. the PR author) --
-                # skip, don't fail the gate
+        request_reviewers(self._client, repo, pr["number"], members)
 
         return GateRequest(request_id=str(pr["number"]))
 
@@ -131,9 +109,18 @@ class PrReviewGate:
         pr_number = run["gate_request_id"]
         reviews = self._client.get(f"/repos/{self.repo}/pulls/{pr_number}/reviews") or []
 
+        # Only the configured approver group may authorize this gate --
+        # anyone else's review is discarded before the decision is made.
+        approver_group = run.get("approver_group")
+        members = set(
+            self.approvers.get("groups", {}).get(approver_group, {}).get("members", [])
+        )
+
         latest: dict[str, dict] = {}
         for review in reviews:
             user = review["user"]["login"]
+            if user not in members:
+                continue
             submitted_at = review.get("submitted_at") or ""
             if user not in latest or submitted_at >= (latest[user].get("submitted_at") or ""):
                 latest[user] = review

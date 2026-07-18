@@ -402,7 +402,9 @@ def sweep(config, taskdefs, store, workflow_api, now_iso: str, adapter_fn: Adapt
         timeout = gate_entry.get("timeout_working_hours")
         repo = _target_repo(config, adapter_fn, ticket_id) or next(iter(config.repos))
         gate = adapter_fn("gate", run.get("bindings", {}).get("gate", "pr-review"), repo=repo)
-        decision = gate.status({**run, "timeout_working_hours": timeout})
+        decision = gate.status(
+            {**run, "timeout_working_hours": timeout, "approver_group": gate_entry.get("approvers")}
+        )
         status = decision.status.value if hasattr(decision.status, "value") else decision.status
         if status == "APPROVED":
             # Enqueue BEFORE marking SUCCEEDED: both are idempotent, and a

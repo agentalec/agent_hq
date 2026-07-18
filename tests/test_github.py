@@ -98,6 +98,29 @@ def test_list_workflow_runs_filters_by_name(monkeypatch):
     assert [r["id"] for r in runs] == [2]
 
 
+def test_list_workflow_runs_matches_display_title_over_workflow_name(monkeypatch):
+    # Realistic payload: the workflow file's `name` stays "Run" for every
+    # dispatch: the custom run-name ("agent-hq/<run_id>") only shows up in
+    # `display_title`.
+    _install(
+        monkeypatch,
+        [
+            FakeResponse(
+                200,
+                {
+                    "workflow_runs": [
+                        {"id": 1, "name": "Run", "display_title": "agent-hq/run-1"},
+                        {"id": 2, "name": "Run", "display_title": "agent-hq/run-2"},
+                    ]
+                },
+            )
+        ],
+    )
+    client = _github.GitHubClient()
+    runs = client.list_workflow_runs("o/r", "agent-hq/run-1")
+    assert [r["id"] for r in runs] == [1]
+
+
 def test_git_credential_args_with_and_without_env(monkeypatch):
     monkeypatch.setenv("AGENT_HQ_TOKEN", "tok")
     args = _github.git_credential_args()

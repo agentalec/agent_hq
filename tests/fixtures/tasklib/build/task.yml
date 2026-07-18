@@ -5,6 +5,7 @@ trigger: enqueue
 inputs:
   artifacts:
     - specs/{ticket}/spec.md
+opens_pr: true
 budget:
   max_cost_usd: 5
   max_runtime_min: 30
@@ -12,3 +13,6 @@ budget:
 outputs:
   artifacts:
     - impl/{ticket}.md
+on_success:
+  enqueue:
+    - task: finalize

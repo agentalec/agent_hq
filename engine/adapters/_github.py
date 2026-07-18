@@ -52,12 +52,51 @@ class GitHubClient:
         return self._request("PATCH", path, json=json, params=params)
 
     def list_workflow_runs(self, repo: str, name: str) -> list[dict]:
+        # `run.yml` sets `run-name: agent-hq/<run_id>`, which GitHub exposes
+        # as `display_title` -- the workflow file's own `name` field ("Run")
+        # never changes, so match on display_title first.
         data = self.get(f"/repos/{repo}/actions/runs") or {}
-        return [run for run in data.get("workflow_runs", []) if run.get("name") == name]
+        return [
+            run
+            for run in data.get("workflow_runs", [])
+            if (run.get("display_title") or run.get("name")) == name
+        ]
 
     def combined_check_status(self, repo: str, ref: str) -> str:
         data = self.get(f"/repos/{repo}/commits/{ref}/status")
         return data["state"]
+
+
+def open_draft_pr(client: GitHubClient, repo: str, branch: str, base: str, title: str, body: str) -> dict:
+    """GET-or-create an open draft PR for `branch`. Shared by the `pr-review`
+    gate adapter and `claude-code-headless`'s agent-session PR lifecycle
+    methods -- both are repo-side effects behind their own port, never called
+    directly by port-agnostic orchestration code (engine/runner.py)."""
+    org = repo.split("/", 1)[0]
+    existing = (
+        client.get(f"/repos/{repo}/pulls", params={"head": f"{org}:{branch}", "state": "open"})
+        or []
+    )
+    if existing:
+        return existing[0]
+    return client.post(
+        f"/repos/{repo}/pulls",
+        json={"title": title, "body": body, "head": branch, "base": base, "draft": True},
+    )
+
+
+def request_reviewers(client: GitHubClient, repo: str, pr_number, members: list[str]) -> None:
+    if not members:
+        return
+    try:
+        client.post(
+            f"/repos/{repo}/pulls/{pr_number}/requested_reviewers", json={"reviewers": members}
+        )
+    except RuntimeError as exc:
+        if "-> 422" not in str(exc):
+            raise
+        # ponytail: a member who can't review (e.g. the PR author) -- skip,
+        # don't fail the caller
 
 
 def git_credential_args() -> list[str]:
