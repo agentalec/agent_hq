@@ -5,7 +5,10 @@ Canonical (P0): `github-comment` (@-mentions ride GitHub notifications).
 ## Ops
 
 - `notify(audience, message, links, event_id)` -- post `message` (plus
-  `links`) to `audience`. `event_id` makes re-delivery idempotent: the same
+  `links`) to `audience`, a dict of
+  `{"ticket_id": <ticket ref>, "mentions": [<recipient>, ...]}` (adapters
+  interpret both keys for their medium). `event_id` makes re-delivery
+  idempotent: the same
   `event_id` must not produce a second notification.
 - `healthcheck() -> bool`
 
