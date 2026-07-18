@@ -1,0 +1,8 @@
+.hyperclaude/
+__pycache__/
+*.egg-info/
+.venv/
+site/
+_state/
+.pytest_cache/
+.ruff_cache/
