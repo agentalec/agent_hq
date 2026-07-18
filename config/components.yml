@@ -1,0 +1,15 @@
+# Component port bindings (§6). Pilot placeholder values only.
+tracker:
+  adapter: github-issues
+executor:
+  adapter: claude-code-headless
+agent-session:
+  adapter: claude-code-headless
+messaging:
+  adapter: github-comment
+gate:
+  adapter: pr-review
+  named:
+    spec-approval: pr-review
+label_overrides:
+  - "hq:executor="

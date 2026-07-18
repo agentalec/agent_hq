@@ -1,0 +1,6 @@
+# Budgets config (§6). Pilot placeholder values only.
+ticket_cap_usd: 25
+in_flight_cap: 3
+loop_guard:
+  max_runs: 25
+  max_depth: 12

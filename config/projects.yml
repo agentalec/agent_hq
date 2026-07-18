@@ -1,0 +1,5 @@
+# Projects config (§6). Pilot placeholder values only.
+repos:
+  - example-org/product-be
+  - example-org/product-fe
+intake_label: hq:intake

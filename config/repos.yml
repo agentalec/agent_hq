@@ -1,0 +1,10 @@
+# Repos config (§6). example-org is a placeholder -- real org/repo names
+# await requirements §12 answers.
+example-org/product-be:
+  role: be
+  branch_prefix: agent-hq
+  product_area: backend
+example-org/product-fe:
+  role: fe
+  branch_prefix: agent-hq
+  product_area: frontend

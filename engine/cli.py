@@ -9,6 +9,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from engine.config import ConfigError, load_config
+
 
 def resolve_repo_root(repo_root_arg: str | None) -> Path:
     """Resolve the repo root once per invocation.
@@ -33,6 +35,16 @@ def _not_implemented(args: argparse.Namespace, repo_root: Path) -> None:
     raise SystemExit("not yet implemented")
 
 
+def _config_validate(args: argparse.Namespace, repo_root: Path) -> None:
+    try:
+        load_config(repo_root / "config", repo_root / "schemas")
+    except ConfigError as exc:
+        for error in exc.errors:
+            print(error)
+        raise SystemExit(1) from exc
+    print("config OK")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agent-hq")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -41,7 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
     config_sub = config_parser.add_subparsers(dest="config_command", required=True)
     config_validate = config_sub.add_parser("validate", help="Validate engine config")
     _add_common_args(config_validate)
-    config_validate.set_defaults(func=_not_implemented)
+    config_validate.set_defaults(func=_config_validate)
 
     tasks_parser = subparsers.add_parser("tasks", help="Task-related commands")
     tasks_sub = tasks_parser.add_subparsers(dest="tasks_command", required=True)

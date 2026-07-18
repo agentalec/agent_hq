@@ -1,0 +1,16 @@
+# Approvers config (§6). example-* members are placeholders -- real
+# usernames await requirements §12 answers.
+groups:
+  product-owners:
+    members: [example-alice]
+  architects:
+    members: [example-bob]
+  clinical-reviewers:
+    members: [example-carol]
+  escalation:
+    members: [example-dave]
+working_hours:
+  timezone: Asia/Kolkata
+  start: 9
+  end: 17
+  days: [Mon, Tue, Wed, Thu, Fri]
