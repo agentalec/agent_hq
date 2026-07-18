@@ -1,0 +1,219 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-hq.dev/schemas/task.schema.json",
+  "title": "Task definition",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "version",
+    "description",
+    "trigger",
+    "budget"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "description": {
+      "type": "string"
+    },
+    "trigger": {
+      "type": "string"
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "ticket_fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "context": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "skills": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "components": {
+      "type": "object",
+      "description": "Port name -> logical binding name",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "model": {
+      "type": "string"
+    },
+    "gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "post": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "approvers",
+              "adapter"
+            ],
+            "properties": {
+              "approvers": {
+                "type": "string"
+              },
+              "adapter": {
+                "type": "string",
+                "description": "LOGICAL gate name resolved via components.yml gate.named (or 'default'); never a concrete adapter id"
+              },
+              "timeout_working_hours": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    "outputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "on_success": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enqueue": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/enqueueItem"
+          }
+        }
+      }
+    },
+    "on_failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enqueue": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/enqueueItem"
+          }
+        }
+      }
+    },
+    "tools": {
+      "type": "array",
+      "description": "Allowed tool names passed to the agent CLI as --allowedTools",
+      "items": {
+        "type": "string"
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_cost_usd",
+        "max_runtime_min",
+        "retries"
+      ],
+      "properties": {
+        "max_cost_usd": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "max_runtime_min": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "retries": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "eligibility": {
+      "type": "object",
+      "description": "Intake-only eligibility filter",
+      "additionalProperties": false,
+      "properties": {
+        "min_body_words": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "excluded_labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "enqueueItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "task"
+      ],
+      "properties": {
+        "task": {
+          "type": "string"
+        },
+        "when": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "field",
+            "op",
+            "value"
+          ],
+          "properties": {
+            "field": {
+              "type": "string"
+            },
+            "op": {
+              "type": "string",
+              "enum": [
+                "eq",
+                "ne",
+                "in"
+              ]
+            },
+            "value": {}
+          }
+        }
+      }
+    }
+  }
+}

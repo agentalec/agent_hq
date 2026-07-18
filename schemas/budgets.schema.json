@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-hq.dev/schemas/budgets.schema.json",
+  "title": "Budgets config",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ticket_cap_usd", "in_flight_cap", "loop_guard"],
+  "properties": {
+    "ticket_cap_usd": { "type": "number", "exclusiveMinimum": 0 },
+    "label_overrides": {
+      "type": "object",
+      "description": "Label -> ticket cost cap override in USD",
+      "additionalProperties": { "type": "number", "exclusiveMinimum": 0 }
+    },
+    "in_flight_cap": {
+      "type": "integer",
+      "description": "Global cap on concurrently in-flight tickets",
+      "minimum": 1
+    },
+    "loop_guard": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_runs", "max_depth"],
+      "properties": {
+        "max_runs": { "type": "integer", "minimum": 1 },
+        "max_depth": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

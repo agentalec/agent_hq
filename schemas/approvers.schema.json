@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-hq.dev/schemas/approvers.schema.json",
+  "title": "Approvers config",
+  "type": "object",
+  "description": "Named approver groups plus the single working-hours schedule used for gate timeouts",
+  "additionalProperties": false,
+  "required": ["groups", "working_hours"],
+  "properties": {
+    "groups": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["members"],
+        "properties": {
+          "members": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    },
+    "working_hours": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["timezone", "start", "end", "days"],
+      "properties": {
+        "timezone": { "type": "string" },
+        "start": { "type": "integer", "minimum": 0, "maximum": 23 },
+        "end": { "type": "integer", "minimum": 0, "maximum": 23 },
+        "days": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+          }
+        }
+      }
+    }
+  }
+}

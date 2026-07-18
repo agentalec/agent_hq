@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-hq.dev/schemas/health.schema.json",
+  "title": "Health record",
+  "type": "object",
+  "description": "Map of \"<port>/<adapter>\" to its recorded health outcome",
+  "additionalProperties": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["ok", "detail", "ts"],
+    "properties": {
+      "ok": { "type": "boolean" },
+      "detail": { "type": "string" },
+      "ts": { "type": "string" }
+    }
+  }
+}

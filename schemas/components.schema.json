@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-hq.dev/schemas/components.schema.json",
+  "title": "Component bindings",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tracker", "executor", "agent-session", "messaging", "gate"],
+  "properties": {
+    "tracker": { "$ref": "#/$defs/binding" },
+    "executor": { "$ref": "#/$defs/binding" },
+    "agent-session": { "$ref": "#/$defs/binding" },
+    "messaging": { "$ref": "#/$defs/binding" },
+    "gate": { "$ref": "#/$defs/gateBinding" },
+    "label_overrides": {
+      "type": "array",
+      "description": "Label patterns permitted to override component bindings",
+      "items": { "type": "string" }
+    }
+  },
+  "$defs": {
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["adapter"],
+      "properties": {
+        "adapter": { "type": "string" },
+        "settings": { "type": "object" }
+      }
+    },
+    "gateBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["adapter"],
+      "properties": {
+        "adapter": { "type": "string" },
+        "settings": { "type": "object" },
+        "named": {
+          "type": "object",
+          "description": "Logical gate name -> concrete adapter",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    }
+  }
+}

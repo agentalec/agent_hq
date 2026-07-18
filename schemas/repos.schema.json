@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-hq.dev/schemas/repos.schema.json",
+  "title": "Repos config",
+  "type": "object",
+  "description": "Map of repo full-name (owner/repo) to its role in the pilot",
+  "additionalProperties": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["role", "branch_prefix", "product_area"],
+    "properties": {
+      "role": { "type": "string", "enum": ["be", "fe", "docs"] },
+      "branch_prefix": { "type": "string" },
+      "product_area": { "type": "string" }
+    }
+  }
+}

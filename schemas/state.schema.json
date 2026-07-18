@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-hq.dev/schemas/state.schema.json",
+  "title": "Per-ticket state document",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ticket_id", "status", "runs"],
+  "properties": {
+    "ticket_id": { "type": "string" },
+    "pinned_comment_id": { "type": ["string", "integer", "null"] },
+    "status": { "type": "string", "enum": ["ACTIVE", "BLOCKED", "DONE"] },
+    "runs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/run" }
+    }
+  },
+  "$defs": {
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "task_id",
+        "task_version",
+        "ticket_id",
+        "state",
+        "attempt",
+        "bindings",
+        "cost_usd",
+        "tokens",
+        "usage_known",
+        "artifacts",
+        "chain_depth"
+      ],
+      "properties": {
+        "run_id": { "type": "string" },
+        "task_id": { "type": "string" },
+        "task_version": { "type": "integer", "minimum": 1 },
+        "ticket_id": { "type": "string" },
+        "state": {
+          "type": "string",
+          "enum": ["QUEUED", "RUNNING", "WAITING_GATE", "SUCCEEDED", "FAILED", "BLOCKED"]
+        },
+        "deadline": { "type": ["string", "null"] },
+        "attempt_started_at": { "type": ["string", "null"] },
+        "gate_requested_at": { "type": ["string", "null"] },
+        "gate_request_id": { "type": ["string", "integer", "null"] },
+        "base_commit": { "type": ["string", "null"] },
+        "output_commit": { "type": ["string", "null"] },
+        "pr_ref": { "type": ["string", "null"] },
+        "attempt": { "type": "integer", "minimum": 0 },
+        "parent_run_id": { "type": ["string", "null"] },
+        "source_event_id": { "type": ["string", "null"] },
+        "enqueue_index": { "type": ["integer", "null"] },
+        "bindings": {
+          "type": "object",
+          "description": "Port name -> concrete adapter used for this run",
+          "additionalProperties": { "type": "string" }
+        },
+        "cost_usd": { "type": ["number", "null"] },
+        "tokens": { "type": ["integer", "null"] },
+        "usage_known": { "type": "boolean" },
+        "artifacts": { "type": "array", "items": { "type": "string" } },
+        "chain_depth": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}
