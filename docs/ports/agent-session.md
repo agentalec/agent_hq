@@ -12,10 +12,10 @@ Canonical (P0): `claude-code-headless`.
   bundle with an allowlisted tool set (PD-5: the agent never holds
   credentials the host process doesn't hand it) until it finishes or
   `deadline` passes.
-- `collect_outputs(declared) -> list[str]` -- verify and return the artifact
+- `collect_outputs(worktree, declared) -> list[str]` -- verify and return the artifact
   paths the task definition declared as outputs; missing declared artifacts
   is a failure, not a partial success.
-- `build_pr_branch(run_id, base_commit) -> str` -- push the worktree's
+- `build_pr_branch(run_id, worktree, base_commit) -> str` -- push the worktree's
   changes as a branch off `base_commit` and return the PR ref.
 - `healthcheck() -> bool`
 
