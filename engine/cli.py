@@ -33,10 +33,6 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--state", help="Path to the state-store worktree")
 
 
-def _not_implemented(args: argparse.Namespace, repo_root: Path) -> None:
-    raise SystemExit("not yet implemented")
-
-
 def _load(repo_root: Path):
     """Load config + task library for a runtime command, exiting with the
     collected validation errors on failure."""
@@ -89,6 +85,17 @@ def _run(args: argparse.Namespace, repo_root: Path) -> None:
         print(f"claimed={'true' if result.get('claimed') else 'false'}")
     else:
         print(json.dumps(result))
+
+
+def _dashboard(args: argparse.Namespace, repo_root: Path) -> None:
+    from engine.dashboard import build, snapshot
+
+    if not args.state:
+        raise SystemExit("--state (state-store worktree path) is required")
+    config = load_config(repo_root / "config", repo_root / "schemas")
+    snap = snapshot(args.state, config)
+    out_path = build(snap, args.out or "./site")
+    print(out_path)
 
 
 def _config_validate(args: argparse.Namespace, repo_root: Path) -> None:
@@ -160,7 +167,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     dashboard_parser = subparsers.add_parser("dashboard", help="Render the status dashboard")
     _add_common_args(dashboard_parser)
-    dashboard_parser.set_defaults(func=_not_implemented)
+    dashboard_parser.add_argument("--out", help="Output directory (default: ./site)")
+    dashboard_parser.set_defaults(func=_dashboard)
 
     return parser
 

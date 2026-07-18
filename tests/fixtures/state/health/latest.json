@@ -1,0 +1,4 @@
+{
+  "executor/claude-code-headless": {"ok": true, "detail": "ok", "ts": "2026-07-18T00:00:00Z"},
+  "gate/github-pr": {"ok": false, "detail": "token expired", "ts": "2026-07-18T00:05:00Z"}
+}

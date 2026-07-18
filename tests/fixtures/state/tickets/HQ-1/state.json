@@ -1,0 +1,52 @@
+{
+  "ticket_id": "HQ-1",
+  "pinned_comment_id": 123,
+  "status": "ACTIVE",
+  "runs": [
+    {
+      "run_id": "run-succeeded-1",
+      "task_id": "implement",
+      "task_version": 1,
+      "ticket_id": "HQ-1",
+      "state": "SUCCEEDED",
+      "attempt": 1,
+      "bindings": {},
+      "cost_usd": 1.5,
+      "tokens": 1000,
+      "usage_known": true,
+      "artifacts": ["</script><img src=x onerror=alert(1)>"],
+      "chain_depth": 0,
+      "pr_ref": "example-org/product-be#42"
+    },
+    {
+      "run_id": "run-waiting-gate-1",
+      "task_id": "review",
+      "task_version": 1,
+      "ticket_id": "HQ-1",
+      "state": "WAITING_GATE",
+      "attempt": 1,
+      "bindings": {},
+      "cost_usd": null,
+      "tokens": null,
+      "usage_known": false,
+      "artifacts": [],
+      "chain_depth": 0,
+      "gate_requested_at": "2026-07-18T00:00:00Z",
+      "gate_request_id": 7
+    },
+    {
+      "run_id": "run-queued-1",
+      "task_id": "docs",
+      "task_version": 1,
+      "ticket_id": "HQ-1",
+      "state": "QUEUED",
+      "attempt": 0,
+      "bindings": {},
+      "cost_usd": null,
+      "tokens": null,
+      "usage_known": false,
+      "artifacts": [],
+      "chain_depth": 0
+    }
+  ]
+}
