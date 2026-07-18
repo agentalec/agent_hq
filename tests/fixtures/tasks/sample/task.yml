@@ -1,0 +1,12 @@
+id: sample
+version: 1
+description: Minimal task definition used by taskdef loader tests.
+trigger: enqueued_by
+skills:
+  - prompts/sample.md
+budget:
+  max_cost_usd: 5
+  max_runtime_min: 30
+  retries: 2
+on_success:
+  enqueue: []

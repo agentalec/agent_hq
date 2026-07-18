@@ -10,6 +10,7 @@ import argparse
 from pathlib import Path
 
 from engine.config import ConfigError, load_config
+from engine.taskdefs import TaskDefError, load_all, validate_library
 
 
 def resolve_repo_root(repo_root_arg: str | None) -> Path:
@@ -45,6 +46,25 @@ def _config_validate(args: argparse.Namespace, repo_root: Path) -> None:
     print("config OK")
 
 
+def _tasks_validate(args: argparse.Namespace, repo_root: Path) -> None:
+    tasks_dir = repo_root / "tasks"
+    if not tasks_dir.exists():
+        print("no tasks/ directory")
+        return
+    try:
+        taskdefs = load_all(tasks_dir, repo_root / "schemas")
+    except TaskDefError as exc:
+        for error in exc.errors:
+            print(error)
+        raise SystemExit(1) from exc
+    errors = validate_library(taskdefs)
+    if errors:
+        for error in errors:
+            print(error)
+        raise SystemExit(1)
+    print("tasks OK")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agent-hq")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -59,7 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
     tasks_sub = tasks_parser.add_subparsers(dest="tasks_command", required=True)
     tasks_validate = tasks_sub.add_parser("validate", help="Validate task definitions")
     _add_common_args(tasks_validate)
-    tasks_validate.set_defaults(func=_not_implemented)
+    tasks_validate.set_defaults(func=_tasks_validate)
 
     intake_parser = subparsers.add_parser("intake", help="Intake a new task")
     _add_common_args(intake_parser)
