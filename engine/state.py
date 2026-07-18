@@ -140,6 +140,9 @@ class GitJsonStateStore:
     def _health_path(self) -> Path:
         return self.worktree_path / "health" / "latest.json"
 
+    def healthcheck(self) -> bool:
+        return self.worktree_path.exists() and bool(self._git("remote").strip())
+
     def read_state(self, ticket_id: str) -> dict | None:
         path = self._state_path(ticket_id)
         if not path.exists():

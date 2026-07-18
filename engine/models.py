@@ -62,6 +62,20 @@ class GateRequest:
 
 
 @dataclass(frozen=True)
+class TicketDetails:
+    """A tracker-fetched view of a ticket (title/body/labels).
+
+    Distinct from `Ticket`, which mirrors the persisted state.schema.json
+    ticket document and carries no source-tracker content.
+    """
+
+    ticket_id: str
+    title: str
+    body: str
+    labels: list[str]
+
+
+@dataclass(frozen=True)
 class Ticket:
     ticket_id: str
     pinned_comment_id: str | int | None
