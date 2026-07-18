@@ -7,6 +7,7 @@ the P0 plan lands.
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 from engine.config import ConfigError, load_config
@@ -29,11 +30,60 @@ def resolve_repo_root(repo_root_arg: str | None) -> Path:
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--repo-root", help="Path to the repo root (default: auto-detected)")
-    parser.add_argument("--state", help="Path to the engine state file")
+    parser.add_argument("--state", help="Path to the state-store worktree")
 
 
 def _not_implemented(args: argparse.Namespace, repo_root: Path) -> None:
     raise SystemExit("not yet implemented")
+
+
+def _load(repo_root: Path):
+    """Load config + task library for a runtime command, exiting with the
+    collected validation errors on failure."""
+    try:
+        config = load_config(repo_root / "config", repo_root / "schemas")
+        taskdefs = load_all(repo_root / "tasks", repo_root / "schemas")
+    except (ConfigError, TaskDefError) as exc:
+        for error in exc.errors:
+            print(error)
+        raise SystemExit(1) from exc
+    return config, taskdefs
+
+
+def _store(args: argparse.Namespace):
+    from engine.state import GitJsonStateStore
+
+    if not args.state:
+        raise SystemExit("--state (state-store worktree path) is required")
+    return GitJsonStateStore(args.state)
+
+
+def _intake(args: argparse.Namespace, repo_root: Path) -> None:
+    from engine.runner import intake_ticket
+
+    config, taskdefs = _load(repo_root)
+    result = intake_ticket(args.issue, args.event_key, config, taskdefs, _store(args))
+    print(result)
+
+
+def _dispatch(args: argparse.Namespace, repo_root: Path) -> None:
+    from engine.engine import dispatch
+    from engine.runner import GithubWorkflowApi
+
+    config, taskdefs = _load(repo_root)
+    triggered = dispatch(config, taskdefs, _store(args), GithubWorkflowApi())
+    print(f"triggered: {triggered}")
+
+
+def _run(args: argparse.Namespace, repo_root: Path) -> None:
+    from engine.runner import run_task
+
+    config, taskdefs = _load(repo_root)
+    result = run_task(
+        args.run_id, args.phase, config, taskdefs, _store(args),
+        execute_outcome=args.execute_outcome,
+    )
+    print(json.dumps(result))
 
 
 def _config_validate(args: argparse.Namespace, repo_root: Path) -> None:
@@ -81,42 +131,31 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common_args(tasks_validate)
     tasks_validate.set_defaults(func=_tasks_validate)
 
-    intake_parser = subparsers.add_parser("intake", help="Intake a new task")
+    intake_parser = subparsers.add_parser("intake", help="Intake a new ticket")
     _add_common_args(intake_parser)
-    intake_parser.set_defaults(func=_not_implemented)
+    intake_parser.add_argument("--issue", required=True, help="Issue ref (number or org/repo#N)")
+    intake_parser.add_argument("--event-key", required=True, help="Source-stable event key")
+    intake_parser.set_defaults(func=_intake)
 
-    pr_merged_parser = subparsers.add_parser("pr-merged", help="Handle a merged PR event")
-    _add_common_args(pr_merged_parser)
-    pr_merged_parser.set_defaults(func=_not_implemented)
-
-    dispatch_parser = subparsers.add_parser("dispatch", help="Dispatch queued work")
+    dispatch_parser = subparsers.add_parser("dispatch", help="Sweep and trigger queued work")
     _add_common_args(dispatch_parser)
-    dispatch_parser.set_defaults(func=_not_implemented)
-
-    health_parser = subparsers.add_parser("health", help="Report engine health")
-    _add_common_args(health_parser)
-    health_parser.set_defaults(func=_not_implemented)
+    dispatch_parser.set_defaults(func=_dispatch)
 
     run_parser = subparsers.add_parser("run", help="Run a task phase")
     _add_common_args(run_parser)
     run_parser.add_argument(
         "--phase",
-        choices=["register", "prepare", "execute", "collect"],
+        choices=["prepare", "execute", "collect"],
+        required=True,
         help="Phase of the run to execute",
     )
-    run_parser.add_argument("--run-id", help="Run identifier")
+    run_parser.add_argument("--run-id", required=True, help="Run identifier")
     run_parser.add_argument("--execute-outcome", help="Outcome recorded by the execute phase")
-    run_parser.add_argument("--gate-passed", help="Whether the review gate passed")
-    run_parser.add_argument("--workflow-run-id", help="GitHub Actions workflow run id")
-    run_parser.set_defaults(func=_not_implemented)
+    run_parser.set_defaults(func=_run)
 
     dashboard_parser = subparsers.add_parser("dashboard", help="Render the status dashboard")
     _add_common_args(dashboard_parser)
     dashboard_parser.set_defaults(func=_not_implemented)
-
-    mint_token_parser = subparsers.add_parser("mint-token", help="Mint a GitHub App token")
-    _add_common_args(mint_token_parser)
-    mint_token_parser.set_defaults(func=_not_implemented)
 
     return parser
 

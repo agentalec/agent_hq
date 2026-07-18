@@ -1,0 +1,19 @@
+id: spec
+version: 1
+description: Author the specification
+trigger: enqueue
+budget:
+  max_cost_usd: 5
+  max_runtime_min: 30
+  retries: 0
+outputs:
+  artifacts:
+    - specs/{ticket}/spec.md
+gates:
+  post:
+    - approvers: product-owners
+      adapter: spec-approval
+      timeout_working_hours: 8
+on_success:
+  enqueue:
+    - task: build

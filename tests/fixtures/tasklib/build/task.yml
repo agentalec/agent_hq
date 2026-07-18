@@ -1,0 +1,14 @@
+id: build
+version: 1
+description: Implement the specification
+trigger: enqueue
+inputs:
+  artifacts:
+    - specs/{ticket}/spec.md
+budget:
+  max_cost_usd: 5
+  max_runtime_min: 30
+  retries: 1
+outputs:
+  artifacts:
+    - impl/{ticket}.md

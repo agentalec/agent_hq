@@ -156,6 +156,7 @@ class Event:
     bindings: dict[str, str] | None = None
     run_url: str | None = None
     artifacts: list[str] | None = None
+    detail: str | None = None
 
     def to_dict(self) -> dict:
         d = _to_dict_omit_none_optionals(self)

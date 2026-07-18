@@ -149,6 +149,17 @@ class GitJsonStateStore:
             return None
         return json.loads(path.read_text())
 
+    def list_tickets(self) -> list[str]:
+        tickets_dir = self.worktree_path / "tickets"
+        if not tickets_dir.exists():
+            return []
+        return sorted(
+            p.name for p in tickets_dir.iterdir() if (p / "state.json").exists()
+        )
+
+    def read_events(self, ticket_id: str) -> list[dict]:
+        return self._read_events(ticket_id)
+
     def _read_events(self, ticket_id: str) -> list[dict]:
         path = self._events_path(ticket_id)
         if not path.exists():

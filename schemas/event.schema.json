@@ -24,6 +24,7 @@
       "additionalProperties": { "type": "string" }
     },
     "run_url": { "type": "string" },
-    "artifacts": { "type": "array", "items": { "type": "string" } }
+    "artifacts": { "type": "array", "items": { "type": "string" } },
+    "detail": { "type": "string" }
   }
 }
