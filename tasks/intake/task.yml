@@ -1,0 +1,15 @@
+id: intake
+version: 1
+description: Filter and accept new tickets into the pipeline.
+trigger: tracker_event
+eligibility:
+  min_body_words: 30
+  excluded_labels:
+    - hq:excluded
+budget:
+  max_cost_usd: 0.5
+  max_runtime_min: 5
+  retries: 0
+on_success:
+  enqueue:
+    - task: spec

@@ -1,0 +1,18 @@
+id: arch-approval
+version: 1
+description: Confirm the plan artifacts are in place; make no changes.
+trigger: enqueued_by
+gates:
+  post:
+    - approvers: architects
+      adapter: default
+      timeout_working_hours: 48
+outputs:
+  artifacts: []
+on_success:
+  enqueue:
+    - task: breakdown
+budget:
+  max_cost_usd: 0.5
+  max_runtime_min: 5
+  retries: 0

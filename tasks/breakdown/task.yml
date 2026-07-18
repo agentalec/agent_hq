@@ -1,0 +1,16 @@
+id: breakdown
+version: 1
+description: Break the plan into ordered, per-repo implementation tasks with acceptance-criteria coverage.
+trigger: enqueued_by
+skills:
+  - prompts/breakdown.md
+outputs:
+  artifacts:
+    - specs/{ticket}/tasks.md
+on_success:
+  enqueue:
+    - task: implement
+budget:
+  max_cost_usd: 5
+  max_runtime_min: 30
+  retries: 2

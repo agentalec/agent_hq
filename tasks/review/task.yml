@@ -1,0 +1,23 @@
+id: review
+version: 1
+description: Review the implementation against the spec and plan; write findings.
+trigger: enqueued_by
+context:
+  - constitution
+  - specs/{ticket}/*
+skills:
+  - prompts/review.md
+tools:
+  - Read
+  - Grep
+  - Glob
+outputs:
+  artifacts:
+    - specs/{ticket}/review.md
+on_success:
+  enqueue:
+    - task: finalize
+budget:
+  max_cost_usd: 5
+  max_runtime_min: 30
+  retries: 2

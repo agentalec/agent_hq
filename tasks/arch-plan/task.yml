@@ -1,0 +1,29 @@
+id: arch-plan
+version: 1
+description: Produce an implementation plan and classify the ticket as crud or beyond-crud.
+trigger: enqueued_by
+context:
+  - constitution
+  - specs/{ticket}/*
+skills:
+  - prompts/arch-plan.md
+outputs:
+  artifacts:
+    - specs/{ticket}/plan.md
+    - specs/{ticket}/classification.json
+on_success:
+  enqueue:
+    - task: arch-approval
+      when:
+        field: plan.classification
+        op: eq
+        value: beyond-crud
+    - task: breakdown
+      when:
+        field: plan.classification
+        op: ne
+        value: beyond-crud
+budget:
+  max_cost_usd: 5
+  max_runtime_min: 30
+  retries: 2

@@ -23,12 +23,14 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
 
 from engine import engine as eng
 from engine.adapters._github import GitHubClient
 from engine.config import Config, resolve_binding
 from engine.engine import (
+    _block_ticket,
     _handle_failure,
     enqueue,
     enqueue_targets,
@@ -36,6 +38,7 @@ from engine.engine import (
     resolve_target_repo,
     subst,
 )
+from engine.predicates import PredicateError
 from engine.models import Event, RunState
 from engine.state import _now_iso
 
@@ -105,7 +108,29 @@ def _rework_comments(store, ticket_id, run_id) -> str | None:
     return None
 
 
-def _assemble_prompt(taskdef, details, rework: str | None) -> str:
+def _write_parent_diff(worktree: Path, parent: dict | None) -> bool:
+    """Deterministically materialize the parent run's diff for read-only
+    child tasks (review has no git tool): `.agent-hq/diff.patch` =
+    parent.base_commit..parent.output_commit. Best-effort — a missing
+    commit or non-git worktree just skips the file."""
+    if not parent or not parent.get("output_commit"):
+        return False
+    base = parent.get("base_commit")
+    tip = parent["output_commit"]
+    args = ["git", "-C", str(worktree), "diff", *( [f"{base}..{tip}"] if base else [tip] )]
+    try:
+        result = subprocess.run(args, capture_output=True, text=True)
+    except OSError:
+        return False
+    if result.returncode != 0:
+        return False
+    out = worktree / ".agent-hq" / "diff.patch"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(result.stdout)
+    return True
+
+
+def _assemble_prompt(taskdef, details, rework: str | None, parent: dict | None = None) -> str:
     # ponytail: skill/context files live in the engine repo, not the target
     # worktree; inlining their contents is a later concern (Task 15/16). P0
     # bundles the task description, ticket, and any rework feedback.
@@ -119,6 +144,16 @@ def _assemble_prompt(taskdef, details, rework: str | None) -> str:
         parts.append("## Skills\n" + "\n".join(f"- {s}" for s in taskdef["skills"]))
     if taskdef.get("context"):
         parts.append("## Context\n" + "\n".join(f"- {c}" for c in taskdef["context"]))
+    if parent:
+        lineage = [f"- parent task: {parent.get('task_id')}"]
+        if parent.get("pr_ref"):
+            lineage.append(f"- parent PR: {parent['pr_ref']}")
+        if parent.get("output_commit"):
+            lineage.append(
+                "- the parent's changes are materialized at .agent-hq/diff.patch "
+                "(read it for the full diff)"
+            )
+        parts.append("## Upstream work\n" + "\n".join(lineage))
     if rework:
         parts.append("## Requested changes\n" + rework)
     return "\n\n".join(p for p in parts if p)
@@ -188,6 +223,7 @@ def _prepare(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskd
         )
 
     base_commit = None
+    parent = None
     if run.get("parent_run_id"):
         parent = next(
             (r for r in store.read_state(ticket_id)["runs"] if r["run_id"] == run["parent_run_id"]),
@@ -202,9 +238,10 @@ def _prepare(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskd
     agent = adapter_fn("agent-session", bindings["agent-session"], repo=repo)
     worktree = Path(agent.prepare_worktree(run_id, repo, base_commit))
 
+    _write_parent_diff(worktree, parent)
     rework = _rework_comments(store, ticket_id, run_id)
     bundle = {
-        "prompt": _assemble_prompt(taskdef, details, rework),
+        "prompt": _assemble_prompt(taskdef, details, rework, parent),
         "tools": taskdef.get("tools", []),
         "deadline": run.get("deadline"),
     }
@@ -360,10 +397,19 @@ def _collect_success(
         )
 
     store.write(succeed)
-    enqueue_targets(
-        store, taskdefs, {**run, "artifacts": artifacts}, taskdef, "on_success", values,
-        run["chain_depth"] + 1,
-    )
+    try:
+        enqueue_targets(
+            store, taskdefs, {**run, "artifacts": artifacts}, taskdef, "on_success", values,
+            run["chain_depth"] + 1,
+        )
+    except PredicateError as exc:
+        # Same graceful path as the sweep's redrive: a missing/malformed
+        # predicate source (e.g. classification.json) blocks loudly instead
+        # of crashing collect.
+        _block_ticket(
+            store, ticket_id, run_id,
+            f"enqueue predicates unevaluable ({exc}); fix the artifact and re-enqueue manually",
+        )
 
 
 # --------------------------------------------------------------------------

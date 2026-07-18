@@ -1,0 +1,25 @@
+id: spec
+version: 1
+description: Author the specification for the ticket.
+trigger: enqueued_by
+context:
+  - constitution
+  - specs/{ticket}/*
+skills:
+  - prompts/spec.md
+  - checklists/spec-quality.md
+outputs:
+  artifacts:
+    - specs/{ticket}/spec.md
+gates:
+  post:
+    - approvers: product-owners
+      adapter: spec-approval
+      timeout_working_hours: 48
+on_success:
+  enqueue:
+    - task: arch-plan
+budget:
+  max_cost_usd: 5
+  max_runtime_min: 30
+  retries: 2
