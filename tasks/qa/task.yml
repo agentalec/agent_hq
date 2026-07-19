@@ -1,0 +1,26 @@
+# P1: needs the compose-based qa-env adapter (see docs/roadmap.md; not built in P0).
+# Activation: point tasks/review/task.yml on_success at qa (review still
+# points at finalize until then).
+id: qa
+version: 1
+description: Stand up the target stack and run integration tests against the acceptance criteria.
+trigger: enqueued_by
+context:
+  - constitution
+  - specs/{ticket}/*
+skills:
+  - prompts/qa.md
+  - checklists/qa-coverage.md
+outputs:
+  artifacts:
+    - specs/{ticket}/qa.md
+on_success:
+  enqueue:
+    - task: docs
+on_failure:
+  enqueue:
+    - task: implement
+budget:
+  max_cost_usd: 10
+  max_runtime_min: 60
+  retries: 1

@@ -1,0 +1,25 @@
+# P1: activation = insert between qa and finalize (qa already points here
+# via on_success once qa is activated); on_success below still points at
+# finalize directly since qa isn't wired into the live chain yet. Docs
+# destination is per repos.yml docs role/destination (requirements §12 open
+# question -- until answered, write under the target repo's own docs/ dir).
+id: docs
+version: 1
+description: Update user/developer docs for the change and record what changed where.
+trigger: enqueued_by
+context:
+  - constitution
+  - specs/{ticket}/*
+skills:
+  - prompts/docs.md
+  - checklists/docs-drift.md
+outputs:
+  artifacts:
+    - specs/{ticket}/docs.md
+on_success:
+  enqueue:
+    - task: finalize
+budget:
+  max_cost_usd: 5
+  max_runtime_min: 30
+  retries: 2

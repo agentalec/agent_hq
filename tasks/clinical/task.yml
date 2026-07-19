@@ -1,0 +1,28 @@
+# P1: activate by pointing tasks/spec/task.yml on_success at clinical
+# (spec still enqueues arch-plan directly until then). Uses the existing
+# "default" gate adapter -- no new adapter needed.
+id: clinical
+version: 1
+description: Detail the clinical impact of the ticket, or record that there is none.
+trigger: enqueued_by
+context:
+  - constitution
+  - specs/{ticket}/*
+skills:
+  - prompts/clinical.md
+  - checklists/clinical-safety.md
+outputs:
+  artifacts:
+    - specs/{ticket}/clinical.md
+gates:
+  post:
+    - approvers: clinical-reviewers
+      adapter: default
+      timeout_working_hours: 48
+on_success:
+  enqueue:
+    - task: arch-plan
+budget:
+  max_cost_usd: 5
+  max_runtime_min: 30
+  retries: 2

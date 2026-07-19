@@ -1,0 +1,20 @@
+# P1: needs the reaction-based poll adapter (see docs/roadmap.md; not built in P0).
+# Activation: spec's prompt tags open questions `poll:*`; the P1 engine
+# work enqueues one poll task per tagged question -- not wired here.
+id: poll
+version: 1
+description: Frame one open question as a team decision and record the outcome.
+trigger: enqueued_by
+context:
+  - specs/{ticket}/*
+skills:
+  - prompts/poll.md
+outputs:
+  artifacts:
+    - specs/{ticket}/decisions.md
+on_success:
+  enqueue: []
+budget:
+  max_cost_usd: 2
+  max_runtime_min: 15
+  retries: 1
