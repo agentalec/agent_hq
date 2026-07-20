@@ -62,7 +62,7 @@ setup, and again after any change to `scripts/checkout-state.sh`,
    `AGENT_HQ_TOKEN` set and confirm `./_state` clones/bootstraps and a
    subsequent `agent-hq intake`/`dispatch` write pushes cleanly.
 2. **One real `claude -p --output-format json` run** -- confirm the pinned
-   Claude CLI version's stream-json output shape still matches what
+   Claude CLI version's JSON result shape still matches what
    `engine/adapters/claude_code_headless.py` parses (usage/session-id at
    exit). Re-check whenever `postCreateCommand` in
    `.devcontainer/devcontainer.json` bumps the `@anthropic-ai/claude-code`

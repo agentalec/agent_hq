@@ -52,6 +52,18 @@ zero engine code (`tests/test_config_swap.py` proves this end to end).
 pending the real pilot values (requirements §12); replace them before the
 first real intake. See `docs/operations.md` §4.
 
+## Extending the pipeline
+
+- **New task type:** add `tasks/<id>/task.yml` (+ its `prompts/` and
+  `checklists/` skills) per `schemas/task.schema.json`, point a parent task's
+  `on_success.enqueue` at it, merge via PR — zero engine changes.
+  `agent-hq tasks validate` and `tests/test_task_library.py` gate it in CI.
+  The P1 tasks (`clinical`, `poll`, `qa`, `docs`) are already defined but
+  unwired; each task.yml header names its one-line activation edit.
+- **New adapter:** implement the port's Protocol from `engine/ports.py`,
+  register the class in `engine/registry.py`, select it in
+  `config/components.yml`. Prompts/skills and task definitions never change.
+
 ## Docs
 
 - [`docs/architecture.md`](docs/architecture.md) — the P0 flow, ports/adapters, credential boundary, retry semantics

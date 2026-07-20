@@ -17,8 +17,8 @@
 4. `run.yml` executes one task phase for a run inside the project
    devcontainer (`devcontainers/ci`, D7 — Codespaces parity), running
    `scripts/run-phases.sh`: **prepare** (clone target repo, build the prompt
-   bundle) -> **execute** (spawn the `claude` CLI, drain `stream-json` once
-   at exit for usage/cost) -> **collect** (parse `.agent-hq/execute-result.json`,
+   bundle) -> **execute** (spawn `claude -p --output-format json`, parse the
+   single JSON result at exit for usage/cost) -> **collect** (parse `.agent-hq/execute-result.json`,
    commit outputs, open/update the artifact PR, record adapter health).
 5. Tasks with a `gates.post` entry (e.g. `spec`'s `spec-approval`) stop after
    collect until the gate's adapter reports `APPROVED`; `dispatch.yml`'s
