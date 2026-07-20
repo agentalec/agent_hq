@@ -53,9 +53,15 @@ CI (`.github/workflows/ci.yml`) runs all five; a change isn't done until all pas
 - State writes go through `GitJsonStateStore.write(fn)`. Writers are
   serialized by the `agent-hq-state` Actions concurrency group; the store's
   fetch/reset/reapply retry is a safety net, not the concurrency model.
-- The `claude` child process env is an allowlist built from scratch (PD-5) —
+- The agent child process env is an allowlist built from scratch (PD-5) —
   never pass `AGENT_HQ_TOKEN`/`GITHUB_TOKEN`/`GH_TOKEN` into it, and tokens
-  never appear in git argv (env-var credential helper only).
+  never appear in git argv (env-var credential helper only). The default
+  `copilot-cli` child carries ONLY `COPILOT_GITHUB_TOKEN` (a dedicated
+  no-repo-access bot seat) — never the engine's own `AGENT_HQ_TOKEN` PAT.
+  Copilot's premium-request billing has no per-run USD metering (runs record
+  `cost_usd: 0.0`), so per-ticket USD budget caps don't bind under this
+  binding — `budget.retries`, the loop guard, in-flight cap, and runtime
+  deadlines still do (see `docs/architecture.md` deviation 9).
 - `run_id` is causal (`compute_run_id`); `enqueue` is idempotent by run_id.
 - `schemas/state.schema.json`/`event.schema.json` and the dataclasses in
   `engine/models.py` must stay in sync (`tests/test_models.py` pins it).

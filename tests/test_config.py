@@ -12,7 +12,7 @@ SCHEMAS_DIR = REPO_ROOT / "schemas"
 
 def test_pilot_config_loads_clean():
     config = load_config(CONFIG_DIR, SCHEMAS_DIR)
-    assert config.components["executor"]["adapter"] == "claude-code-headless"
+    assert config.components["executor"]["adapter"] == "copilot-cli"
     assert "example-org/product-be" in config.repos
     assert config.projects["intake_label"] == "hq:intake"
     assert "product-owners" in config.approvers["groups"]

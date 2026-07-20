@@ -9,8 +9,11 @@ run_id="${1:?usage: run-phases.sh <run_id>}"
 
 pip install .
 
-if ! claude --help 2>/dev/null | grep -q -- --output-format; then
-  echo "claude CLI missing/incompatible" >&2
+# Check matches the default executor binding (config/components.yml:
+# copilot-cli). Swapping the executor back to claude-code-headless means
+# swapping this check back to `claude --help | grep -q -- --output-format`.
+if ! copilot --help 2>/dev/null | grep -q -- --prompt; then
+  echo "copilot CLI missing/incompatible" >&2
   exit 1
 fi
 

@@ -48,6 +48,10 @@ task-specific override such as the `spec` task's `spec-approval` gate
 binding — is a one-line config change; it touches zero task-definition and
 zero engine code (`tests/test_config_swap.py` proves this end to end).
 
+Agent runs are billed through GitHub Copilot by default (`executor`/
+`agent-session` bind to `copilot-cli`, Claude Sonnet 4.5) — swap the binding
+to `claude-code-headless` for direct Anthropic API billing instead.
+
 **Note:** `config/` ships `example-*` placeholder org/repo/username values
 pending the real pilot values (requirements §12); replace them before the
 first real intake. See `docs/operations.md` §4.

@@ -17,9 +17,11 @@
 4. `run.yml` executes one task phase for a run inside the project
    devcontainer (`devcontainers/ci`, D7 — Codespaces parity), running
    `scripts/run-phases.sh`: **prepare** (clone target repo, build the prompt
-   bundle) -> **execute** (spawn `claude -p --output-format json`, parse the
-   single JSON result at exit for usage/cost) -> **collect** (parse `.agent-hq/execute-result.json`,
-   commit outputs, open/update the artifact PR, record adapter health).
+   bundle) -> **execute** (spawn `copilot -p "<prompt>" -s --no-ask-user
+   --model claude-sonnet-4.5`, billed through a GitHub Copilot seat rather
+   than a direct Anthropic key) -> **collect** (parse
+   `.agent-hq/execute-result.json`, commit outputs, open/update the artifact
+   PR, record adapter health).
 5. Tasks with a `gates.post` entry (e.g. `spec`'s `spec-approval`) stop after
    collect until the gate's adapter reports `APPROVED`; `dispatch.yml`'s
    sweep polls gate status and advances the ticket via `on_success.enqueue`
@@ -38,8 +40,8 @@ contracts: [`docs/ports/README.md`](ports/README.md).
 | Port | P0 adapter | Notes |
 |---|---|---|
 | `tracker` | `github-issues` | issue read/comment/label |
-| `executor` | `claude-code-headless` | spawns `claude -p` |
-| `agent-session` | `claude-code-headless` | worktree prepare/run/collect (same class as `executor`) |
+| `executor` | `copilot-cli` | spawns `copilot -p` (Claude Sonnet 4.5, billed through Copilot); one-line config swap to `claude-code-headless` (spawns `claude -p` on a direct Anthropic key) |
+| `agent-session` | `copilot-cli` | worktree prepare/run/collect (same class as `executor`); `CopilotCli` subclasses `ClaudeCodeHeadless` and inherits its git/PR plumbing unchanged |
 | `messaging` | `github-comment` | status/escalation comments |
 | `gate` | `pr-review` | spec and architecture approval are both PR reviews on the artifact PR (D2) |
 | `poll` | — | Protocol only (`engine.ports.Poll`); no adapter ships in P0 (D3) |
@@ -48,14 +50,29 @@ contracts: [`docs/ports/README.md`](ports/README.md).
 
 ## Credential boundary (PD-5)
 
-The child `claude` process gets an env built key-by-key from an allowlist
-(`PATH`, `HOME`, `TMPDIR`, `LANG`, `TERM`, `LC_*`, `CLAUDE_CONFIG_DIR`,
-`ANTHROPIC_API_KEY`) plus `--disallowedTools WebFetch,WebSearch`. GitHub
-credentials (`AGENT_HQ_TOKEN`) and the ambient `GITHUB_TOKEN`/`GH_TOKEN` never
-reach the child env — `engine/adapters/claude_code_headless.py` asserts this
-at construction time as a documented boundary, not real defense (the
-allowlist already makes leakage structurally impossible; the assert just
-fails loudly if that ever stops being true).
+The child `claude` process (fallback `claude-code-headless` binding) gets an
+env built key-by-key from an allowlist (`PATH`, `HOME`, `TMPDIR`, `LANG`,
+`TERM`, `LC_*`, `CLAUDE_CONFIG_DIR`, `ANTHROPIC_API_KEY`) plus
+`--disallowedTools WebFetch,WebSearch`. GitHub credentials (`AGENT_HQ_TOKEN`)
+and the ambient `GITHUB_TOKEN`/`GH_TOKEN` never reach the child env —
+`engine/adapters/claude_code_headless.py` asserts this at construction time
+as a documented boundary, not real defense (the allowlist already makes
+leakage structurally impossible; the assert just fails loudly if that ever
+stops being true).
+
+**Copilot-billed deviation (default binding, `copilot-cli`):** the child
+`copilot` process gets the same style of from-scratch allowlist env (`PATH`,
+`HOME`, `TMPDIR`, `LANG`, `TERM`, `LC_*`, `XDG_CONFIG_HOME`) but, unlike the
+Anthropic-key child, it necessarily also holds a GitHub credential —
+`COPILOT_GITHUB_TOKEN` — because Copilot CLI authenticates against a GitHub
+Copilot seat rather than a model-provider API key. This is assessed and
+accepted, not accidental: blast radius on compromise is that seat's account's
+GitHub access, which the dedicated bot seat (Copilot access only, **no write
+access** to any pilot or engine repo — see `docs/operations.md`) reduces to
+"model access only". `AGENT_HQ_TOKEN` — the engine's own PAT — never reaches
+the child process either way; `engine/adapters/copilot_cli.py` asserts
+`AGENT_HQ_TOKEN`/`GITHUB_TOKEN`/`GH_TOKEN` stay out of the child env, same as
+the fallback adapter.
 
 **Stated honestly, this is a partial boundary.** The child process still runs
 on the GitHub-hosted runner with that runner's filesystem and network access
@@ -103,5 +120,16 @@ Summarized here so this doc is self-contained:
    runs `scripts/run-phases.sh` inside the project devcontainer via
    `devcontainers/ci` (Codespaces parity honored), even though lighter jobs
    (intake/dispatch/pages/CI) use direct setup.
+9. **Copilot-billed executor by default** — `executor`/`agent-session` bind
+   to `copilot-cli` (spawns `copilot -p ... --model claude-sonnet-4.5`,
+   billed through a dedicated GitHub Copilot seat), not
+   `claude-code-headless` (direct Anthropic API key), which stays registered
+   as a one-line-swap fallback. Copilot's premium-request subscription
+   billing has no per-run USD metering, so runs record `cost_usd: 0.0`,
+   `usage_known: true` — per-ticket USD budget caps (`budgets.yml`) don't
+   bind under this binding; runaway work is still bounded by
+   `budget.retries`, the loop guard (25 runs / depth 12), the in-flight cap,
+   and runtime deadlines (see "Credential boundary" above for the PD-5
+   assessment of the resulting `COPILOT_GITHUB_TOKEN` in the child env).
 
 See [`docs/roadmap.md`](roadmap.md) for restore triggers on each of these.

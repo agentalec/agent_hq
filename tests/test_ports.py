@@ -11,6 +11,8 @@ EXPECTED_PAIRS = {
     ("gate", "pr-review"),
     ("executor", "claude-code-headless"),
     ("agent-session", "claude-code-headless"),
+    ("executor", "copilot-cli"),
+    ("agent-session", "copilot-cli"),
 }
 
 

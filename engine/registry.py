@@ -22,6 +22,8 @@ _ADAPTERS: dict[tuple[str, str], str] = {
     ("agent-session", "claude-code-headless"): (
         "engine.adapters.claude_code_headless:ClaudeCodeHeadless"
     ),
+    ("executor", "copilot-cli"): "engine.adapters.copilot_cli:CopilotCli",
+    ("agent-session", "copilot-cli"): "engine.adapters.copilot_cli:CopilotCli",
 }
 
 

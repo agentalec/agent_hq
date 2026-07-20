@@ -35,5 +35,5 @@ jobs:
           runCmd: bash scripts/run-phases.sh "${{ inputs.run_id }}"
           env: |
             AGENT_HQ_TOKEN=${{ secrets.AGENT_HQ_TOKEN }}
-            ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+            COPILOT_GITHUB_TOKEN=${{ secrets.AGENT_HQ_COPILOT_TOKEN }}
             AGENT_HQ_ENGINE_REPO=${{ github.repository }}

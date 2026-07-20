@@ -22,7 +22,7 @@ Everything intentionally not in P0, with its restore trigger. Sources: the P0 sc
 ## B. P1 (requirements §13)
 
 - `jira-mirror` tracker adapter — config + external sync, near-zero agent_hq code, zero JIRA credentials (PD-9/JM-1..6).
-- Managed executors — `copilot-coding-agent`, `claude-partner-agent` — and the executor bake-off on comparable tickets (PD-3).
+- Managed executors — `copilot-coding-agent`, `claude-partner-agent` — and the executor bake-off on comparable tickets (PD-3). The bake-off now has its second adapter: `copilot-cli` (P0 default) alongside `claude-code-headless` (fallback); the managed `copilot-coding-agent` remains the P1 item.
 - `slack-message` / `slack-reactions` adapters (if GitHub-canonical messaging proves insufficient — open question §12.8).
 - Task library: `clinical`, `poll`, `qa`, `docs` (with their gates, PHI lint, Playwright QA, docs-drift blocking). Task definitions + minimal skills now exist under `tasks/` (validated, not wired into the live chain); still pending: the `github-issue-reactions` and `docker-compose` adapters, and the one-line `on_success` edits in `tasks/spec/task.yml` / `tasks/review/task.yml` that activate them.
 - Multi-repo implement fan-out + input-join (`parallel_ok`).

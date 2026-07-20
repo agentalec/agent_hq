@@ -8,5 +8,5 @@
       "version": "20"
     }
   },
-  "postCreateCommand": "pip install -e '.[dev]' && npm install -g @anthropic-ai/claude-code@2.1.178"
+  "postCreateCommand": "pip install -e '.[dev]' && npm install -g @anthropic-ai/claude-code@2.1.178 @github/copilot@0.5.1"
 }

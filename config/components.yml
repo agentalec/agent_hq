@@ -1,10 +1,17 @@
 # Component port bindings (§6). Pilot placeholder values only.
 tracker:
   adapter: github-issues
+# Copilot-billed Claude by default (see docs/architecture.md PD-5); swap
+# `adapter` to `claude-code-headless` for the direct-Anthropic-key fallback --
+# one line each, no other change needed (PA-2).
 executor:
-  adapter: claude-code-headless
+  adapter: copilot-cli
+  settings:
+    model: claude-sonnet-4.5
 agent-session:
-  adapter: claude-code-headless
+  adapter: copilot-cli
+  settings:
+    model: claude-sonnet-4.5
 messaging:
   adapter: github-comment
 gate:
