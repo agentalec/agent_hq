@@ -8,6 +8,15 @@
    `spec` task.
    Cross-repository event delivery and repo-qualified ticket identity are not
    implemented; this is a pilot blocker in `docs/project-review.md`.
+
+   The parent issue's repository is a configured value,
+   `config.projects["engine_repo"]` (PLAN.md decision 3) — distinct from the
+   work repositories tasks target — and that issue number is the ticket's
+   canonical key. This is recorded as a frozen decision here; wiring
+   `intake_repo()` and every tracker/messaging call through it is a routing
+   change that ships in Task 3 of the hardening plan
+   (`.hyperclaude/plans/20260721-2056-harden-the-existing-plan-at.md`), not
+   this one.
 2. State lives on an orphan `agent-hq-state` branch (`engine.state.GitJsonStateStore`,
    plain JSON files, one fixed implementation per PD-7 — not a port, no
    adapter to swap). All state-writing workflows share the
@@ -69,6 +78,88 @@ instructions, the parent output commit/diff, checked-in artifacts such as
 `specs/<ticket>/*.md`, and any rework event. GitHub Actions logs are useful
 operational evidence, but they are not used as memory. P0 has no database,
 vector store, transcript archive, or session checkpoint/resume mechanism.
+
+## Lifecycle
+
+Frozen by Phase 0 of the hardening plan
+(`.hyperclaude/plans/20260721-2056-harden-the-existing-plan-at.md`, Task 1);
+the routing, schema, and engine changes that implement it land task-by-task
+through that plan's later phases — this section documents the contract, not
+the current runtime.
+
+A ticket carries one of three lifecycle states (`engine.models.TicketStatus`):
+
+| State | Meaning |
+|---|---|
+| `ACTIVE` | Queued, running, or waiting-gate work remains. |
+| `BLOCKED` | A non-engine issue close or operator `block` interrupted active work; the queue and any pending gate are preserved for resume. |
+| `DONE` | Engine complete — see below. Merge status is never tracked or implied. |
+
+Edges:
+
+- `ACTIVE` -> `BLOCKED` — a non-engine issue close with work/gate/current
+  remaining, or an operator `block`: the state fence commits first
+  (terminalize any `RUNNING` run as `interrupted_run_id`; a `WAITING_GATE` run
+  is left as-is), then the Actions run is cancelled and the pinned comment
+  updated.
+- `BLOCKED` -> `ACTIVE` — an authorized `/agent-hq reopen <reason>` command,
+  the native `issues: reopened` event, or operator `unblock`: retains the
+  queue and pending gates, and enqueues attempt+1 of any `interrupted_run_id`.
+- `ACTIVE` -> `DONE` — queue, current, and pending gates are exhausted and the
+  terminal run's own recorded artifacts include the closing summary: required
+  work PRs are marked ready and the issue is closed. `DONE` is displayed as
+  **"engine complete; merge status not tracked"** (PLAN.md decision 12) —
+  whether a human subsequently merges those PRs is out of scope for ticket
+  state.
+- `DONE` -> `ACTIVE` — an authorized reopen/native reopen when every recorded
+  work PR is still open or none exists: enqueues the configured
+  `initial_task`. Any recorded PR already merged or closed keeps the ticket
+  `DONE` and requires a new ticket.
+
+### Control outcomes
+
+Every completed task run emits exactly one control outcome
+(`schemas/control.schema.json`), and the outcome alone drives the run's
+transition — a schema-invalid control document rejects the run; it is never
+silently ignored:
+
+- **`handoff`** — `handoffs` required (non-empty). With no post-gate, accepted
+  handoffs enqueue as `QUEUED` runs and this run finishes `SUCCEEDED`. With a
+  post-gate, the proposals are stored pending (`run.pending_handoffs`) and the
+  run stops at `WAITING_GATE`; a gate `APPROVED` applies the stored handoffs
+  and completes the run `SUCCEEDED`.
+- **`complete`** — `handoffs` forbidden; the run finishes `SUCCEEDED` with no
+  children, feeding the `ACTIVE -> DONE` queue-empty check above.
+- **`blocked`** — `handoffs` forbidden, `reason` required; the run is
+  recorded blocked and the ticket moves to `BLOCKED` with that reason,
+  escalating to a human with no auto-retry.
+
+### Work branches
+
+Each work repository a ticket touches gets exactly one stable branch,
+`agent-hq/<issue-number>` (PLAN.md decision 4 — not `agent-hq/<run_id>`;
+every task and rework attempt on that ticket reuses the same branch), created
+once from that repository's configured `base_branch` (`repos.yml`) and
+updated by every later task. At most one PR per ticket per repository is
+opened against that `base_branch`. This branch/PR model supersedes the
+current per-run `agent-hq/<run_id>` branch described under "Where work and
+memory live" above; the isolated-job cutover that lands it is Task 12.
+
+### Approval and reopen commands
+
+Orchestration approvals and reopen use the same authorized-comment grammar on
+the parent (engine-repository) issue, verified against the configured
+approver group and deduped by comment id:
+
+- `/agent-hq approve <run-id>` -> gate `APPROVED`.
+- `/agent-hq request-changes <run-id> <reason>` -> gate `CHANGES_REQUESTED`
+  (rework: the source task re-runs; its `pending_handoffs` are cleared, not
+  applied).
+- `/agent-hq reject <run-id> <reason>` -> gate `REJECTED` (terminal for that
+  proposal; `pending_handoffs` are cleared).
+- `/agent-hq reopen <reason>` -> resumes a `BLOCKED` or `DONE` ticket per the
+  edges above (PLAN.md decision 14); native `issues: reopened` is the
+  equivalent signal, still subject to the same guards.
 
 ## Ports and adapters
 
@@ -167,5 +258,13 @@ Summarized here so this doc is self-contained:
    `budget.retries`, the loop guard (25 runs / depth 12), the in-flight cap,
    and runtime deadlines (see "Credential boundary" above for the PD-5
    assessment of the resulting `COPILOT_GITHUB_TOKEN` in the child env).
+10. **`DONE` merge-tracking is a permanent decision, not a P0 cut —
+    supersedes deviation 7.** Deviation 7's "no `pull_request: closed`
+    closing-summary path" was recorded as an operational extra cut for P0;
+    the hardening plan (PLAN.md decision 12, Task 1 of
+    `.hyperclaude/plans/20260721-2056-harden-the-existing-plan-at.md`) makes
+    it permanent: `DONE` means "engine complete; merge status not tracked",
+    watching PR merge state is never added back, and reopen after a merged
+    recorded PR requires a new ticket instead of resuming the old one.
 
 See [`docs/roadmap.md`](roadmap.md) for restore triggers on each of these.

@@ -114,7 +114,8 @@ agent_hq repository
 
   agent-hq-state                         # existing orphan state branch
     tickets/<issue-number>/
-      state.json                         # queue, current, handoffs, approvals
+      state.json                         # runs (single source of truth) +
+                                          # handoffs, approvals, lifecycle
       events.jsonl                       # per-ticket event log
       artifacts/                         # product.md, clinical.md, summary.md
     health/latest.json                   # existing adapter-health snapshot
@@ -124,6 +125,15 @@ work repository
     implementation, tests, QA fixes, docs
   PR: agent-hq/<issue-number> -> configured base branch
 ```
+
+`state.json`'s `runs` array is the single source of truth for a ticket; there
+is no stored `queue`, `current`, or `history` field. Queue (`QUEUED` runs in
+insertion order), current (the one `RUNNING`/`WAITING_GATE` run), and history
+(terminal runs) are derived views computed from `runs`, not persisted
+separately. **Note:** the executable task plan
+(`.hyperclaude/plans/20260721-2056-harden-the-existing-plan-at.md`) is
+authoritative over this document wherever the two differ on state-layout
+detail.
 
 Enumeration is one shallow state-branch fetch followed by a directory listing.
 Completed tickets remain in place and are hidden by lifecycle status. The
@@ -172,8 +182,9 @@ settled before schemas or workflows change.
 
 ## Phase 1 — schemas, models, and configuration validation
 
-- [ ] Extend ticket state with `current`, ordered `queue`, `history`, work
-  repositories, handoffs, approvals, and lifecycle state.
+- [ ] Extend ticket state with `runs` as the single source of truth — queue,
+  current, and history are derived from `runs`, not separately stored — plus
+  work repositories, handoffs, approvals, and lifecycle state.
 - [ ] Add structured task control output with exactly three outcomes:
   `handoff`, `complete`, and `blocked`.
 - [ ] Define each handoff with a stable `key`, registered target task, reason,

@@ -24,6 +24,24 @@ Don't write ticket artifacts anywhere else, and don't touch another ticket's
   straight from `arch-plan` to `breakdown`.
 - **Merge** -- always a human. No task auto-merges a PR.
 
+## Agent rules
+
+- **Structured control output** -- every task run ends by writing exactly
+  one control outcome to `.agent-hq/control.json` (`handoff`, `complete`, or
+  `blocked`); never end silently, and never invent a fourth outcome.
+- **Explicit repository targets** -- work only inside the repository the
+  engine names for this run (the injected `run.repo`, resolved from
+  configured `repos.yml` entries); never guess, infer, or touch a repository
+  the run wasn't scoped to.
+- **Public-safe artifacts** -- assume every artifact, comment, and handoff
+  reason is public; never write secrets, credentials, or content that isn't
+  safe for a public issue, PR, or Pages site.
+- **No direct mutation** -- agents propose, they never execute: no editing
+  the run queue, triggering workflows, reading/writing secrets, or changing
+  repository permissions directly. A handoff is a proposal the engine
+  validates and applies -- it is never a queue edit performed by the agent
+  itself.
+
 ## Engineering conventions
 
 - Every implementation task ships tests for the code it adds.
