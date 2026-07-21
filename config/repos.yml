@@ -4,7 +4,9 @@ example-org/product-be:
   role: be
   branch_prefix: agent-hq
   product_area: backend
+  base_branch: main
 example-org/product-fe:
   role: fe
   branch_prefix: agent-hq
   product_area: frontend
+  base_branch: main

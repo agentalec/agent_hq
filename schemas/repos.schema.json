@@ -7,11 +7,12 @@
   "additionalProperties": {
     "type": "object",
     "additionalProperties": false,
-    "required": ["role", "branch_prefix", "product_area"],
+    "required": ["role", "branch_prefix", "product_area", "base_branch"],
     "properties": {
       "role": { "type": "string", "enum": ["be", "fe", "docs"] },
       "branch_prefix": { "type": "string" },
-      "product_area": { "type": "string" }
+      "product_area": { "type": "string" },
+      "base_branch": { "type": "string", "description": "Branch a fresh agent-hq/<issue> branch is cut from" }
     }
   }
 }

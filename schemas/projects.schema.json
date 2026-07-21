@@ -4,7 +4,7 @@
   "title": "Projects config",
   "type": "object",
   "additionalProperties": false,
-  "required": ["repos", "intake_label", "engine_repo"],
+  "required": ["repos", "intake_label", "engine_repo", "initial_task", "intake", "public"],
   "properties": {
     "repos": {
       "type": "array",
@@ -15,6 +15,38 @@
     "engine_repo": {
       "type": "string",
       "description": "org/repo hosting the engine's own issue tracker (intake, pinned comments, escalations) -- distinct from the work repos in repos.yml"
+    },
+    "initial_task": {
+      "type": "string",
+      "description": "Task id enqueued (with the root run's resolved repo) for a newly accepted ticket"
+    },
+    "intake": {
+      "type": "object",
+      "description": "Eligibility filter applied before the first state/artifact write",
+      "additionalProperties": false,
+      "required": ["min_body_words", "excluded_labels"],
+      "properties": {
+        "min_body_words": { "type": "integer", "minimum": 0 },
+        "excluded_labels": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "public": {
+      "type": "boolean",
+      "description": "Whether tickets/artifacts may be published (dashboard, public-safe gate)"
+    },
+    "public_safe_label": {
+      "type": "string",
+      "description": "Label a ticket must carry before intake accepts it when public is true"
     }
+  },
+  "if": {
+    "properties": { "public": { "const": true } },
+    "required": ["public"]
+  },
+  "then": {
+    "required": ["public_safe_label"]
   }
 }

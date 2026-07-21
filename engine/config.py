@@ -90,3 +90,20 @@ def resolve_binding(
             return named[task_binding_name]
 
     return binding["adapter"]
+
+
+def validate_task_bindings(taskdefs: dict, config: Config) -> list[str]:
+    """Reject a task-declared `components` port with no configured binding.
+
+    A task's `components` map (port -> logical binding name) only makes
+    sense for a port components.yml actually configures. A task that
+    declares no `components` (e.g. qa) stays registered-but-unwired.
+    """
+    errors: list[str] = []
+    for task_id, taskdef in taskdefs.items():
+        for port in taskdef.get("components", {}):
+            if port not in config.components:
+                errors.append(
+                    f"{task_id}: components.{port}: no binding configured in components.yml"
+                )
+    return errors

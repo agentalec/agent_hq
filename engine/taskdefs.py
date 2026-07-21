@@ -105,7 +105,8 @@ def validate_library(taskdefs: dict[str, dict]) -> list[str]:
 
     Ids are unique by construction (dict keys); this also flags a taskdef
     whose declared `id` doesn't match the key it's stored under. Every
-    on_success/on_failure enqueue target must resolve to a loaded task id.
+    on_success/on_failure enqueue target and every handoff.allowed target
+    must resolve to a loaded task id.
     """
     errors: list[str] = []
     for task_id, taskdef in taskdefs.items():
@@ -118,4 +119,9 @@ def validate_library(taskdefs: dict[str, dict]) -> list[str]:
                     errors.append(
                         f"{task_id}: {phase}.enqueue: task '{target}' is not in the loaded library"
                     )
+        for target in taskdef.get("handoff", {}).get("allowed", []):
+            if target not in taskdefs:
+                errors.append(
+                    f"{task_id}: handoff.allowed: task '{target}' is not in the loaded library"
+                )
     return errors

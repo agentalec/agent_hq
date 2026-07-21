@@ -4,3 +4,10 @@ repos:
   - example-org/product-fe
 intake_label: hq:intake
 engine_repo: example-org/agent-hq
+initial_task: spec
+intake:
+  min_body_words: 30
+  excluded_labels:
+    - hq:excluded
+public: true
+public_safe_label: hq:public-safe

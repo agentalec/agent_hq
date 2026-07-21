@@ -100,3 +100,23 @@ def test_library_accepts_resolvable_enqueue_targets(tmp_path):
 
     taskdefs = load_all(tmp_path, SCHEMAS_DIR)
     assert validate_library(taskdefs) == []
+
+
+def test_library_rejects_handoff_target_not_in_library(tmp_path):
+    task_a = _minimal_taskdef("task-a", handoff={"allowed": ["task-b"], "max": 1})
+    _write_task(tmp_path / "task-a", task_a)
+
+    taskdefs = load_all(tmp_path, SCHEMAS_DIR)
+    errors = validate_library(taskdefs)
+
+    assert any("task-b" in e for e in errors)
+
+
+def test_library_accepts_resolvable_handoff_targets(tmp_path):
+    task_a = _minimal_taskdef("task-a", handoff={"allowed": ["task-b"], "max": 1})
+    task_b = _minimal_taskdef("task-b")
+    _write_task(tmp_path / "task-a", task_a)
+    _write_task(tmp_path / "task-b", task_b)
+
+    taskdefs = load_all(tmp_path, SCHEMAS_DIR)
+    assert validate_library(taskdefs) == []

@@ -10,7 +10,7 @@ import argparse
 import json
 from pathlib import Path
 
-from engine.config import ConfigError, load_config
+from engine.config import ConfigError, load_config, validate_task_bindings
 from engine.taskdefs import TaskDefError, load_all, validate_library
 
 
@@ -115,11 +115,13 @@ def _tasks_validate(args: argparse.Namespace, repo_root: Path) -> None:
         return
     try:
         taskdefs = load_all(tasks_dir, repo_root / "schemas")
-    except TaskDefError as exc:
+        config = load_config(repo_root / "config", repo_root / "schemas")
+    except (TaskDefError, ConfigError) as exc:
         for error in exc.errors:
             print(error)
         raise SystemExit(1) from exc
     errors = validate_library(taskdefs)
+    errors += validate_task_bindings(taskdefs, config)
     if errors:
         for error in errors:
             print(error)

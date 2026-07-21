@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from engine.config import Config, ConfigError, load_config, resolve_binding
+from engine.config import Config, ConfigError, load_config, resolve_binding, validate_task_bindings
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_DIR = REPO_ROOT / "config"
@@ -16,6 +16,12 @@ def test_pilot_config_loads_clean():
     assert "example-org/product-be" in config.repos
     assert config.projects["intake_label"] == "hq:intake"
     assert config.projects["engine_repo"] == "example-org/agent-hq"
+    assert config.projects["initial_task"] == "spec"
+    assert config.projects["intake"]["min_body_words"] == 30
+    assert config.projects["intake"]["excluded_labels"] == ["hq:excluded"]
+    assert config.projects["public"] is True
+    assert config.projects["public_safe_label"] == "hq:public-safe"
+    assert config.repos["example-org/product-be"]["base_branch"] == "main"
     assert "product-owners" in config.approvers["groups"]
     assert config.budgets["ticket_cap_usd"] == 25
 
@@ -72,3 +78,26 @@ def test_resolve_binding_allowlisted_label_override_wins():
 def test_resolve_binding_non_allowlisted_label_is_ignored():
     config = _config({"executor": {"adapter": "claude-code-headless"}, "label_overrides": []})
     assert resolve_binding(config, "executor", "default", ["hq:executor=codex"]) == "claude-code-headless"
+
+
+def test_validate_task_bindings_rejects_unconfigured_port():
+    config = _config({"executor": {"adapter": "claude-code-headless"}, "label_overrides": []})
+    taskdefs = {"sample": {"id": "sample", "components": {"qa-env": "default"}}}
+
+    errors = validate_task_bindings(taskdefs, config)
+
+    assert any("qa-env" in e for e in errors)
+
+
+def test_validate_task_bindings_accepts_configured_port():
+    config = _config({"executor": {"adapter": "claude-code-headless"}, "label_overrides": []})
+    taskdefs = {"sample": {"id": "sample", "components": {"executor": "default"}}}
+
+    assert validate_task_bindings(taskdefs, config) == []
+
+
+def test_validate_task_bindings_ignores_task_with_no_components():
+    config = _config({"executor": {"adapter": "claude-code-headless"}, "label_overrides": []})
+    taskdefs = {"qa": {"id": "qa"}}
+
+    assert validate_task_bindings(taskdefs, config) == []
