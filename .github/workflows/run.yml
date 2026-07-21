@@ -17,6 +17,7 @@ concurrency:
 jobs:
   execute:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     concurrency:
       group: agent-hq-state
       cancel-in-progress: false

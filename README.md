@@ -24,18 +24,25 @@ GitHub issue (hq:intake label)
 Each arrow is a task definition (`tasks/<id>/task.yml`); `dispatch.yml`
 sweeps queued/running work every 15 minutes and triggers `run.yml`, which
 executes one task phase (prepare/execute/collect) inside the project
-devcontainer. State lives on an orphan `agent-hq-state` branch, serialized
-through an Actions concurrency group. A static dashboard (`pages.yml`)
-reports ticket/run state.
+devcontainer. The issue is the control plane, produced work lives on
+target-repo branches and selected draft PRs, and orchestration memory lives on
+an orphan `agent-hq-state` branch. A static dashboard (`pages.yml`) reports
+ticket/run state. See [where work and memory live](docs/architecture.md#where-work-and-memory-live)
+for the exact lifecycle and storage paths.
 
 ## Quickstart
 
 ```bash
-pip install -e '.[dev]'
-pytest
-agent-hq config validate
-agent-hq tasks validate
+python3 -m venv .venv
+.venv/bin/pip install -e '.[dev]'
+.venv/bin/pytest -q
+.venv/bin/ruff check .
+.venv/bin/agent-hq config validate
+.venv/bin/agent-hq tasks validate
 ```
+
+See [`docs/local-testing.md`](docs/local-testing.md) for workflow lint,
+devcontainer/Copilot smoke tests, live sandbox checks, and credential needs.
 
 ## Config-only binding swap
 
@@ -72,6 +79,8 @@ first real intake. See `docs/operations.md` §4.
 
 - [`docs/architecture.md`](docs/architecture.md) — the P0 flow, ports/adapters, credential boundary, retry semantics
 - [`docs/operations.md`](docs/operations.md) — day-to-day operation of the GitHub Actions surface
+- [`docs/local-testing.md`](docs/local-testing.md) — offline, container, and live sandbox validation
+- [`docs/project-review.md`](docs/project-review.md) — review findings and the GitHub Agentic Workflows migration recommendation
 - [`docs/roadmap.md`](docs/roadmap.md) — deferred work and restore triggers
 - [`docs/ports/README.md`](docs/ports/README.md) — the port/adapter contract
 - [`constitution.md`](constitution.md) — conventions every task and agent run follows

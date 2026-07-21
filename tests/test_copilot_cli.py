@@ -89,15 +89,22 @@ def test_run_argv_allows_all_tools_when_none_given(monkeypatch, tmp_path):
     assert "--allow-all-tools" in argv
 
 
-def test_run_argv_omits_allow_all_tools_when_tools_given(monkeypatch, tmp_path):
+def test_run_argv_maps_task_tool_allowlist(monkeypatch, tmp_path):
     proc = FakeProc()
     calls = _install_fake_popen(monkeypatch, proc)
     executor = CopilotCli({})
 
-    executor.run({"prompt": "hi", "worktree": str(tmp_path)}, ["Bash", "Read"], FUTURE_DEADLINE)
+    executor.run(
+        {"prompt": "hi", "worktree": str(tmp_path)},
+        ["Read", "Grep", "Glob", "Write"],
+        FUTURE_DEADLINE,
+    )
 
     argv = calls[0]["argv"]
     assert "--allow-all-tools" not in argv
+    assert "--allow-tool=read" in argv
+    assert "--allow-tool=write" in argv
+    assert argv.count("--allow-tool=read") == 1
 
 
 def test_run_uses_configured_model(monkeypatch, tmp_path):

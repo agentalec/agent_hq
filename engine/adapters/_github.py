@@ -24,6 +24,7 @@ class GitHubClient:
         return {
             "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2026-03-10",
         }
 
     def _request(self, method: str, path: str, *, json=None, params=None):
@@ -33,6 +34,7 @@ class GitHubClient:
             headers=self._headers(),
             json=json,
             params=params,
+            timeout=30,
         )
         if not 200 <= resp.status_code < 300:
             raise RuntimeError(
@@ -55,7 +57,7 @@ class GitHubClient:
         # `run.yml` sets `run-name: agent-hq/<run_id>`, which GitHub exposes
         # as `display_title` -- the workflow file's own `name` field ("Run")
         # never changes, so match on display_title first.
-        data = self.get(f"/repos/{repo}/actions/runs") or {}
+        data = self.get(f"/repos/{repo}/actions/runs", params={"per_page": 100}) or {}
         return [
             run
             for run in data.get("workflow_runs", [])

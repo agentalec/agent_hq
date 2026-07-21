@@ -64,6 +64,10 @@ def load_task(task_dir: str | Path, schemas_dir: str | Path) -> dict:
     if errors:
         raise TaskDefError(errors)
 
+    # Runtime-only source locations let the runner inline task instructions;
+    # these keys are added after schema validation and never written to state.
+    taskdef["_task_dir"] = str(task_dir)
+    taskdef["_repo_root"] = str(schemas_dir.parent)
     return taskdef
 
 

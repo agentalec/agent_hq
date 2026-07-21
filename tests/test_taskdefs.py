@@ -3,6 +3,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from engine.models import TicketDetails
+from engine.runner import _assemble_prompt
 from engine.taskdefs import TaskDefError, load_all, load_task, validate_library
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -31,6 +33,18 @@ def test_sample_fixture_loads():
     taskdef = load_task(FIXTURES_DIR / "sample", SCHEMAS_DIR)
     assert taskdef["id"] == "sample"
     assert taskdef["skills"] == ["prompts/sample.md"]
+
+
+def test_prompt_inlines_task_instructions_context_and_required_outputs():
+    taskdef = load_task(REPO_ROOT / "tasks" / "spec", SCHEMAS_DIR)
+    details = TicketDetails("HQ-7", "Example", "A sufficiently detailed ticket.", [])
+
+    prompt = _assemble_prompt(taskdef, details, None)
+
+    assert "Acceptance criteria are phrased as Given/When/Then" in prompt
+    assert "# Constitution" in prompt
+    assert "`specs/HQ-7/spec.md`" in prompt
+    assert "{ticket}" not in prompt
 
 
 def test_schema_violation_rejected_with_clear_error(tmp_path):

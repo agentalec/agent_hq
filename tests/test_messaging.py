@@ -22,7 +22,7 @@ class FakeRequests:
         self.responses = list(responses)
         self.calls = []
 
-    def request(self, method, url, headers=None, json=None, params=None):
+    def request(self, method, url, headers=None, json=None, params=None, timeout=None):
         self.calls.append(
             {"method": method, "url": url, "headers": headers, "json": json, "params": params}
         )

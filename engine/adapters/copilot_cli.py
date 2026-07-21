@@ -9,14 +9,9 @@ git/PR plumbing (`prepare_worktree`, `build_pr_branch`, `collect_outputs`,
 `_commit_if_dirty`) unchanged; only `run`, `_child_env`, and `healthcheck`
 differ from the parent.
 
-**Tool policy mapping:** Claude tool names (`Read`/`Grep`/`Bash`/...) don't
-exist in Copilot CLI's vocabulary, so there's no allowlist flag to translate
-them into. Instead: taskdef `tools` absent -> `--allow-all-tools`; taskdef
-`tools` present -> no tool flags at all -- Copilot CLI denies any tool use it
-can't get interactive confirmation for, and `--no-ask-user` suppresses that
-confirmation, so an unapproved tool is denied by construction. This is a
-deny-by-default read-only mode, the honest equivalent for a task (e.g.
-`review`) that must stay read-only.
+**Tool policy mapping:** taskdef `tools` absent -> `--allow-all-tools`;
+Claude's `Read`/`Grep`/`Glob`/`Write`/`Bash` names map to Copilot CLI's
+`read`/`write`/`shell` tool kinds when an allowlist is present.
 
 **PD-5 deviation:** unlike the Anthropic-key child, this child process
 necessarily holds a GitHub credential (`COPILOT_GITHUB_TOKEN`). Blast radius
@@ -42,6 +37,13 @@ from engine.adapters.claude_code_headless import (
 )
 
 _ALLOWLIST_KEYS = ("PATH", "HOME", "TMPDIR", "LANG", "TERM", "XDG_CONFIG_HOME")
+_TOOL_MAP = {
+    "Read": "read",
+    "Grep": "read",
+    "Glob": "read",
+    "Write": "write",
+    "Bash": "shell",
+}
 
 
 def _child_env() -> dict:
@@ -85,6 +87,9 @@ class CopilotCli(ClaudeCodeHeadless):
         ]
         if not tools:
             argv.append("--allow-all-tools")
+        else:
+            for tool in dict.fromkeys(_TOOL_MAP[name] for name in tools if name in _TOOL_MAP):
+                argv.append(f"--allow-tool={tool}")
 
         timeout = max(1, _seconds_until(deadline_iso))
         proc = subprocess.Popen(
@@ -120,7 +125,7 @@ class CopilotCli(ClaudeCodeHeadless):
     def healthcheck(self) -> bool:
         try:
             result = subprocess.run(
-                [self.copilot_bin, "--version"], capture_output=True, text=True, timeout=10
+                [self.copilot_bin, "version"], capture_output=True, text=True, timeout=10
             )
             return result.returncode == 0
         except (OSError, subprocess.TimeoutExpired):

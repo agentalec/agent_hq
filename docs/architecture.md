@@ -2,9 +2,12 @@
 
 ## Flow
 
-1. A GitHub issue labeled `hq:intake` is the entry point. `intake.yml`
-   (triggered on issue label/edit) reads it via the `tracker` port, records a
-   ticket on the state branch, and enqueues the `spec` task.
+1. A GitHub issue labeled `hq:intake` is the intended entry point. `intake.yml`
+   (triggered on issue open/label in the engine repo) reads it via the
+   `tracker` port, records a ticket on the state branch, and enqueues the
+   `spec` task.
+   Cross-repository event delivery and repo-qualified ticket identity are not
+   implemented; this is a pilot blocker in `docs/project-review.md`.
 2. State lives on an orphan `agent-hq-state` branch (`engine.state.GitJsonStateStore`,
    plain JSON files, one fixed implementation per PD-7 — not a port, no
    adapter to swap). All state-writing workflows share the
@@ -30,6 +33,43 @@
    waiting-on-humans list) after intake/dispatch/collect and on a `*/5`
    schedule.
 
+## Where work and memory live
+
+The issue, agent workspace, PR, and state branch have different jobs:
+
+| Concern | Location | Durable? | Role |
+|---|---|---:|---|
+| Request and human conversation | GitHub issue in the intake repo | Yes | Control plane: intake, status, escalation, rework, and closing summary |
+| Active agent workspace | Target-repo clone at `<workdir>/_target/<run_id>` inside the Actions devcontainer | No | Where the agent reads, edits, and tests during one run |
+| Runner-only metadata | `.agent-hq/bundle.json`, `.agent-hq/diff.patch`, and `.agent-hq/execute-result.json` in that clone | No | Handoff between prepare, execute, and collect; excluded from pushed work |
+| Produced work | `agent-hq/<run_id>` branch in the target repo | Yes | Canonical output commit for that task and the base for its child task |
+| Human review | Draft PR in the target repo, when the task has a post gate or `opens_pr: true` | Yes | Approval/review surface; not the engine state store |
+| Orchestration memory | Orphan `agent-hq-state` branch in the engine repo | Yes | Canonical ticket, run, event, gate, artifact, cost, and adapter-health state |
+| Dashboard | GitHub Pages projection of the state branch | Rebuildable | Read-only operator view, not a source of truth |
+| Agent session/conversation memory | None in P0 | No | A retry starts a new process and clone; there is no saved LLM session to resume |
+
+Every successful task's collect phase pushes its result as
+`agent-hq/<run_id>`. A PR is more selective: `spec` and `arch-approval` open
+draft artifact PRs because they have human gates, while `implement` opens the
+draft implementation PR because it declares `opens_pr: true`. `breakdown`,
+`review`, and `finalize` still produce durable task branches/output commits,
+but do not open separate PRs. `finalize` finds the earlier implementation PR,
+posts `summary.md` to the issue, requests reviewers, and marks that PR ready;
+merge remains human-only.
+
+The state branch is the engine's durable memory, stored as:
+
+- `tickets/<id>/state.json` — current ticket and run snapshots, including
+  bindings, deadlines, artifacts, output commits, and PR/gate references.
+- `tickets/<id>/events.jsonl` — append-only lifecycle and rework events.
+- `health/latest.json` — latest adapter health observations.
+
+The next task reconstructs its context from the GitHub issue, its inlined task
+instructions, the parent output commit/diff, checked-in artifacts such as
+`specs/<ticket>/*.md`, and any rework event. GitHub Actions logs are useful
+operational evidence, but they are not used as memory. P0 has no database,
+vector store, transcript archive, or session checkpoint/resume mechanism.
+
 ## Ports and adapters
 
 Every side effect crosses a port; task definitions and engine code bind to
@@ -54,11 +94,10 @@ The child `claude` process (fallback `claude-code-headless` binding) gets an
 env built key-by-key from an allowlist (`PATH`, `HOME`, `TMPDIR`, `LANG`,
 `TERM`, `LC_*`, `CLAUDE_CONFIG_DIR`, `ANTHROPIC_API_KEY`) plus
 `--disallowedTools WebFetch,WebSearch`. GitHub credentials (`AGENT_HQ_TOKEN`)
-and the ambient `GITHUB_TOKEN`/`GH_TOKEN` never reach the child env —
-`engine/adapters/claude_code_headless.py` asserts this at construction time
-as a documented boundary, not real defense (the allowlist already makes
-leakage structurally impossible; the assert just fails loudly if that ever
-stops being true).
+and the ambient `GITHUB_TOKEN`/`GH_TOKEN` are not directly inherited by the
+child. This prevents accidental env propagation; it is not a security
+boundary when the child has shell access in the same container as a parent
+process holding those credentials.
 
 **Copilot-billed deviation (default binding, `copilot-cli`):** the child
 `copilot` process gets the same style of from-scratch allowlist env (`PATH`,
@@ -69,20 +108,17 @@ Copilot seat rather than a model-provider API key. This is assessed and
 accepted, not accidental: blast radius on compromise is that seat's account's
 GitHub access, which the dedicated bot seat (Copilot access only, **no write
 access** to any pilot or engine repo — see `docs/operations.md`) reduces to
-"model access only". `AGENT_HQ_TOKEN` — the engine's own PAT — never reaches
-the child process either way; `engine/adapters/copilot_cli.py` asserts
-`AGENT_HQ_TOKEN`/`GITHUB_TOKEN`/`GH_TOKEN` stay out of the child env, same as
-the fallback adapter.
+"model access only". `engine/adapters/copilot_cli.py` asserts that the engine
+credential is absent from the direct child env, but the surrounding job still
+holds it.
 
-**Stated honestly, this is a partial boundary.** The child process still runs
-on the GitHub-hosted runner with that runner's filesystem and network access
-— it can reach the internet directly (subject to `--disallowedTools`, which
-is an application-level instruction to the CLI, not a network firewall).
-Egress restriction requires self-hosted runners with an enforced network
-allowlist, which is out of scope for P0 (see [`docs/roadmap.md`](roadmap.md)
-§D, "Egress-restricted agent execution"). The NFR-SEC residual risk for the
-pilot is: no GitHub/App/API credential can leak out of the child process, but
-a compromised or misbehaving child agent is not network-isolated.
+**This is process hygiene, not isolation.** The child has the container's
+filesystem, shell, process namespace, and direct network access. A compromised
+or prompt-injected agent may be able to inspect parent processes and exfiltrate
+the engine credential. The production boundary is a separate secret-free,
+read-only agent job plus a network firewall and a later scoped write job, as
+documented in [`docs/project-review.md`](project-review.md). Until that lands,
+do not run untrusted tickets.
 
 ## Retry semantics (D1)
 

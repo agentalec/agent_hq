@@ -5,8 +5,8 @@
     "ghcr.io/devcontainers/features/docker-in-docker:2": {},
     "ghcr.io/devcontainers/features/github-cli:1": {},
     "ghcr.io/devcontainers/features/node:1": {
-      "version": "20"
+      "version": "22"
     }
   },
-  "postCreateCommand": "pip install -e '.[dev]' && npm install -g @anthropic-ai/claude-code@2.1.178 @github/copilot@0.5.1"
+  "postCreateCommand": "pip install -e '.[dev]' && npm install -g @anthropic-ai/claude-code@2.1.178 @github/copilot@1.0.54"
 }

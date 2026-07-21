@@ -11,6 +11,7 @@ tools:
   - Read
   - Grep
   - Glob
+  - Write
 outputs:
   artifacts:
     - specs/{ticket}/review.md

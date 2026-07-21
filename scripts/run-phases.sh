@@ -12,7 +12,7 @@ pip install .
 # Check matches the default executor binding (config/components.yml:
 # copilot-cli). Swapping the executor back to claude-code-headless means
 # swapping this check back to `claude --help | grep -q -- --output-format`.
-if ! copilot --help 2>/dev/null | grep -q -- --prompt; then
+if ! copilot help 2>/dev/null | grep -Eq -- '(^|[[:space:]])-p([,=[:space:]]|$)'; then
   echo "copilot CLI missing/incompatible" >&2
   exit 1
 fi

@@ -5,20 +5,23 @@ Setup and day-to-day operation of the GitHub Actions surface (Task 15,
 See `.hyperclaude/decisions/20260718-p0-scope-cut.md` for the decisions
 (D4/D5/D7/D8) this runbook implements.
 
-## 1. Fine-grained PAT (`AGENT_HQ_TOKEN`, D4)
+## 1. GitHub write credential (`AGENT_HQ_TOKEN`, D4)
 
-Create one fine-grained personal access token, scoped to the pilot repos
-(the two configured in `config/repos.yml`) **and** the engine repo (which
-also hosts the orphan `agent-hq-state` branch). Permissions:
+The current multi-repository P0 wiring expects a fine-grained PAT in
+`AGENT_HQ_TOKEN`, scoped to the configured pilot repos **and** the engine repo
+(which hosts `agent-hq-state`). Permissions:
 
 - Contents: Read and write
 - Issues: Read and write
 - Pull requests: Read and write
 - Actions: Read and write
 
-Store it as an Actions secret named `AGENT_HQ_TOKEN` on the engine repo. This
-is a pilot-scale simplification (D4) -- a dedicated least-privilege GitHub
-App installation is P1 (see `docs/roadmap.md`).
+Store it as an Actions secret named `AGENT_HQ_TOKEN` on the engine repo. A PAT
+is not required by the engine API: this variable can hold any accepted bearer
+token. For same-repository workflows, the built-in `GITHUB_TOKEN` is enough.
+For the actual cross-repository design, a short-lived GitHub App installation
+token minted per job is the production target. The checked-in workflows do
+not mint that token yet; see the blockers in `docs/project-review.md`.
 
 **Rotation:** PATs expire. Before expiry, mint a replacement with the same
 scopes and update the `AGENT_HQ_TOKEN` secret; no code or workflow change is
@@ -32,19 +35,27 @@ On the engine repo, under Settings > Secrets and variables > Actions:
 
 | Name | Kind | Purpose |
 |---|---|---|
-| `AGENT_HQ_TOKEN` | secret | fine-grained PAT, see above |
-| `AGENT_HQ_COPILOT_TOKEN` | secret | dedicated bot-seat PAT, passed into the agent's child env as `COPILOT_GITHUB_TOKEN` (run.yml only) -- see setup below |
+| `AGENT_HQ_TOKEN` | secret | current cross-repo fine-grained PAT; replace with per-job GitHub App installation tokens before production |
+| `AGENT_HQ_COPILOT_TOKEN` | secret | dedicated bot-seat fine-grained PAT with the account-level Copilot Requests permission; passed into the child as `COPILOT_GITHUB_TOKEN` |
 | `ANTHROPIC_API_KEY` | secret | only needed when the `executor`/`agent-session` binding is swapped back to `claude-code-headless` (see `config/components.yml`) |
 | `AGENT_HQ_KILL_SWITCH` | variable | `dispatch.yml` env; set to `1` to pause all new dispatch (checked by `engine.engine.kill_switch_active`) |
 
 **`AGENT_HQ_COPILOT_TOKEN` setup:** create a dedicated GitHub account (a bot
 seat, not a human's), assign it a GitHub Copilot seat, and give it **no
 write access** to any pilot or engine repo -- it only needs model access.
-Mint a PAT on that account and store it as `AGENT_HQ_COPILOT_TOKEN`. This is
-the PD-5 deviation: the Copilot child process necessarily holds a GitHub
+Mint a fine-grained PAT with the **Copilot Requests** account permission and
+store it as `AGENT_HQ_COPILOT_TOKEN`; classic PATs are not supported by the
+current Copilot CLI. This is the PD-5 deviation: the Copilot child process
+necessarily holds a GitHub
 credential, and the no-repo-access bot seat bounds its blast radius to
-"model access only" (see `docs/architecture.md`). Local tier-2 testing uses
-your own `copilot` CLI login instead -- no token/secret needed locally.
+"model access only". It does not isolate the engine PAT held by the surrounding
+job; see `docs/architecture.md`. Local testing uses `copilot login` instead --
+no token/secret needed locally.
+
+GitHub now recommends built-in `GITHUB_TOKEN` plus
+`copilot-requests: write` for organization automation. Adopt that when execute
+moves to its own read-only, secret-free job. Do not pass a write-scoped job
+token into the current single-job agent process.
 
 ## 3. Orphan state branch bootstrap
 
@@ -77,14 +88,10 @@ setup, and again after any change to `scripts/checkout-state.sh`,
    and exits cleanly, and that its billing shows up as a Copilot premium
    request rather than direct Anthropic spend. Re-check whenever
    `postCreateCommand` in `.devcontainer/devcontainer.json` bumps the
-   `@github/copilot` version. The pin (`@github/copilot@0.5.1` at the time
-   of writing) is best-effort -- if `npm install` rejects it as
-   nonexistent, correct it to the actual current version at first
-   devcontainer build; this check is what verifies the corrected pin still
-   works.
+   `@github/copilot` version. The current pin is `1.0.54` on Node.js 22.
 3. **Devcontainer build** -- `devcontainer build --workspace-folder .` (or
    let `run.yml`'s `devcontainers/ci@v0.3` step build it) succeeds and
-   `copilot --help` inside it reports `--prompt`.
+   `copilot help` inside it reports the `-p` prompt option.
 
 **Swapped-back fallback (`claude-code-headless`):** if the `executor`/
 `agent-session` binding is swapped to `claude-code-headless`, re-run check 2
@@ -100,3 +107,10 @@ Set the `AGENT_HQ_KILL_SWITCH` repo variable to `1` to stop `dispatch.yml`
 from triggering new runs (in-flight runs already dispatched still finish).
 Unset it (or set to anything else) to resume. Intake still records/blocks
 tickets while the switch is on; only dispatch is paused.
+
+## 7. Local validation
+
+The exact offline, devcontainer, Copilot, and live sandbox checks are in
+[`docs/local-testing.md`](local-testing.md). Do not start a production pilot
+until the open blockers in [`docs/project-review.md`](project-review.md) are
+closed.

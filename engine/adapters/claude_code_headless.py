@@ -200,7 +200,22 @@ class ClaudeCodeHeadless:
 
     def mark_pr_ready(self, pr_ref: str) -> None:
         repo, _, number = pr_ref.rpartition("#")
-        GitHubClient().patch(f"/repos/{repo}/pulls/{number}", json={"draft": False})
+        client = GitHubClient()
+        pr = client.get(f"/repos/{repo}/pulls/{number}")
+        if not pr.get("draft"):
+            return
+        result = client.post(
+            "/graphql",
+            json={
+                "query": (
+                    "mutation($id:ID!){markPullRequestReadyForReview("
+                    "input:{pullRequestId:$id}){pullRequest{isDraft}}}"
+                ),
+                "variables": {"id": pr["node_id"]},
+            },
+        )
+        if result.get("errors"):
+            raise RuntimeError(f"GitHub markPullRequestReadyForReview failed: {result['errors']}")
 
     def request_reviewers(self, pr_ref: str, members: list[str]) -> None:
         repo, _, number = pr_ref.rpartition("#")

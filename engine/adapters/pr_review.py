@@ -107,7 +107,9 @@ class PrReviewGate:
 
     def status(self, run: dict) -> GateDecision:
         pr_number = run["gate_request_id"]
-        reviews = self._client.get(f"/repos/{self.repo}/pulls/{pr_number}/reviews") or []
+        reviews = self._client.get(
+            f"/repos/{self.repo}/pulls/{pr_number}/reviews", params={"per_page": 100}
+        ) or []
 
         # Only the configured approver group may authorize this gate --
         # anyone else's review is discarded before the decision is made.

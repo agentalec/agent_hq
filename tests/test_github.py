@@ -1,6 +1,7 @@
 import pytest
 
 from engine.adapters import _github
+from engine.adapters.claude_code_headless import ClaudeCodeHeadless
 from engine.adapters.github_issues import GithubIssuesTracker
 
 
@@ -22,9 +23,16 @@ class FakeRequests:
         self.responses = list(responses)
         self.calls = []
 
-    def request(self, method, url, headers=None, json=None, params=None):
+    def request(self, method, url, headers=None, json=None, params=None, timeout=None):
         self.calls.append(
-            {"method": method, "url": url, "headers": headers, "json": json, "params": params}
+            {
+                "method": method,
+                "url": url,
+                "headers": headers,
+                "json": json,
+                "params": params,
+                "timeout": timeout,
+            }
         )
         return self.responses.pop(0)
 
@@ -49,6 +57,8 @@ def test_bearer_header_comes_from_env(monkeypatch):
     client.get("/whatever")
     assert fake.calls[0]["headers"]["Authorization"] == "Bearer test-token"
     assert fake.calls[0]["headers"]["Accept"] == "application/vnd.github+json"
+    assert fake.calls[0]["headers"]["X-GitHub-Api-Version"] == "2026-03-10"
+    assert fake.calls[0]["timeout"] == 30
 
 
 def test_missing_token_raises(monkeypatch):
@@ -131,6 +141,29 @@ def test_git_credential_args_with_and_without_env(monkeypatch):
     ]
     monkeypatch.delenv("AGENT_HQ_TOKEN", raising=False)
     assert _github.git_credential_args() == []
+
+
+def test_mark_pr_ready_uses_graphql_mutation(monkeypatch):
+    fake = _install(
+        monkeypatch,
+        [
+            FakeResponse(200, {"draft": True, "node_id": "PR_node"}),
+            FakeResponse(
+                200,
+                {
+                    "data": {
+                        "markPullRequestReadyForReview": {"pullRequest": {"isDraft": False}}
+                    }
+                },
+            ),
+        ],
+    )
+
+    ClaudeCodeHeadless({}).mark_pr_ready("o/r#12")
+
+    assert fake.calls[0]["url"].endswith("/repos/o/r/pulls/12")
+    assert fake.calls[1]["url"].endswith("/graphql")
+    assert fake.calls[1]["json"]["variables"] == {"id": "PR_node"}
 
 
 # -- GithubIssuesTracker ------------------------------------------------------
