@@ -8,7 +8,7 @@ schema files when either changes.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from enum import Enum
 
 
@@ -80,12 +80,20 @@ class Ticket:
     ticket_id: str
     pinned_comment_id: str | int | None
     status: TicketStatus
+    block_reason: str | None = None
+    block_source: str | None = None
+    interrupted_run_id: str | None = None
+    work_repos: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
             "ticket_id": self.ticket_id,
             "pinned_comment_id": self.pinned_comment_id,
             "status": self.status.value,
+            "block_reason": self.block_reason,
+            "block_source": self.block_source,
+            "interrupted_run_id": self.interrupted_run_id,
+            "work_repos": list(self.work_repos),
         }
 
     @classmethod
@@ -94,6 +102,10 @@ class Ticket:
             ticket_id=data["ticket_id"],
             pinned_comment_id=data.get("pinned_comment_id"),
             status=TicketStatus(data["status"]),
+            block_reason=data.get("block_reason"),
+            block_source=data.get("block_source"),
+            interrupted_run_id=data.get("interrupted_run_id"),
+            work_repos=data.get("work_repos", []),
         )
 
 
@@ -102,6 +114,30 @@ class Budget:
     max_cost_usd: float
     max_runtime_min: float
     retries: int
+
+
+@dataclass(frozen=True)
+class Handoff:
+    """A proposed child run, mirroring schemas/state.schema.json $defs/handoff.
+
+    Identity for a spawned run is (source_run_id, key, attempt) -- task_id is
+    not part of it, so a re-delivered key with a different target yields the
+    same run id (see PLAN.md handoff-identity note).
+    """
+
+    key: str
+    target_task: str
+    reason: str
+    repo: str | None = None
+    artifacts: list[str] | None = None
+    source_run_id: str | None = None
+
+    def to_dict(self) -> dict:
+        return _to_dict_omit_none_optionals(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Handoff":
+        return cls(**data)
 
 
 @dataclass(frozen=True)
@@ -128,16 +164,24 @@ class TaskRun:
     parent_run_id: str | None = None
     source_event_id: str | None = None
     enqueue_index: int | None = None
+    handoff_key: str | None = None
+    repo: str | None = None
+    input_artifacts: list[str] | None = None
+    pending_handoffs: list[Handoff] | None = None
 
     def to_dict(self) -> dict:
         d = _to_dict_omit_none_optionals(self)
         d["state"] = self.state.value
+        if self.pending_handoffs is not None:
+            d["pending_handoffs"] = [h.to_dict() for h in self.pending_handoffs]
         return d
 
     @classmethod
     def from_dict(cls, data: dict) -> TaskRun:
         d = dict(data)
         d["state"] = RunState(d["state"])
+        if d.get("pending_handoffs") is not None:
+            d["pending_handoffs"] = [Handoff.from_dict(h) for h in d["pending_handoffs"]]
         return cls(**d)
 
 

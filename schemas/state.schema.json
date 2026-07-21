@@ -9,12 +9,44 @@
     "ticket_id": { "type": "string" },
     "pinned_comment_id": { "type": ["string", "integer", "null"] },
     "status": { "type": "string", "enum": ["ACTIVE", "BLOCKED", "DONE"] },
+    "block_reason": { "type": ["string", "null"] },
+    "block_source": { "type": ["string", "null"] },
+    "interrupted_run_id": { "type": ["string", "null"] },
+    "work_repos": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/work_repo" }
+    },
     "runs": {
       "type": "array",
       "items": { "$ref": "#/$defs/run" }
     }
   },
   "$defs": {
+    "work_repo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo"],
+      "properties": {
+        "repo": { "type": "string" },
+        "branch": { "type": ["string", "null"] },
+        "pr_ref": { "type": ["string", "null"] },
+        "recorded_head": { "type": ["string", "null"] },
+        "base_branch": { "type": ["string", "null"] }
+      }
+    },
+    "handoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "target_task", "reason"],
+      "properties": {
+        "key": { "type": "string" },
+        "target_task": { "type": "string" },
+        "reason": { "type": "string" },
+        "repo": { "type": ["string", "null"] },
+        "artifacts": { "type": "array", "items": { "type": "string" } },
+        "source_run_id": { "type": ["string", "null"] }
+      }
+    },
     "run": {
       "type": "object",
       "additionalProperties": false,
@@ -52,6 +84,13 @@
         "parent_run_id": { "type": ["string", "null"] },
         "source_event_id": { "type": ["string", "null"] },
         "enqueue_index": { "type": ["integer", "null"] },
+        "handoff_key": { "type": ["string", "null"] },
+        "repo": { "type": ["string", "null"] },
+        "input_artifacts": { "type": "array", "items": { "type": "string" } },
+        "pending_handoffs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/handoff" }
+        },
         "bindings": {
           "type": "object",
           "description": "Port name -> concrete adapter used for this run",
