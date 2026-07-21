@@ -146,6 +146,87 @@ def test_claim_run_queued_running_and_immutable_deadline(tmp_path):
     assert run["attempt_started_at"] == "2026-07-18T00:10:00Z"  # refreshed
 
 
+def test_claim_run_two_queued_runs_same_ticket_only_one_claims(tmp_path):
+    """Two concurrent claim attempts for different QUEUED runs on the SAME
+    ticket: only the one that lands first may claim -- per-ticket
+    exclusivity refuses the second inside claim_run's own transaction (the
+    real CAS enforcement), not just via the push-race retry."""
+    origin = _make_origin(tmp_path)
+    wt_a = _clone_worktree(tmp_path, origin, "wt_a")
+    wt_b = _clone_worktree(tmp_path, origin, "wt_b")
+    store_a = GitJsonStateStore(wt_a)
+    store_b = GitJsonStateStore(wt_b)
+
+    def setup(txn: Txn) -> None:
+        txn.set_ticket("ticket-1", status="ACTIVE", pinned_comment_id=None)
+        txn.put_run("ticket-1", {**RUN, "run_id": "run-1"})
+        txn.put_run("ticket-1", {**RUN, "run_id": "run-2"})
+
+    store_a.write(setup)
+    _git("pull", cwd=wt_b)
+
+    assert store_a.claim_run("ticket-1", "run-1", "2026-07-18T00:00:00Z", 30) is True
+    # B's local view is stale (both still QUEUED); B's push loses the race,
+    # replay re-reads fresh state and refuses on per-ticket exclusivity
+    # (run-1 is now RUNNING on the same ticket).
+    assert store_b.claim_run("ticket-1", "run-2", "2026-07-18T00:01:00Z", 30) is False
+
+    check = _clone_worktree(tmp_path, origin, "check")
+    state = json.loads((check / "tickets" / "ticket-1" / "state.json").read_text())
+    states = {r["run_id"]: r["state"] for r in state["runs"]}
+    assert states == {"run-1": "RUNNING", "run-2": "QUEUED"}
+
+
+def test_claim_run_cap_excludes_queued_no_deadlock(tmp_path):
+    """The global in-flight cap counts only OTHER tickets with a
+    RUNNING/WAITING_GATE run. Other tickets that are merely QUEUED must
+    never count -- else a batch of tickets already queued up to the cap
+    would permanently deadlock every future claim."""
+    origin = _make_origin(tmp_path)
+    worktree = _clone_worktree(tmp_path, origin, "wt1")
+    store = GitJsonStateStore(worktree)
+
+    def setup(txn: Txn) -> None:
+        for i in (1, 2, 3):
+            tid = f"ticket-{i}"
+            txn.set_ticket(tid, status="ACTIVE", pinned_comment_id=None)
+            txn.put_run(tid, {**RUN, "run_id": f"run-{i}", "ticket_id": tid, "state": "QUEUED"})
+
+    store.write(setup)
+
+    # cap=2, but ticket-1/ticket-2 are only QUEUED -- not in-flight.
+    assert store.claim_run(
+        "ticket-3", "run-3", "2026-07-18T00:00:00Z", 30, in_flight_cap=2
+    ) is True
+
+
+def test_claim_run_cap_counts_only_running_and_waiting_gate(tmp_path):
+    """Once other tickets are actually RUNNING/WAITING_GATE (in-flight, not
+    just QUEUED), the global cap does refuse the claim."""
+    origin = _make_origin(tmp_path)
+    worktree = _clone_worktree(tmp_path, origin, "wt1")
+    store = GitJsonStateStore(worktree)
+
+    def setup(txn: Txn) -> None:
+        txn.set_ticket("ticket-1", status="ACTIVE", pinned_comment_id=None)
+        txn.put_run("ticket-1", {**RUN, "run_id": "run-1", "ticket_id": "ticket-1", "state": "RUNNING"})
+        txn.set_ticket("ticket-2", status="ACTIVE", pinned_comment_id=None)
+        txn.put_run(
+            "ticket-2",
+            {**RUN, "run_id": "run-2", "ticket_id": "ticket-2", "state": "WAITING_GATE"},
+        )
+        txn.set_ticket("ticket-3", status="ACTIVE", pinned_comment_id=None)
+        txn.put_run("ticket-3", {**RUN, "run_id": "run-3", "ticket_id": "ticket-3", "state": "QUEUED"})
+
+    store.write(setup)
+
+    assert store.claim_run(
+        "ticket-3", "run-3", "2026-07-18T00:00:00Z", 30, in_flight_cap=2
+    ) is False
+    run3 = store.read_state("ticket-3")["runs"][0]
+    assert run3["state"] == "QUEUED"
+
+
 def test_missing_origin_raises(tmp_path):
     plain = tmp_path / "plain"
     _git("init", str(plain))

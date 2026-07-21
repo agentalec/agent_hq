@@ -5,6 +5,7 @@ from engine.engine import (
     check_budget,
     check_concurrency,
     check_loop_guard,
+    dispatch,
     enqueue,
     intake_repo,
     kill_switch_active,
@@ -230,3 +231,75 @@ def test_resolve_target_repo_still_returns_a_work_repo():
     )
     details = TicketDetails(ticket_id="1", title="Billing bug", body="", labels=[])
     assert resolve_target_repo(config, details) == "org/product-be"
+
+
+class _FakeWorkflowApi:
+    def __init__(self):
+        self.triggered: list[str] = []
+
+    def active_workflow(self, run_name: str) -> bool:
+        return False
+
+    def trigger_run(self, run_id: str) -> None:
+        self.triggered.append(run_id)
+
+
+def _dispatch_fixture(tmp_path):
+    store, _ = _store(tmp_path)
+    config = Config(
+        components={}, repos={}, projects={}, approvers={},
+        budgets={
+            "loop_guard": {"max_runs": 25, "max_depth": 12},
+            "ticket_cap_usd": 1000.0,
+            "in_flight_cap": 3,
+        },
+    )
+    taskdefs = {"task-1": {"budget": {"max_cost_usd": 100.0, "max_runtime_min": 30, "retries": 2}}}
+
+    def setup(txn) -> None:
+        for tid in ("ticket-1", "ticket-2"):
+            txn.set_ticket(tid, status="ACTIVE", pinned_comment_id=None)
+            txn.put_run(
+                tid,
+                {
+                    "run_id": f"run-{tid}",
+                    "task_id": "task-1",
+                    "task_version": 1,
+                    "ticket_id": tid,
+                    "state": "QUEUED",
+                    "attempt": 0,
+                    "bindings": {},
+                    "cost_usd": None,
+                    "tokens": None,
+                    "usage_known": False,
+                    "artifacts": [],
+                    "chain_depth": 0,
+                },
+            )
+
+    store.write(setup)
+    return store, config, taskdefs
+
+
+def test_dispatch_issue_scope_triggers_only_the_named_ticket(tmp_path):
+    """`dispatch(..., issue=...)` is the fast path: it triggers only the
+    named ticket's ready run, leaving an equally-eligible run on a different
+    ticket for the next unscoped (scheduled) call."""
+    store, config, taskdefs = _dispatch_fixture(tmp_path)
+    wf = _FakeWorkflowApi()
+
+    triggered = dispatch(
+        config, taskdefs, store, wf, now_iso="2026-07-18T00:00:00Z", issue="ticket-1"
+    )
+
+    assert triggered == ["run-ticket-1"]
+    assert wf.triggered == ["run-ticket-1"]
+
+
+def test_dispatch_unscoped_call_scans_every_ticket(tmp_path):
+    store, config, taskdefs = _dispatch_fixture(tmp_path)
+    wf = _FakeWorkflowApi()
+
+    triggered = dispatch(config, taskdefs, store, wf, now_iso="2026-07-18T00:00:00Z")
+
+    assert set(triggered) == {"run-ticket-1", "run-ticket-2"}

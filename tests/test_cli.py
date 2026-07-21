@@ -93,6 +93,42 @@ def test_intake_bare_issue_id_touches_only_engine_repo():
     assert result == "skipped"
 
 
+def test_dispatch_parses_issue_and_threads_it_through(monkeypatch):
+    captured = {}
+
+    def fake_dispatch(config, taskdefs, store, workflow_api, issue=None):
+        captured["issue"] = issue
+        return ["run-1"]
+
+    monkeypatch.setattr(cli, "_load", lambda repo_root: (object(), object()))
+    monkeypatch.setattr(cli, "_store", lambda args: object())
+    monkeypatch.setattr("engine.engine.dispatch", fake_dispatch)
+    monkeypatch.setattr("engine.runner.GithubWorkflowApi", lambda: object())
+
+    args = cli.build_parser().parse_args(["dispatch", "--state", "/tmp/whatever", "--issue", "42"])
+    args.func(args, REPO_ROOT)
+
+    assert captured["issue"] == "42"
+
+
+def test_dispatch_issue_defaults_to_none_for_a_full_scan(monkeypatch):
+    captured = {}
+
+    def fake_dispatch(config, taskdefs, store, workflow_api, issue=None):
+        captured["issue"] = issue
+        return []
+
+    monkeypatch.setattr(cli, "_load", lambda repo_root: (object(), object()))
+    monkeypatch.setattr(cli, "_store", lambda args: object())
+    monkeypatch.setattr("engine.engine.dispatch", fake_dispatch)
+    monkeypatch.setattr("engine.runner.GithubWorkflowApi", lambda: object())
+
+    args = cli.build_parser().parse_args(["dispatch", "--state", "/tmp/whatever"])
+    args.func(args, REPO_ROOT)
+
+    assert captured["issue"] is None
+
+
 def test_intake_stale_org_repo_ref_form_is_ignored_not_honored():
     captured = []
     result = intake_ticket(

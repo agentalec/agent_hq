@@ -67,7 +67,7 @@ def _dispatch(args: argparse.Namespace, repo_root: Path) -> None:
     from engine.runner import GithubWorkflowApi
 
     config, taskdefs = _load(repo_root)
-    triggered = dispatch(config, taskdefs, _store(args), GithubWorkflowApi())
+    triggered = dispatch(config, taskdefs, _store(args), GithubWorkflowApi(), issue=args.issue)
     print(f"triggered: {triggered}")
 
 
@@ -155,6 +155,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     dispatch_parser = subparsers.add_parser("dispatch", help="Sweep and trigger queued work")
     _add_common_args(dispatch_parser)
+    dispatch_parser.add_argument(
+        "--issue",
+        help="Scan only this ticket (fast path for a wake-up producer); omit for a full scan",
+    )
     dispatch_parser.set_defaults(func=_dispatch)
 
     run_parser = subparsers.add_parser("run", help="Run a task phase")

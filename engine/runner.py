@@ -267,7 +267,10 @@ def _restore_input_artifacts(store, worktree: Path, ticket_id: str, run: dict) -
 
 def _prepare(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskdef) -> dict:
     run_id = run["run_id"]
-    claimed = store.claim_run(ticket_id, run_id, now_iso, taskdef["budget"]["max_runtime_min"])
+    claimed = store.claim_run(
+        ticket_id, run_id, now_iso, taskdef["budget"]["max_runtime_min"],
+        in_flight_cap=config.budgets["in_flight_cap"],
+    )
     if not claimed:
         return {"claimed": False}
 
@@ -350,6 +353,10 @@ def _collect(
     outcome = result.get("outcome", "failure")
     usage_known = bool(result.get("usage_known", False))
     agent_binding = run.get("bindings", {}).get("agent-session", "")
+    # scripts/run-phases.sh reads this back out to scope its post-collect
+    # dispatcher wake-up to this run's ticket (the fast path `dispatch
+    # --issue` takes).
+    result["ticket_id"] = ticket_id
 
     # FIRST unconditionally record spend + health, whatever the outcome.
     def record(txn) -> None:

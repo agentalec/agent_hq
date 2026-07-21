@@ -115,7 +115,13 @@ def check_concurrency(
     parallel_ok: bool = False,
     in_flight_cap: int = 3,
 ) -> bool:
-    """True if the run `run_id` (or a hypothetical new run) may start on
+    """ADVISORY pre-filter only -- cheap and tolerant of stale/scoped state,
+    used by `dispatch` to skip an obviously-blocked run before even
+    attempting a claim. The real enforcement (the compare-and-swap that
+    can't be raced) is `GitJsonStateStore.claim_run`; do not rely on this
+    function for correctness.
+
+    True if the run `run_id` (or a hypothetical new run) may start on
     `ticket_id`.
 
     Refused when the ticket has another run in an EXCLUSIVE state
@@ -427,10 +433,24 @@ def _mark_failed(store, ticket_id, run_id, kind: str, event_suffix: str) -> None
     store.write(fn)
 
 
-def sweep(config, taskdefs, store, workflow_api, now_iso: str, adapter_fn: AdapterFn) -> None:
-    """Reconcile every ticket's in-flight runs: fail lost/timed-out RUNNING
-    runs (then retry per policy) and resolve WAITING_GATE runs against the gate
-    adapter. Runs before the trigger stage so freed capacity is visible."""
+def sweep(
+    config,
+    taskdefs,
+    store,
+    workflow_api,
+    now_iso: str,
+    adapter_fn: AdapterFn,
+    ticket_ids: list[str] | None = None,
+) -> None:
+    """Reconcile in-flight runs: fail lost/timed-out RUNNING runs (then retry
+    per policy) and resolve WAITING_GATE runs against the gate adapter. Runs
+    before the trigger stage so freed capacity is visible.
+
+    `ticket_ids`, when given, narrows the sweep to just those tickets (the
+    dispatcher's issue-scoped fast path); a full, unscoped sweep still scans
+    every ticket, so gate timeouts and lost-run detection never depend
+    solely on a scoped call landing.
+    """
 
     def handle_running(taskdef, ticket_id, run) -> None:
         run_id = run["run_id"]
@@ -529,8 +549,10 @@ def sweep(config, taskdefs, store, workflow_api, now_iso: str, adapter_fn: Adapt
             )
         # PENDING: leave the run WAITING_GATE.
 
-    for ticket_id in store.list_tickets():
+    for ticket_id in (ticket_ids if ticket_ids is not None else store.list_tickets()):
         state = store.read_state(ticket_id)
+        if state is None:
+            continue
         for run in list(state.get("runs", [])):
             taskdef = taskdefs.get(run["task_id"])
             if taskdef is None:
@@ -651,23 +673,31 @@ def dispatch(
     workflow_api,
     now_iso: str | None = None,
     adapter_fn: AdapterFn | None = None,
+    issue: str | None = None,
 ) -> list[str]:
     """Two stages: sweep in-flight runs first, then trigger eligible QUEUED
-    runs. Returns the run ids triggered this pass."""
+    runs. `issue`, when given, is the dispatcher's fast path -- a wake-up
+    producer that already knows which ticket changed narrows both stages to
+    just that ticket; a scheduled/unscoped call still scans every active
+    ticket, so nothing depends solely on a scoped call landing. Returns the
+    run ids triggered this pass."""
     now_iso = now_iso or _now_iso()
     adapter_fn = adapter_fn or _default_adapter_fn(config)
+    scope = [issue] if issue else None
 
-    sweep(config, taskdefs, store, workflow_api, now_iso, adapter_fn)
+    sweep(config, taskdefs, store, workflow_api, now_iso, adapter_fn, ticket_ids=scope)
 
     triggered: list[str] = []
     if kill_switch_active():
         return triggered
 
     budgets = config.budgets
-    ticket_ids = store.list_tickets()
+    ticket_ids = scope if scope is not None else store.list_tickets()
     all_states = {tid: store.read_state(tid) for tid in ticket_ids}
     for ticket_id in ticket_ids:
         state = all_states[ticket_id]
+        if state is None:
+            continue
         if state.get("status") == "BLOCKED":
             continue
         for run in state.get("runs", []):

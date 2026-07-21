@@ -31,7 +31,14 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
       - run: bash scripts/checkout-state.sh
-      - run: agent-hq dispatch --state ./_state
+      - name: Dispatch (issue-scoped fast path when a wake-up producer named one)
+        run: |
+          issue="${{ github.event.client_payload.issue }}"
+          if [[ -n "$issue" ]]; then
+            agent-hq dispatch --state ./_state --issue "$issue"
+          else
+            agent-hq dispatch --state ./_state
+          fi
       - name: Refresh the dashboard
         run: |
           curl -s -X POST \

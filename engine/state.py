@@ -25,6 +25,13 @@ from pathlib import Path
 # errors are not CAS contention and fail on the first attempt.
 _MAX_WRITE_ATTEMPTS = 5
 
+# Run states that occupy a ticket's one in-flight slot for `claim_run`'s
+# per-ticket exclusivity and global in-flight cap. Duplicated from
+# `engine.engine.EXCLUSIVE_STATES` (not imported -- engine.py imports this
+# module, so the reverse import would be circular); QUEUED is deliberately
+# excluded from the cap count -- see `claim_run`.
+_EXCLUSIVE_STATES = {"RUNNING", "WAITING_GATE"}
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -322,9 +329,36 @@ class GitJsonStateStore:
             self._git("fetch", "origin", branch)
             self._git("reset", "--hard", f"origin/{branch}")
 
+    def _has_exclusive_run(self, ticket_id: str) -> bool:
+        doc = self.read_state(ticket_id) or {}
+        return any(r["state"] in _EXCLUSIVE_STATES for r in doc.get("runs", []))
+
     def claim_run(
-        self, ticket_id: str, run_id: str, now_iso: str, max_runtime_min: float
+        self,
+        ticket_id: str,
+        run_id: str,
+        now_iso: str,
+        max_runtime_min: float,
+        in_flight_cap: int | None = None,
     ) -> bool:
+        """Atomically claim a QUEUED run for execution.
+
+        This is the real compare-and-swap enforcement point -- unlike
+        `engine.check_concurrency`, which is only a cheap, stale-tolerant
+        ADVISORY pre-filter the dispatcher uses to skip an obviously-blocked
+        run before even attempting a claim. Refuses (leaves the run QUEUED,
+        unclaimed) when:
+        - the run isn't QUEUED (already claimed, or claimed by a concurrent
+          winner since this attempt started reading state), or
+        - the SAME ticket already has another RUNNING/WAITING_GATE run
+          (per-ticket exclusivity -- at most one in-flight run per ticket),
+          or
+        - `in_flight_cap` is given and the number of OTHER tickets with a
+          RUNNING/WAITING_GATE run has already reached it. QUEUED runs on
+          other tickets never count towards this cap -- counting them would
+          let a batch of already-queued tickets permanently deadlock every
+          future claim once the cap is reached.
+        """
         claimed = False
 
         def fn(txn: Txn) -> None:
@@ -335,6 +369,20 @@ class GitJsonStateStore:
             run = txn.get_run(ticket_id, run_id)
             if run is None or run["state"] != "QUEUED":
                 return
+            same_ticket_exclusive = any(
+                r["run_id"] != run_id and r["state"] in _EXCLUSIVE_STATES
+                for r in txn.ticket_doc(ticket_id).get("runs", [])
+            )
+            if same_ticket_exclusive:
+                return
+            if in_flight_cap is not None:
+                other_in_flight = sum(
+                    1
+                    for tid in self.list_tickets()
+                    if tid != ticket_id and self._has_exclusive_run(tid)
+                )
+                if other_in_flight >= in_flight_cap:
+                    return
             deadline = run.get("deadline") or _add_minutes(now_iso, max_runtime_min)
             txn.update_run(
                 ticket_id,
