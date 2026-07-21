@@ -46,16 +46,18 @@ write access** to any pilot or engine repo -- it only needs model access.
 Mint a fine-grained PAT with the **Copilot Requests** account permission and
 store it as `AGENT_HQ_COPILOT_TOKEN`; classic PATs are not supported by the
 current Copilot CLI. This is the PD-5 deviation: the Copilot child process
-necessarily holds a GitHub
-credential, and the no-repo-access bot seat bounds its blast radius to
-"model access only". It does not isolate the engine PAT held by the surrounding
-job; see `docs/architecture.md`. Local testing uses `copilot login` instead --
-no token/secret needed locally.
+necessarily holds a GitHub credential, and the no-repo-access bot seat bounds
+its blast radius to "model access only". Since the hardening plan's Task 12
+isolated-job cutover, `execute` (the job that runs this child) is its own
+credential-free Actions job -- `AGENT_HQ_TOKEN` is never in its environment
+at all, not merely absent from the child's allowlist; see
+`docs/architecture.md` "Credential boundary". Local testing uses `copilot
+login` instead -- no token/secret needed locally.
 
 GitHub now recommends built-in `GITHUB_TOKEN` plus
-`copilot-requests: write` for organization automation. Adopt that when execute
-moves to its own read-only, secret-free job. Do not pass a write-scoped job
-token into the current single-job agent process.
+`copilot-requests: write` for organization automation. Adopt that in a
+future pass to drop `AGENT_HQ_COPILOT_TOKEN` entirely; do not pass a
+write-scoped job token into `execute` meanwhile.
 
 ## 3. Orphan state branch bootstrap
 
@@ -153,3 +155,38 @@ Private deployments do not get a public dashboard: use the operator CLI
 Pages. `pages.yml` gating on `public: false` (skip new deploys, and the
 one-time manual unpublish step for an install that was previously public)
 lands in Task 17.
+
+## 10. Isolated prepare/execute/collect jobs (Task 12)
+
+`run.yml` runs each task's three phases as three separate Actions jobs
+(`docs/architecture.md` "Flow"): `prepare` and `collect` are credentialed
+(`AGENT_HQ_TOKEN`) and run directly on the runner; `execute` is
+credential-free (`permissions: {}`, only `COPILOT_GITHUB_TOKEN`) and runs
+inside the project devcontainer -- it's the only phase that needs the
+`copilot`/`claude` CLI. `bundle-<run_id>` and `execute-out-<run_id>`
+Actions artifacts transport prepare's manifest and execute's output between
+jobs; both are pruned (`retention-days: 1`) since they're single-use
+transport, not durable state.
+
+**`branch_conflict` recovery.** Collect lands each task's work on the
+ticket's stable `agent-hq/<issue-number>` branch with a plain fast-forward
+push (`docs/architecture.md` "Work branches"). If that push is rejected and
+the remote content doesn't match this run's own intended commit, the ticket
+is set `BLOCKED` with reason `branch_conflict` rather than force-pushed
+over. To recover:
+
+1. Inspect the remote `agent-hq/<issue-number>` head in the target repo
+   against `ticket.work_repos[repo].recorded_head` (state store) -- diff
+   them to see what unexpected work landed on the branch.
+2. If that unexpected work is worth keeping, **copy it to a separate branch
+   first** (e.g. `git branch rescue/<issue-number> agent-hq/<issue-number>`
+   and push `rescue/<issue-number>`).
+3. **Reset** `agent-hq/<issue-number>` back to `recorded_head` (a
+   force-push of that exact commit) -- do **not** hand-merge the two
+   histories: a merge moves the remote head off `recorded_head`, so the
+   next `retry` (which bases its attempt on `recorded_head`) would just
+   re-block.
+4. `retry` the terminally-`BLOCKED` run (it enqueues a replacement attempt
+   built on `recorded_head`, now matching the reset branch). `unblock` is
+   only for an operator/`issue_closed` block, not this one; `reconcile`
+   would just reproduce the same conflict.

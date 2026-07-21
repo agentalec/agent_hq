@@ -1,6 +1,10 @@
 # `executor` (`engine.ports.Executor`)
 
-Canonical (P0): `claude-code-headless`.
+Canonical (P0): `claude-code-headless`. `start`/`result` are thin, unused
+stubs in P0 -- the runner drives the actual work through the `agent-session`
+port's isolated prepare/execute/collect methods instead (`docs/ports/
+agent-session.md`, hardening plan Task 12); this Protocol documents the
+shape a future async dispatch model would use.
 
 ## Ops
 

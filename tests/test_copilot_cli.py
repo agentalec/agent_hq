@@ -118,14 +118,18 @@ def test_run_uses_configured_model(monkeypatch, tmp_path):
     assert argv[argv.index("--model") + 1] == "custom-model"
 
 
-def test_run_timeout_kills_process_and_returns_timeout_outcome(monkeypatch, tmp_path):
+def test_run_timeout_maps_to_failure_with_detail(monkeypatch, tmp_path):
+    """Task 12 normalization: schemas/execute-result.schema.json only knows
+    success/failure -- a timeout is reported as a schema-valid failure with
+    a `detail`, not a bare "timeout" outcome."""
     proc = FakeProc(raise_timeout=True)
     _install_fake_popen(monkeypatch, proc)
     executor = CopilotCli({})
 
     result = executor.run({"prompt": "hi", "worktree": str(tmp_path)}, [], FUTURE_DEADLINE)
 
-    assert result["outcome"] == "timeout"
+    assert result["outcome"] == "failure"
+    assert "timed out" in result["detail"]
     assert proc.killed is True
 
 
@@ -140,7 +144,7 @@ def test_run_success_records_zero_cost_and_usage_known(monkeypatch, tmp_path):
     assert result["cost_usd"] == 0.0
     assert result["tokens"] is None
     assert result["usage_known"] is True
-    assert result["session_id"] is None
+    assert "session_id" not in result  # Task 12: not part of the transported contract
 
     written = json.loads((tmp_path / ".agent-hq" / "execute-result.json").read_text())
     assert written == result

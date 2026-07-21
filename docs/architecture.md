@@ -29,17 +29,24 @@
    `workflow_dispatch`). It sweeps the state store for queued runs, gate
    timeouts, and orphaned/stale running work, then triggers `run.yml` via
    `workflow_dispatch` for anything ready to execute.
-4. `run.yml` executes one task phase for a run inside the project
-   devcontainer (`devcontainers/ci`, D7 — Codespaces parity), running
-   `scripts/run-phases.sh`: **prepare** (clone target repo, restore any
-   handoff `input_artifacts` from the source run's ledger, build the prompt
-   bundle) -> **execute** (spawn `copilot -p "<prompt>" -s --no-ask-user
-   --model claude-sonnet-4.5`, billed through a GitHub Copilot seat rather
-   than a direct Anthropic key) -> **collect** (parse
-   `.agent-hq/execute-result.json`; on success, validate `.agent-hq/control.json`
-   against the three control outcomes, commit outputs, open a PR only when the
-   task declares `opens_pr`, persist declared outputs to this run's ledger
-   namespace, and record adapter health).
+4. `run.yml` runs a task's three phases as three ISOLATED Actions jobs
+   (`scripts/run-phases.sh`, hardening plan Task 12): **prepare**
+   (credentialed; claims the run, restores any handoff `input_artifacts`
+   from the source run's ledger, and writes the prompt bundle to
+   `bundle.json` -- no work-repo clone) -> **execute** (credential-free,
+   `permissions: {}`, only `COPILOT_GITHUB_TOKEN`; clones the public repo,
+   spawns `copilot -p "<prompt>" -s --no-ask-user --model
+   claude-sonnet-4.5`, and emits a work patch, the normalized
+   `execute-result.json`, `control.json`, and staged declared/input
+   artifacts, all as a transported Actions artifact -- runs inside the
+   project devcontainer, the only phase that needs the `copilot`/`claude`
+   CLI) -> **collect** (credentialed; parses `execute-result.json` first --
+   on failure it stops there; on success it validates `control.json`
+   against the three control outcomes, fresh-clones the repo, `git apply`s
+   the work patch, lands it on the ticket's stable per-issue branch, opens
+   a PR only when the task declares `opens_pr` and none is already
+   recorded, persists declared outputs to this run's ledger namespace, and
+   records adapter health).
 5. A task's own transition is driven entirely by its validated
    `.agent-hq/control.json` outcome (`schemas/control.schema.json` --
    "Control outcomes" below), not a static `on_success` list. A `handoff`
@@ -60,20 +67,24 @@ The issue, agent workspace, PR, and state branch have different jobs:
 | Concern | Location | Durable? | Role |
 |---|---|---:|---|
 | Request and human conversation | GitHub issue in the engine repo (`config.projects["engine_repo"]`) | Yes | Control plane: intake, status, escalation, gate approvals/reopen, and closing summary |
-| Active agent workspace | Target-repo clone at `<workdir>/_target/<run_id>` inside the Actions devcontainer | No | Where the agent reads, edits, and tests during one run |
-| Runner-only metadata | `.agent-hq/bundle.json`, `.agent-hq/diff.patch`, `.agent-hq/execute-result.json`, and `.agent-hq/control.json` in that clone | No | Handoff between prepare, execute, and collect; excluded from pushed work |
-| Produced work | `agent-hq/<run_id>` branch in the target repo | Yes | Canonical output commit for that task and the base for its child task |
-| Human review | Draft PR in the target repo, only when the task declares `opens_pr: true` | Yes | Approval/review surface; not the engine state store |
+| Active agent workspace | Target-repo clone at `<workdir>/_target/<run_id>` inside execute's credential-free devcontainer job | No | Where the agent reads, edits, and tests during one run; never transferred (`.git` stays behind) |
+| Job-boundary transport | `_prepare/<run_id>/bundle.json`+`inputs/`, `_execute/<run_id>/{execute-result.json,control.json,work.patch,outputs/}` | No | Plain-file Actions artifacts (`actions/upload-artifact`/`download-artifact`, no custom tar) handing prepare -> execute -> collect their inputs/outputs |
+| Produced work | `agent-hq/<issue-number>` branch in the target repo (one per repo per ticket, reused across every task and rework attempt) | Yes | Canonical, ticket-stable output history; each task/rework bases on the branch's recorded head, never the base branch again |
+| Human review | Draft PR in the target repo, only when a task declares `opens_pr: true` (create-or-get: at most one per repo per ticket) | Yes | Approval/review surface; not the engine state store |
 | Orchestration memory | Orphan `agent-hq-state` branch in the engine repo | Yes | Canonical ticket, run, event, gate, artifact, cost, and adapter-health state |
 | Dashboard | GitHub Pages projection of the state branch | Rebuildable | Read-only operator view, not a source of truth |
 | Agent session/conversation memory | None in P0 | No | A retry starts a new process and clone; there is no saved LLM session to resume |
 
-Every successful task's collect phase pushes its result as
-`agent-hq/<run_id>` in its resolved work repo (`run.repo`). A PR is more
-selective: only `implement` opens one, because it declares `opens_pr: true`.
-Every other task -- including `spec` and `arch-approval`, which carry human
-gates -- produces a durable task branch/output commit with no separate PR of
-its own; their gates are authorized comments on the parent engine issue
+Every successful task's collect phase lands its result on
+`agent-hq/<issue-number>` in its resolved work repo (`run.repo`) -- a plain
+fast-forward push, since every attempt is built on the branch's own
+recorded head (`ticket.work_repos[].recorded_head`). A PR is more selective:
+only `implement` opens one, because it declares `opens_pr: true`, and only
+the first task to do so on a given repo/ticket actually calls
+`open_draft_pr` -- every later task reuses the recorded `pr_ref`. Every
+other task -- including `spec` and `arch-approval`, which carry human gates
+-- still lands on that same durable branch with no separate PR of its own;
+their gates are authorized comments on the parent engine issue
 (`github-issue-comment`, `docs/ports/gate.md`), not PR reviews. `finalize`
 writes `specs/<ticket>/summary.md` and emits `complete`; queue-empty
 completion (`engine.engine._complete_if_queue_empty`) is what then posts the
@@ -104,11 +115,11 @@ vector store, transcript archive, or session checkpoint/resume mechanism.
 
 Frozen by Phase 0 of the hardening plan
 (`.hyperclaude/plans/20260721-2056-harden-the-existing-plan-at.md`, Task 1).
-The control-outcome/handoff mechanics, gate-approval completion, and
-queue-empty completion below are **live** as of the atomic cutover (Task 9);
-the mid-flight close/operator-block/reopen edges and the stable per-issue
-work branch are **planned** (Tasks 12, 14, 16, 18 of that plan) and marked
-as such below.
+The control-outcome/handoff mechanics, gate-approval completion, queue-empty
+completion, and the isolated-job/stable-per-issue-branch cutover below are
+**live** as of Tasks 9 and 12; the mid-flight close/operator-block/reopen
+edges are still **planned** (Tasks 14, 16, 18 of that plan) and marked as
+such below.
 
 A ticket carries one of three lifecycle states (`engine.models.TicketStatus`):
 
@@ -164,16 +175,33 @@ silently ignored:
   recorded blocked and the ticket moves to `BLOCKED` with that reason,
   escalating to a human with no auto-retry.
 
-### Work branches [planned, Task 12]
+### Work branches [live, Task 12]
 
 Each work repository a ticket touches gets exactly one stable branch,
 `agent-hq/<issue-number>` (PLAN.md decision 4 — not `agent-hq/<run_id>`;
 every task and rework attempt on that ticket reuses the same branch), created
 once from that repository's configured `base_branch` (`repos.yml`) and
 updated by every later task. At most one PR per ticket per repository is
-opened against that `base_branch`. This branch/PR model supersedes the
-current per-run `agent-hq/<run_id>` branch described under "Where work and
-memory live" above; the isolated-job cutover that lands it is Task 12.
+opened against that `base_branch` (create-or-get: `engine.runner._collect_success`
+reuses `ticket.work_repos[repo].pr_ref` once it's set).
+
+**`base_commit` resolution:** `work_repos[repo].recorded_head` if the ticket
+has already landed a task on that repo, else the repo's configured
+`base_branch` -- the first task branches from base, every later task/rework
+bases on the recorded head, and a downstream failure never resets this (the
+branch persists; no special-casing needed). Each attempt is therefore built
+on the branch's last recorded head, so collect's landing push is a **plain
+fast-forward** (`git push origin HEAD:refs/heads/agent-hq/<issue-number>`,
+creating the branch from `base_branch` on the first push) -- the recorded
+head IS the lease; `--force-with-lease` adds no case a fast-forward doesn't
+already cover. On a rejected push, collect revalidates this run's claim
+(only the currently-`RUNNING` run may reconcile or block -- a stale/zombie
+run's own rejected push is a no-op) and compares the remote branch's
+tree/parent to this attempt's own: identical (a retry that got a fresh
+timestamp -- different SHA, same content) is adopted; any real divergence
+sets the ticket `BLOCKED` with reason `branch_conflict` rather than forcing
+over unknown work (`docs/operations.md` has the operator recovery
+procedure).
 
 ### Approval and reopen commands
 
@@ -235,15 +263,22 @@ accepted, not accidental: blast radius on compromise is that seat's account's
 GitHub access, which the dedicated bot seat (Copilot access only, **no write
 access** to any pilot or engine repo — see `docs/operations.md`) reduces to
 "model access only". `engine/adapters/copilot_cli.py` asserts that the engine
-credential is absent from the direct child env, but the surrounding job still
-holds it.
+credential is absent from the direct child env.
 
-**This is process hygiene, not isolation.** The child has the container's
-filesystem, shell, process namespace, and direct network access. A compromised
-or prompt-injected agent may be able to inspect parent processes and exfiltrate
-the engine credential. The production boundary is a separate secret-free,
-read-only agent job plus a network firewall and a later scoped write job, as
-documented in [`docs/project-review.md`](project-review.md). Until that lands,
+**Isolated-job boundary (hardening plan Task 12, live):** unlike the P0
+single-job runner this section originally described, `execute` is now its
+own Actions job with `permissions: {}` and ONLY `COPILOT_GITHUB_TOKEN` in
+its environment -- `AGENT_HQ_TOKEN` is never set in that job at all, not
+merely absent from the child's allowlisted env. `prepare` and `collect` are
+separate, credentialed jobs that never run agent code. A compromised or
+prompt-injected agent in `execute` therefore cannot exfiltrate the engine
+credential from its own job's environment or process tree, since it was
+never there. This remains process/job hygiene, not full isolation: the
+`execute` job still has its container's filesystem, shell, process
+namespace, and direct network access (no egress firewall yet), and the
+engine credential lives in the separate `prepare`/`collect` jobs' runners.
+The remaining hardening (a network firewall around the agent process) is
+tracked in [`docs/project-review.md`](project-review.md); until that lands,
 do not run untrusted tickets.
 
 ## Retry semantics (D1)

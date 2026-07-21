@@ -56,3 +56,12 @@ repo, checked out as a worktree (production: `./_state`). Layout:
 No listing/query API beyond `read_state` -- callers that need to scan all
 tickets read the worktree directory tree directly. No caching: every read
 hits disk in the worktree.
+
+## Isolated-job access (hardening plan Task 12)
+
+`prepare` and `collect` are credentialed Actions jobs and read/write this
+store normally. `execute` is credential-free (`permissions: {}`, only
+`COPILOT_GITHUB_TOKEN`) and never calls `write()` -- it only needs the
+already-claimed run's record, fetched via a read-only, anonymous clone/pull
+of the (public) engine repo's `agent-hq-state` branch (PD-5: a public repo
+needs no clone credential); no `AGENT_HQ_TOKEN` ever reaches that job.

@@ -110,18 +110,23 @@ def test_run_argv_includes_allowed_tools_when_given(monkeypatch, tmp_path):
     assert argv[argv.index("--allowedTools") + 1] == "Bash,Read"
 
 
-def test_run_timeout_kills_process_and_returns_timeout_outcome(monkeypatch, tmp_path):
+def test_run_timeout_maps_to_failure_with_detail(monkeypatch, tmp_path):
+    """Task 12 normalization: schemas/execute-result.schema.json only knows
+    success/failure -- a timeout is reported as a schema-valid failure with
+    a `detail`, not a bare "timeout" outcome."""
     proc = FakeProc(raise_timeout=True)
     _install_fake_popen(monkeypatch, proc)
     executor = ClaudeCodeHeadless({})
 
     result = executor.run({"prompt": "hi", "worktree": str(tmp_path)}, [], FUTURE_DEADLINE)
 
-    assert result["outcome"] == "timeout"
+    assert result["outcome"] == "failure"
+    assert "timed out" in result["detail"]
     assert proc.killed is True
     assert result["usage_known"] is False
     assert result["cost_usd"] is None
     assert result["tokens"] is None
+    assert "session_id" not in result
 
 
 def test_run_success_parses_usage_and_writes_result_file(monkeypatch, tmp_path):
@@ -140,7 +145,7 @@ def test_run_success_parses_usage_and_writes_result_file(monkeypatch, tmp_path):
     result = executor.run({"prompt": "hi", "worktree": str(tmp_path)}, [], FUTURE_DEADLINE)
 
     assert result["outcome"] == "success"
-    assert result["session_id"] == "sess-42"
+    assert "session_id" not in result  # Task 12: not part of the transported contract
     assert result["cost_usd"] == 0.0456
     assert result["tokens"] == 150
     assert result["usage_known"] is True
@@ -170,7 +175,7 @@ def test_run_garbage_stdout_usage_unknown(monkeypatch, tmp_path):
     assert result["usage_known"] is False
     assert result["cost_usd"] is None
     assert result["tokens"] is None
-    assert result["session_id"] is None
+    assert "session_id" not in result
 
 
 # -- collect_outputs ------------------------------------------------------------
@@ -192,12 +197,10 @@ def test_collect_outputs_returns_declared_when_all_present(tmp_path):
     assert executor.collect_outputs(tmp_path, ["a.txt", "b.txt"]) == ["a.txt", "b.txt"]
 
 
-# -- prepare_worktree + build_pr_branch (real git) ------------------------------
+# -- prepare_worktree (real git) ------------------------------------------------
 
 
-def test_prepare_worktree_and_build_pr_branch_materialize_committed_and_uncommitted_work(
-    monkeypatch, tmp_path
-):
+def test_prepare_worktree_checks_out_base_commit_and_tags_it(monkeypatch, tmp_path):
     origin = _make_origin(tmp_path)
     base_commit = _git("rev-parse", "main", cwd=tmp_path / "_seed").strip()
     monkeypatch.setattr(cch, "_clone_url", lambda repo: str(origin))
@@ -207,51 +210,126 @@ def test_prepare_worktree_and_build_pr_branch_materialize_committed_and_uncommit
 
     assert worktree == tmp_path / "work" / "_target" / "run-1"
     assert worktree.exists()
-
-    # agent commits a change...
-    (worktree / "existing.txt").write_text("committed change\n")
-    _git("add", "-A", cwd=worktree)
-    _git("commit", "-m", "agent commit", cwd=worktree)
-    # ...leaves an uncommitted edit...
-    (worktree / "new_uncommitted.txt").write_text("uncommitted\n")
-    # ...and drops runner metadata that must never reach the PR branch.
-    (worktree / ".agent-hq").mkdir()
-    (worktree / ".agent-hq" / "execute-result.json").write_text("{}")
-
-    output_commit = executor.build_pr_branch("run-1", worktree, base_commit)
-
-    assert (worktree / "existing.txt").read_text() == "committed change\n"
-    assert (worktree / "new_uncommitted.txt").read_text() == "uncommitted\n"
-    assert not (worktree / ".agent-hq").exists()
-
-    branch = _git("rev-parse", "agent-hq/run-1", cwd=worktree).strip()
-    assert branch == output_commit
-
-    # pushed to origin -- fresh clone shows the same branch and content
-    check = tmp_path / "check"
-    _git("clone", "--branch", "agent-hq/run-1", str(origin), str(check))
-    assert _git("rev-parse", "HEAD", cwd=check).strip() == output_commit
-    assert (check / "existing.txt").read_text() == "committed change\n"
-    assert (check / "new_uncommitted.txt").read_text() == "uncommitted\n"
-    assert not (check / ".agent-hq").exists()
+    assert _git("rev-parse", "agent-hq-base", cwd=worktree).strip() == base_commit
 
 
-def test_build_pr_branch_uses_base_tag_when_base_commit_none(monkeypatch, tmp_path):
+# -- materialize_work_patch / apply_patch / land_branch (Task 12, real git) -----
+
+
+def test_materialize_work_patch_excludes_declared_and_agent_hq(monkeypatch, tmp_path):
     origin = _make_origin(tmp_path)
+    base_commit = _git("rev-parse", "main", cwd=tmp_path / "_seed").strip()
     monkeypatch.setattr(cch, "_clone_url", lambda repo: str(origin))
 
     executor = ClaudeCodeHeadless({"workdir": str(tmp_path / "work")})
-    worktree = executor.prepare_worktree("run-2", "o/r", None)
-    base_tip = _git("rev-parse", "HEAD~0", cwd=worktree).strip()
+    worktree = executor.prepare_worktree("run-1", "o/r", base_commit)
 
-    (worktree / "existing.txt").write_text("changed\n")
-    _git("add", "-A", cwd=worktree)
-    _git("commit", "-m", "agent commit", cwd=worktree)
+    # code the agent wrote (must be in the patch)...
+    (worktree / "code.py").write_text("print('hi')\n")
+    # ...a declared/input artifact (must be EXCLUDED -- ledger-only, never
+    # work-repo code)...
+    (worktree / "specs" / "7").mkdir(parents=True)
+    (worktree / "specs" / "7" / "spec.md").write_text("the spec\n")
+    # ...and runner metadata (always excluded).
+    (worktree / ".agent-hq").mkdir()
+    (worktree / ".agent-hq" / "execute-result.json").write_text("{}")
 
-    executor.build_pr_branch("run-2", worktree, None)
+    patch = executor.materialize_work_patch(worktree, ["specs/7/spec.md"])
 
-    parent = _git("rev-parse", "agent-hq/run-2^", cwd=worktree).strip()
-    assert parent == base_tip
+    assert "code.py" in patch
+    assert "spec.md" not in patch
+    assert ".agent-hq" not in patch
+
+
+def test_apply_patch_applies_cleanly_on_a_fresh_clone(monkeypatch, tmp_path):
+    origin = _make_origin(tmp_path)
+    base_commit = _git("rev-parse", "main", cwd=tmp_path / "_seed").strip()
+    monkeypatch.setattr(cch, "_clone_url", lambda repo: str(origin))
+
+    executor = ClaudeCodeHeadless({"workdir": str(tmp_path / "work")})
+    source = executor.prepare_worktree("run-1", "o/r", base_commit)
+    (source / "code.py").write_text("print('hi')\n")
+    patch = executor.materialize_work_patch(source, [])
+
+    landing = executor.prepare_worktree("run-1-collect", "o/r", base_commit)
+    executor.apply_patch(landing, patch)
+
+    assert (landing / "code.py").read_text() == "print('hi')\n"
+    assert not (landing / ".agent-hq-work.patch").exists()
+
+
+def test_apply_patch_raises_on_a_patch_that_does_not_apply(monkeypatch, tmp_path):
+    origin = _make_origin(tmp_path)
+    base_commit = _git("rev-parse", "main", cwd=tmp_path / "_seed").strip()
+    monkeypatch.setattr(cch, "_clone_url", lambda repo: str(origin))
+
+    executor = ClaudeCodeHeadless({"workdir": str(tmp_path / "work")})
+    landing = executor.prepare_worktree("run-2", "o/r", base_commit)
+
+    with pytest.raises(RuntimeError):
+        executor.apply_patch(landing, "not a valid patch at all\n")
+
+
+def test_land_branch_creates_branch_then_fast_forwards_a_later_attempt(monkeypatch, tmp_path):
+    origin = _make_origin(tmp_path)
+    base_commit = _git("rev-parse", "main", cwd=tmp_path / "_seed").strip()
+    monkeypatch.setattr(cch, "_clone_url", lambda repo: str(origin))
+    executor = ClaudeCodeHeadless({"workdir": str(tmp_path / "work")})
+
+    first = executor.prepare_worktree("run-1", "o/r", base_commit)
+    (first / "a.py").write_text("a\n")
+    landed_1 = executor.land_branch("run-1", first, "agent-hq/7", "main")
+    assert landed_1["landed"] is True
+
+    check = tmp_path / "check-1"
+    _git("clone", "--branch", "agent-hq/7", str(origin), str(check))
+    assert _git("rev-parse", "HEAD", cwd=check).strip() == landed_1["head"]
+    assert (check / "a.py").read_text() == "a\n"
+
+    # A later task/rework attempt bases on the recorded head (Task 12) --
+    # its push is a plain fast-forward onto the same branch.
+    second = executor.prepare_worktree("run-2", "o/r", landed_1["head"])
+    (second / "b.py").write_text("b\n")
+    landed_2 = executor.land_branch("run-2", second, "agent-hq/7", "main")
+    assert landed_2["landed"] is True
+    assert landed_2["head"] != landed_1["head"]
+
+
+def test_land_branch_adopts_identical_retry_and_blocks_a_real_conflict(monkeypatch, tmp_path):
+    origin = _make_origin(tmp_path)
+    base_commit = _git("rev-parse", "main", cwd=tmp_path / "_seed").strip()
+    monkeypatch.setattr(cch, "_clone_url", lambda repo: str(origin))
+    executor = ClaudeCodeHeadless({"workdir": str(tmp_path / "work")})
+
+    # Someone else's identically-contented commit already landed on the
+    # branch (e.g. a retry that got a fresh timestamp -- different SHA,
+    # same tree/parent as this attempt's own commit).
+    zombie = tmp_path / "zombie"
+    _git("clone", str(origin), str(zombie))
+    _git("checkout", base_commit, cwd=zombie)
+    _git("checkout", "-b", "agent-hq/9", cwd=zombie)
+    (zombie / "same.py").write_text("same\n")
+    _git("add", "-A", cwd=zombie)
+    _git("-c", "user.name=z", "-c", "user.email=z@example.com", "commit", "-m", "zombie",
+         cwd=zombie)
+    _git("push", "origin", "agent-hq/9", cwd=zombie)
+    zombie_head = _git("rev-parse", "agent-hq/9", cwd=zombie).strip()
+
+    # Our own attempt, built from the SAME base, with the SAME resulting
+    # content -- its push is rejected (the branch moved), but the content
+    # matches, so it's adopted rather than blocked.
+    ours = executor.prepare_worktree("run-adopt", "o/r", base_commit)
+    (ours / "same.py").write_text("same\n")
+    landed = executor.land_branch("run-adopt", ours, "agent-hq/9", "main")
+    assert landed == {"landed": True, "head": zombie_head}
+
+    # A real conflict (different content from the same base) is reported,
+    # never force-pushed over.
+    conflicting = executor.prepare_worktree("run-conflict", "o/r", base_commit)
+    (conflicting / "same.py").write_text("different\n")
+    blocked = executor.land_branch("run-conflict", conflicting, "agent-hq/9", "main")
+    assert blocked["landed"] is False
+    assert blocked["remote_head"] == zombie_head
 
 
 # -- healthcheck ----------------------------------------------------------------

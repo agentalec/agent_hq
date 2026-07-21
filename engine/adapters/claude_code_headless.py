@@ -3,10 +3,17 @@
 Settings: `{"workdir": "<parent dir for clones>", "claude_bin": "claude"}`.
 No checkpoint/resume in P0 (D1): every run starts from a fresh clone: a
 killed session is retried from scratch by the dispatcher, not resumed here.
-`start`/`result` are thin stubs -- the runner (Task 13) drives
-`prepare_worktree`/`run`/`collect_outputs`/`build_pr_branch` directly against
+`start`/`result` are thin stubs -- the runner drives `prepare_worktree`/
+`run`/`collect_outputs`/`materialize_work_patch` (execute) and
+`prepare_worktree`/`apply_patch`/`land_branch` (collect) directly against
 this same adapter instance; there is no separate async dispatch step for the
 in-process claude-code-headless executor.
+
+Isolated-job model (hardening plan Task 12): `prepare_worktree` +
+`materialize_work_patch` run in execute's credential-free job (a plain clone
+of a public repo needs no credential -- PD-5); `apply_patch` + `land_branch`
+run only in collect's credentialed job -- this adapter never pushes from
+execute.
 """
 
 from __future__ import annotations
@@ -65,29 +72,32 @@ def _result_is_error(stdout: str) -> bool:
 
 
 def _parse_execute_result(outcome: str, stdout: str) -> dict:
+    """Build `schemas/execute-result.schema.json`-shaped output directly
+    (Task 12 normalization): no `session_id` (not part of the transported
+    contract -- collect validates against this schema, which forbids it),
+    and a `timeout` outcome maps to `failure` + a `detail` (the schema only
+    knows `success`/`failure`; collect's own failure/retry accounting
+    already treats `timeout` identically to `failure`, so this is a schema
+    fix, not a behavior change)."""
     cost_usd = None
     tokens = None
-    session_id = None
     usage_known = False
     try:
         data = json.loads(stdout) if stdout else None
     except json.JSONDecodeError:
         data = None
     if isinstance(data, dict):
-        session_id = data.get("session_id")
         usage = data.get("usage")
         cost = data.get("total_cost_usd")
         if isinstance(usage, dict) and cost is not None:
             tokens = sum(v for v in usage.values() if isinstance(v, int) and not isinstance(v, bool))
             cost_usd = cost
             usage_known = True
-    return {
-        "outcome": outcome,
-        "cost_usd": cost_usd,
-        "tokens": tokens,
-        "usage_known": usage_known,
-        "session_id": session_id,
-    }
+    result = {"outcome": outcome, "cost_usd": cost_usd, "tokens": tokens, "usage_known": usage_known}
+    if outcome == "timeout":
+        result["outcome"] = "failure"
+        result["detail"] = "execution timed out before the deadline"
+    return result
 
 
 class ClaudeCodeHeadless:
@@ -177,22 +187,73 @@ class ClaudeCodeHeadless:
             raise RuntimeError(f"missing declared artifacts: {missing}")
         return list(declared)
 
-    def build_pr_branch(self, run_id: str, worktree: str | Path, base_commit: str | None) -> str:
+    def materialize_work_patch(self, worktree: str | Path, exclude_paths: list[str]) -> str:
+        """Diff the agent's committed+uncommitted changes against this run's
+        base tag, excluding `exclude_paths` (the declared outputs and
+        restored input artifacts -- neither is work-repo code) and
+        `.agent-hq/`. This is the ONLY payload that ever reaches the target
+        repo -- Task 12: execute holds no push credential, so it never
+        pushes directly; it hands this patch to collect, which applies it
+        to a fresh, credentialed clone."""
         worktree = Path(worktree)
-        self._commit_if_dirty(worktree, "agent-hq: uncommitted work")
-        work_tip = self._git("rev-parse", "work", cwd=worktree).strip()
-        base = base_commit or self._git("rev-parse", _BASE_TAG, cwd=worktree).strip()
+        self._commit_if_dirty(worktree, "agent-hq: work")
+        base = self._git("rev-parse", _BASE_TAG, cwd=worktree).strip()
+        tip = self._git("rev-parse", "work", cwd=worktree).strip()
+        excludes = [f":!{p}" for p in exclude_paths] + [":!.agent-hq"]
+        return self._git("diff", base, tip, "--", ".", *excludes, cwd=worktree)
 
-        branch = f"agent-hq/{run_id}"
-        self._git("checkout", "-B", branch, base, cwd=worktree)
-        self._git("restore", "--source", work_tip, "--", ".", ":!.agent-hq", cwd=worktree)
-        self._commit_if_dirty(worktree, f"agent-hq: run {run_id}")
-        self._git("push", "-u", "origin", branch, cwd=worktree)
-        return self._git("rev-parse", branch, cwd=worktree).strip()
+    def apply_patch(self, worktree: str | Path, patch_text: str) -> None:
+        """Apply a transported work patch to a fresh landing clone (collect,
+        Task 12). Raises (via `_git`) if it doesn't apply cleanly -- a patch
+        that fails to apply fails the run, it is never silently dropped."""
+        worktree = Path(worktree)
+        patch_path = worktree / ".agent-hq-work.patch"
+        patch_path.write_text(patch_text)
+        try:
+            self._git("apply", str(patch_path), cwd=worktree)
+        finally:
+            patch_path.unlink(missing_ok=True)
+
+    def _parent_sha(self, worktree: str | Path, ref: str) -> str | None:
+        try:
+            return self._git("rev-parse", f"{ref}^", cwd=worktree).strip()
+        except RuntimeError:
+            return None
+
+    def land_branch(self, run_id: str, worktree: str | Path, branch: str, base_branch: str) -> dict:
+        """Commit the applied patch (if dirty) and fast-forward-push onto
+        the ticket's stable `branch` (created from `base_branch` on the
+        first push -- Task 12). A plain fast-forward push IS the lease:
+        every attempt is built on the branch's last recorded head, so a
+        rejection means someone moved it since. On rejection, fetch the
+        remote tip and compare its tree/parent to this attempt's own --
+        identical content from a retried (fresh-timestamp) attempt is
+        adopted (`landed: True`, the remote head); a real divergence is
+        reported (`landed: False`) for the caller to block."""
+        worktree = Path(worktree)
+        self._commit_if_dirty(worktree, f"agent-hq: {run_id}")
+        head = self._git("rev-parse", "HEAD", cwd=worktree).strip()
+        push = subprocess.run(
+            ["git", "-C", str(worktree), *git_credential_args(), "push", "origin",
+             f"HEAD:refs/heads/{branch}"],
+            capture_output=True, text=True,
+        )
+        if push.returncode == 0:
+            return {"landed": True, "head": head}
+
+        self._git("fetch", "origin", branch, cwd=worktree)
+        remote_head = self._git("rev-parse", "FETCH_HEAD", cwd=worktree).strip()
+        remote_tree = self._git("rev-parse", "FETCH_HEAD^{tree}", cwd=worktree).strip()
+        our_tree = self._git("rev-parse", "HEAD^{tree}", cwd=worktree).strip()
+        if remote_tree == our_tree and self._parent_sha(worktree, "FETCH_HEAD") == self._parent_sha(
+            worktree, "HEAD"
+        ):
+            return {"landed": True, "head": remote_head}
+        return {"landed": False, "head": head, "remote_head": remote_head}
 
     # -- PR lifecycle (repo-side effects owned by this adapter, same as
-    # build_pr_branch's push -- runner.py calls these through the
-    # agent-session port so swapping the executor swaps PR behavior too) ----
+    # land_branch's push -- runner.py calls these through the agent-session
+    # port so swapping the executor swaps PR behavior too) ----
 
     def open_draft_pr(self, repo: str, branch: str, base: str, title: str, body: str) -> str:
         pr = open_draft_pr(GitHubClient(), repo, branch, base, title, body)

@@ -140,14 +140,19 @@ There is exactly one artifact namespace and one input source:
 - **Input artifacts** on a handoff-spawned run
   (`run.input_artifacts`, copied from the accepted handoff's `artifacts[]`
   at apply time) are the run's **only** input source -- there is no
-  separate task-level input list. Prepare restores them from the **source**
-  (parent) run's ledger namespace into the execute worktree
-  (`engine.runner._restore_input_artifacts`), so a child reads exactly what
-  its handoff accepted, never a sibling's file.
-- The **work-repo patch/commit** excludes both: every declared output path
-  and every inherited `input_artifacts` path is stripped from the worktree
-  before `agent.build_pr_branch` runs (`engine.runner._collect_success`).
-  Neither is code; both live only in the ledger.
+  separate task-level input list. Prepare restores their content from the
+  **source** (parent) run's ledger namespace (`engine.runner
+  ._restore_input_artifacts`) into a transported manifest -- execute (its
+  own, credential-free Actions job, hardening plan Task 12) then
+  materializes them into its worktree (`engine.runner._materialize_inputs`),
+  so a child reads exactly what its handoff accepted, never a sibling's
+  file.
+- The **work patch** excludes both: execute's `materialize_work_patch`
+  diffs out every declared output path and every inherited
+  `input_artifacts` path before handing the patch to collect, which
+  `git apply`s it to a fresh clone and lands it on the target branch
+  (`engine.runner._collect_success`). Neither is code; both live only in
+  the ledger.
 
 Every artifact path a handoff proposes is **containment-checked** against
 the worktree root before it's trusted anywhere (absolute paths, `..`

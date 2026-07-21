@@ -5,8 +5,17 @@ Every task's transition is driven by `.agent-hq/control.json` (the three
 outcomes: `handoff`/`complete`/`blocked`) validated through
 `engine.handoff.validate_handoffs` + `engine.engine.apply_handoffs` -- there
 is no more static `on_success` chain, so fake agents emit `control.json`
-directly (either via `FakeAgent.run`, or written into the worktree before
-`collect` the same way tests write `execute-result.json`).
+directly (either via `FakeAgent.run`, or written into the transported
+`execute_dir_for(...)` the same way tests write `execute-result.json`).
+
+Isolated-job model (hardening plan Task 12): prepare writes `bundle.json` +
+restored inputs to `prepare_dir_for(run_id)` (no clone); execute clones into
+`worktree_for(run_id)` and emits `execute-result.json`/`control.json`/
+`work.patch`/staged outputs to `execute_dir_for(run_id)`; collect fresh-clones,
+applies the patch, and lands the ticket's stable `agent-hq/<ticket>` branch.
+Collect-focused tests below skip prepare/execute and write directly into
+`execute_dir_for(...)`, exactly as they skipped straight to `.agent-hq/*` in
+the prior single-job model.
 """
 
 import json
@@ -17,7 +26,7 @@ import pytest
 from engine.config import load_config
 from engine.engine import dispatch, sweep
 from engine.models import GateDecision, GateRequest, GateStatus, TicketDetails
-from engine.runner import intake_ticket, run_task, worktree_for
+from engine.runner import execute_dir_for, intake_ticket, prepare_dir_for, run_task
 from engine.state import GitJsonStateStore
 from engine.taskdefs import load_all
 from test_state import _clone_worktree, _make_origin
@@ -62,16 +71,20 @@ class FakeTracker:
 
 class FakeAgent:
     def __init__(self, workdir, outcome="success", usage_known=True, cost_usd=1.5, tokens=100,
-                 control=None):
+                 control=None, apply_patch_error=None, land_result=None):
         self.workdir = workdir
         self.outcome = outcome
         self.usage_known = usage_known
         self.cost_usd = cost_usd
         self.tokens = tokens
         self.control = control if control is not None else {"outcome": "complete"}
+        self.apply_patch_error = apply_patch_error
+        self.land_result = land_result
         self.opened_prs: list[tuple] = []
         self.requested_reviewers: list[tuple] = []
         self.ready_prs: list[str] = []
+        self.applied_patches: list[str] = []
+        self.landed: list[tuple] = []
         self._pr_number = 0
 
     def _worktree(self, run_id):
@@ -98,8 +111,19 @@ class FakeAgent:
     def collect_outputs(self, worktree, declared):
         return list(declared)
 
-    def build_pr_branch(self, run_id, worktree, base_commit):
-        return f"commit-{run_id}"
+    def materialize_work_patch(self, worktree, exclude_paths):
+        return "fake-patch"
+
+    def apply_patch(self, worktree, patch_text):
+        if self.apply_patch_error:
+            raise RuntimeError(self.apply_patch_error)
+        self.applied_patches.append(patch_text)
+
+    def land_branch(self, run_id, worktree, branch, base_branch):
+        self.landed.append((run_id, branch, base_branch))
+        if self.land_result is not None:
+            return self.land_result
+        return {"landed": True, "head": f"commit-{run_id}"}
 
     def open_draft_pr(self, repo, branch, base, title, body):
         self._pr_number += 1
@@ -223,16 +247,27 @@ def _seed(store, run, ticket_id="7", status="ACTIVE"):
     )
 
 
-def _write_execute_result(worktree: Path, **over) -> None:
+def _write_execute_result(config, run_id: str, **over) -> None:
     result = {"outcome": "success", "cost_usd": 1.0, "tokens": 10, "usage_known": True}
     result.update(over)
-    (worktree / ".agent-hq").mkdir(parents=True, exist_ok=True)
-    (worktree / ".agent-hq" / "execute-result.json").write_text(json.dumps(result))
+    out = execute_dir_for(config, run_id)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "execute-result.json").write_text(json.dumps(result))
 
 
-def _write_control(worktree: Path, control: dict) -> None:
-    (worktree / ".agent-hq").mkdir(parents=True, exist_ok=True)
-    (worktree / ".agent-hq" / "control.json").write_text(json.dumps(control))
+def _write_control(config, run_id: str, control: dict, patch: str = "fake-patch") -> None:
+    out = execute_dir_for(config, run_id)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "control.json").write_text(json.dumps(control))
+    (out / "work.patch").write_text(patch)
+
+
+def _stage(config, run_id: str, rel_path: str, content: str) -> None:
+    """Simulate execute's staged declared/input artifact -- collect
+    re-validates containment against this transported dir (Task 12)."""
+    out = execute_dir_for(config, run_id) / "outputs" / rel_path
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(content)
 
 
 # --------------------------------------------------------------------------
@@ -356,13 +391,63 @@ def test_prepare_claims_and_writes_bundle(config, taskdefs, store, tmp_path):
     run = store.read_state("7")["runs"][0]
     assert run["state"] == "RUNNING"
     assert run["deadline"] == "2026-07-18T00:30:00Z"
-    bundle = worktree_for(config, "specrun") / ".agent-hq" / "bundle.json"
+    # Prepare has no work-repo clone (Task 12) -- the manifest is a
+    # transport artifact, not a file inside a git worktree.
+    bundle = prepare_dir_for(config, "specrun") / "bundle.json"
     assert bundle.exists()
-    assert "control.json" in json.loads(bundle.read_text())["prompt"]
+    written = json.loads(bundle.read_text())
+    assert "control.json" in written["prompt"]
+    assert written["repo"] == "example-org/product-be"
+    assert written["base_commit"] == "main"  # no work_repos entry yet -> configured base branch
+    assert written["output_paths"] == ["specs/7/spec.md"]
 
     again = run_task("specrun", "prepare", config, taskdefs, store,
                      now_iso="2026-07-18T00:05:00Z", adapter_fn=adapters)
     assert again["claimed"] is False
+
+
+def test_prepare_base_commit_uses_recorded_head_and_survives_downstream_failure(
+    config, taskdefs, store, tmp_path
+):
+    """Task 12: base_commit = work_repos[repo].recorded_head, never the
+    configured base branch again once a task has landed. A downstream
+    task's failure never touches work_repos, so a later task/rework on the
+    same repo still bases on that same recorded head -- automatic, no
+    special-casing needed beyond reading it in prepare."""
+    _seed(store, _run_dict("buildrun", "build", state="RUNNING"))
+    _stage(config, "buildrun", "impl/7.md", "the impl")
+    _write_execute_result(config, "buildrun")
+    _write_control(config, "buildrun", {"outcome": "complete"})
+    agent = FakeAgent(tmp_path / "work")
+    adapters = _adapters(tracker=FakeTracker(_details()), agent=agent)
+    run_task("buildrun", "collect", config, taskdefs, store,
+             now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
+    recorded_head = next(
+        wr for wr in store.read_state("7")["work_repos"] if wr["repo"] == "example-org/product-be"
+    )["recorded_head"]
+    assert recorded_head == "commit-buildrun"
+
+    # A downstream task fails outright (never reaches collect_success at all).
+    store.write(lambda txn: txn.put_run(
+        "7", _run_dict("downrun", "build", state="RUNNING", parent_run_id="buildrun", attempt=0)
+    ))
+    _write_execute_result(
+        config, "downrun", outcome="failure", cost_usd=1.0, tokens=5, usage_known=True,
+    )
+    run_task("downrun", "collect", config, taskdefs, store,
+             now_iso="2026-07-18T09:30:00Z", adapter_fn=adapters)
+    work_repos = store.read_state("7")["work_repos"]
+    assert len(work_repos) == 1
+    assert work_repos[0]["recorded_head"] == recorded_head  # unchanged by the failure
+
+    # A later task/rework on the same repo bases on that SAME recorded head
+    # -- never the configured base branch, even after the downstream failure.
+    store.write(lambda txn: txn.put_run(
+        "7", _run_dict("rework", "build", state="QUEUED", parent_run_id="buildrun")
+    ))
+    out = run_task("rework", "prepare", config, taskdefs, store,
+                   now_iso="2026-07-18T10:00:00Z", adapter_fn=adapters)
+    assert out["bundle"]["base_commit"] == recorded_head
 
 
 def test_execute_writes_result(config, taskdefs, store, tmp_path):
@@ -373,18 +458,20 @@ def test_execute_writes_result(config, taskdefs, store, tmp_path):
              now_iso="2026-07-18T00:00:00Z", adapter_fn=adapters)
     result = run_task("specrun", "execute", config, taskdefs, store, adapter_fn=adapters)
     assert result["outcome"] == "success"
-    assert (worktree_for(config, "specrun") / ".agent-hq" / "execute-result.json").exists()
-    assert (worktree_for(config, "specrun") / ".agent-hq" / "control.json").exists()
+    # Transported to execute_dir_for -- never left in the (untransported)
+    # worktree/.git clone.
+    out_dir = execute_dir_for(config, "specrun")
+    assert (out_dir / "execute-result.json").exists()
+    assert (out_dir / "control.json").exists()
+    assert (out_dir / "work.patch").exists()
 
 
 def test_collect_gated_task_waits_gate(config, taskdefs, store, tmp_path):
     _seed(store, _run_dict("specrun", "spec", state="RUNNING",
                            bindings={"agent-session": "claude-code-headless", "gate": "pr-review"}))
-    wt = worktree_for(config, "specrun")
-    (wt / "specs" / "7").mkdir(parents=True, exist_ok=True)
-    (wt / "specs" / "7" / "spec.md").write_text("the spec")
-    _write_execute_result(wt, cost_usd=2.0, tokens=50)
-    _write_control(wt, {
+    _stage(config, "specrun", "specs/7/spec.md", "the spec")
+    _write_execute_result(config, "specrun", cost_usd=2.0, tokens=50)
+    _write_control(config, "specrun", {
         "outcome": "handoff",
         "handoffs": [
             {"key": "build-1", "task": "build", "reason": "ready for build",
@@ -410,6 +497,10 @@ def test_collect_gated_task_waits_gate(config, taskdefs, store, tmp_path):
     assert any(k.startswith("agent-session/") for k in health)
     # The declared artifact is persisted to the ledger, keyed by this run.
     assert store.read_artifact("7", "specrun", "specs/7/spec.md") == "the spec"
+    # The work landed on the ticket's stable per-issue branch.
+    work_repo = store.read_state("7")["work_repos"][0]
+    assert work_repo["branch"] == "agent-hq/7"
+    assert work_repo["recorded_head"] == "commit-specrun"
 
 
 def test_collect_opens_pr_records_pr_ref(config, taskdefs, store, tmp_path):
@@ -418,9 +509,9 @@ def test_collect_opens_pr_records_pr_ref(config, taskdefs, store, tmp_path):
     record it as pr_ref, even for a `complete` outcome with no gate. No
     concrete GitHub adapter is imported by the runner for this."""
     _seed(store, _run_dict("buildrun", "build", state="RUNNING"))
-    wt = worktree_for(config, "buildrun")
-    _write_execute_result(wt)
-    _write_control(wt, {"outcome": "complete"})
+    _stage(config, "buildrun", "impl/7.md", "the impl")
+    _write_execute_result(config, "buildrun")
+    _write_control(config, "buildrun", {"outcome": "complete"})
     agent = FakeAgent(tmp_path / "work")
     adapters = _adapters(tracker=FakeTracker(_details()), agent=agent)
     run_task("buildrun", "collect", config, taskdefs, store,
@@ -432,8 +523,40 @@ def test_collect_opens_pr_records_pr_ref(config, taskdefs, store, tmp_path):
     assert len(agent.opened_prs) == 1
     repo, branch, base, title, body = agent.opened_prs[0]
     assert repo == "example-org/product-be"
-    assert branch == "agent-hq/buildrun"
+    assert branch == "agent-hq/7"  # stable per-issue branch, not per-run
     assert base == "main"
+
+
+def test_collect_reuses_stable_branch_and_pr_across_tasks(config, taskdefs, store, tmp_path):
+    """Task 12: the branch and (≤ one) PR are per issue/repo, reused across
+    every task -- a second task on the same ticket/repo lands on the same
+    branch and never opens a second PR."""
+    _seed(store, _run_dict("buildrun", "build", state="RUNNING"))
+    _stage(config, "buildrun", "impl/7.md", "the impl")
+    _write_execute_result(config, "buildrun")
+    _write_control(config, "buildrun", {"outcome": "complete"})
+    agent = FakeAgent(tmp_path / "work")
+    adapters = _adapters(tracker=FakeTracker(_details()), agent=agent)
+    run_task("buildrun", "collect", config, taskdefs, store,
+             now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
+
+    store.write(lambda txn: txn.put_run(
+        "7", _run_dict("buildrun2", "build", state="RUNNING", parent_run_id="buildrun")
+    ))
+    _stage(config, "buildrun2", "impl/7.md", "more impl")
+    _write_execute_result(config, "buildrun2")
+    _write_control(config, "buildrun2", {"outcome": "complete"})
+    run_task("buildrun2", "collect", config, taskdefs, store,
+             now_iso="2026-07-18T10:00:00Z", adapter_fn=adapters)
+
+    work_repos = [
+        wr for wr in store.read_state("7")["work_repos"] if wr["repo"] == "example-org/product-be"
+    ]
+    assert len(work_repos) == 1  # one branch/PR record, not two
+    assert work_repos[0]["branch"] == "agent-hq/7"
+    assert work_repos[0]["recorded_head"] == "commit-buildrun2"
+    assert work_repos[0]["pr_ref"] == "example-org/product-be#1"
+    assert len(agent.opened_prs) == 1  # the second task never opens a second PR
 
 
 def test_collect_handoff_ungated_applies_immediately(config, taskdefs, store, tmp_path):
@@ -441,9 +564,9 @@ def test_collect_handoff_ungated_applies_immediately(config, taskdefs, store, tm
     queued) and the source run finishes SUCCEEDED, all in one collect call
     -- no separate re-drive step exists for this anymore."""
     _seed(store, _run_dict("buildrun", "build", state="RUNNING"))
-    wt = worktree_for(config, "buildrun")
-    _write_execute_result(wt)
-    _write_control(wt, {
+    _stage(config, "buildrun", "impl/7.md", "the impl")
+    _write_execute_result(config, "buildrun")
+    _write_control(config, "buildrun", {
         "outcome": "handoff",
         "handoffs": [{"key": "final-1", "task": "finalize", "reason": "done building"}],
     })
@@ -463,9 +586,8 @@ def test_collect_handoff_ungated_applies_immediately(config, taskdefs, store, tm
 
 def test_collect_blocked_outcome_blocks_ticket_and_escalates(config, taskdefs, store, tmp_path):
     _seed(store, _run_dict("buildrun", "build", state="RUNNING"))
-    wt = worktree_for(config, "buildrun")
-    _write_execute_result(wt)
-    _write_control(wt, {"outcome": "blocked", "reason": "missing credentials"})
+    _write_execute_result(config, "buildrun")
+    _write_control(config, "buildrun", {"outcome": "blocked", "reason": "missing credentials"})
     adapters = _adapters(tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"))
     run_task("buildrun", "collect", config, taskdefs, store,
              now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
@@ -481,9 +603,8 @@ def test_collect_blocked_outcome_blocks_ticket_and_escalates(config, taskdefs, s
 def test_collect_invalid_control_fails_and_retries(config, taskdefs, store, tmp_path):
     _seed(store, _run_dict("buildrun", "build", state="RUNNING", attempt=0,
                            source_event_id="evt", enqueue_index=0))
-    wt = worktree_for(config, "buildrun")
-    _write_execute_result(wt)
-    _write_control(wt, {"outcome": "nonsense"})
+    _write_execute_result(config, "buildrun")
+    _write_control(config, "buildrun", {"outcome": "nonsense"})
     adapters = _adapters(tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"))
     run_task("buildrun", "collect", config, taskdefs, store,
              now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
@@ -494,6 +615,28 @@ def test_collect_invalid_control_fails_and_retries(config, taskdefs, store, tmp_
     assert len(retries) == 1
     rejected = [e for e in store.read_events("7") if e["kind"] == "handoff.rejected"]
     assert rejected and "schema" in rejected[0]["detail"]
+
+
+def test_collect_patch_apply_failure_fails_run_never_lands(config, taskdefs, store, tmp_path):
+    """Task 12: a work patch that fails to `git apply` fails the run --
+    never a partial land, never a push/PR."""
+    _seed(store, _run_dict("buildrun", "build", state="RUNNING", attempt=0,
+                           source_event_id="evt", enqueue_index=0))
+    _stage(config, "buildrun", "impl/7.md", "the impl")
+    _write_execute_result(config, "buildrun")
+    _write_control(config, "buildrun", {"outcome": "complete"})
+    agent = FakeAgent(tmp_path / "work", apply_patch_error="patch does not apply")
+    adapters = _adapters(tracker=FakeTracker(_details()), agent=agent)
+    run_task("buildrun", "collect", config, taskdefs, store,
+             now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
+
+    runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
+    assert runs["buildrun"]["state"] == "FAILED"
+    retries = [r for r in runs.values() if r["task_id"] == "build" and r["attempt"] == 1]
+    assert len(retries) == 1
+    assert agent.landed == []  # never reached the push
+    assert agent.opened_prs == []
+    assert "work_repos" not in store.read_state("7") or not store.read_state("7")["work_repos"]
 
 
 def test_collect_finalize_completes_ticket_and_marks_pr_ready(config, taskdefs, store, tmp_path):
@@ -513,12 +656,9 @@ def test_collect_finalize_completes_ticket_and_marks_pr_ready(config, taskdefs, 
             ),
         )
     )
-    wt = worktree_for(config, "finalrun")
-    _write_execute_result(wt, cost_usd=0.5, tokens=5)
-    _write_control(wt, {"outcome": "complete"})
-    summary_dir = wt / "specs" / "7"
-    summary_dir.mkdir(parents=True, exist_ok=True)
-    (summary_dir / "summary.md").write_text("Ticket 7 shipped: PR ready, QA green.")
+    _stage(config, "finalrun", "specs/7/summary.md", "Ticket 7 shipped: PR ready, QA green.")
+    _write_execute_result(config, "finalrun", cost_usd=0.5, tokens=5)
+    _write_control(config, "finalrun", {"outcome": "complete"})
     agent = FakeAgent(tmp_path / "work")
     tracker = FakeTracker(_details())
     adapters = _adapters(tracker=tracker, agent=agent)
@@ -540,9 +680,9 @@ def test_collect_completion_pins_awaiting_human_input_without_summary(config, ta
     declared summary (e.g. an unwired terminal task) never auto-completes --
     it pins "awaiting human input" instead."""
     _seed(store, _run_dict("buildrun", "build", state="RUNNING"))
-    wt = worktree_for(config, "buildrun")
-    _write_execute_result(wt)
-    _write_control(wt, {"outcome": "complete"})
+    _stage(config, "buildrun", "impl/7.md", "the impl")
+    _write_execute_result(config, "buildrun")
+    _write_control(config, "buildrun", {"outcome": "complete"})
     tracker = FakeTracker(_details())
     adapters = _adapters(tracker=tracker, agent=FakeAgent(tmp_path / "work"))
     run_task("buildrun", "collect", config, taskdefs, store,
@@ -553,14 +693,14 @@ def test_collect_completion_pins_awaiting_human_input_without_summary(config, ta
 
 
 def test_collect_failure_records_spend_then_retries(config, taskdefs, store, tmp_path):
+    """A `failure` execute-result never reaches apply/land/push (Task 12)."""
     _seed(store, _run_dict("buildrun", "build", state="RUNNING", attempt=0,
                            parent_run_id="p", source_event_id="evt", enqueue_index=0))
-    wt = worktree_for(config, "buildrun") / ".agent-hq"
-    wt.mkdir(parents=True, exist_ok=True)
-    (wt / "execute-result.json").write_text(
-        json.dumps({"outcome": "failure", "cost_usd": 3.0, "tokens": 20, "usage_known": True})
+    _write_execute_result(
+        config, "buildrun", outcome="failure", cost_usd=3.0, tokens=20, usage_known=True,
     )
-    adapters = _adapters(agent=FakeAgent(tmp_path / "work"))
+    agent = FakeAgent(tmp_path / "work")
+    adapters = _adapters(agent=agent)
     run_task("buildrun", "collect", config, taskdefs, store, adapter_fn=adapters)
     runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
     assert runs["buildrun"]["state"] == "FAILED"
@@ -568,14 +708,15 @@ def test_collect_failure_records_spend_then_retries(config, taskdefs, store, tmp
     retries = [r for r in runs.values() if r["task_id"] == "build" and r["attempt"] == 1]
     assert len(retries) == 1
     assert retries[0]["parent_run_id"] == "p"
+    assert agent.applied_patches == []
+    assert agent.landed == []
+    assert agent.opened_prs == []
 
 
 def test_collect_failure_exhausted_blocks(config, taskdefs, store, tmp_path):
     _seed(store, _run_dict("buildrun", "build", state="RUNNING", attempt=1))
-    wt = worktree_for(config, "buildrun") / ".agent-hq"
-    wt.mkdir(parents=True, exist_ok=True)
-    (wt / "execute-result.json").write_text(
-        json.dumps({"outcome": "failure", "cost_usd": 3.0, "tokens": 20, "usage_known": True})
+    _write_execute_result(
+        config, "buildrun", outcome="failure", cost_usd=3.0, tokens=20, usage_known=True,
     )
     adapters = _adapters(agent=FakeAgent(tmp_path / "work"))
     run_task("buildrun", "collect", config, taskdefs, store, adapter_fn=adapters)
@@ -584,10 +725,8 @@ def test_collect_failure_exhausted_blocks(config, taskdefs, store, tmp_path):
 
 def test_collect_unknown_usage_blocks_never_retries(config, taskdefs, store, tmp_path):
     _seed(store, _run_dict("buildrun", "build", state="RUNNING", attempt=0))
-    wt = worktree_for(config, "buildrun") / ".agent-hq"
-    wt.mkdir(parents=True, exist_ok=True)
-    (wt / "execute-result.json").write_text(
-        json.dumps({"outcome": "failure", "cost_usd": None, "tokens": None, "usage_known": False})
+    _write_execute_result(
+        config, "buildrun", outcome="failure", cost_usd=None, tokens=None, usage_known=False,
     )
     adapters = _adapters(agent=FakeAgent(tmp_path / "work"))
     run_task("buildrun", "collect", config, taskdefs, store, adapter_fn=adapters)

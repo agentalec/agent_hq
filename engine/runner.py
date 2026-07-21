@@ -1,16 +1,38 @@
 """Three-phase runner + intake + the GitHub workflow dispatch API.
 
 The runner drives one task run through three separately-invoked phases
-(`prepare` / `execute` / `collect`), each a distinct GitHub Actions step so a
-lost runner simply restarts the phase (D1: no checkpoint/resume). State is
-handed between phases through deterministic on-disk artifacts in the target
-worktree (`<workdir>/_target/<run_id>/.agent-hq/`):
+(`prepare` / `execute` / `collect`), each an ISOLATED GitHub Actions job
+(hardening plan Task 12): prepare and collect are credentialed
+(`AGENT_HQ_TOKEN`); execute is credential-free (`permissions: {}`, only
+`COPILOT_GITHUB_TOKEN`) and never touches the state store or a push
+credential. State crosses the job boundary as plain files transported by
+`actions/upload-artifact`/`download-artifact` (no custom tar), at
+deterministic per-phase paths (`prepare_dir_for`/`worktree_for`/
+`execute_dir_for`):
 
-  - prepare writes `bundle.json` (prompt, tools, deadline) and materializes
-    `run.input_artifacts` (restored from the source run's ledger namespace)
-    for execute;
-  - execute writes `execute-result.json` (outcome + usage) and
-    `control.json` (outcome/handoffs) for collect.
+  - **prepare** writes only the claim (`store.claim_run`) and binding, then
+    `bundle.json` (prompt, tools, deadline, repo, base_commit, output_paths,
+    and -- for a task whose prompt needs the parent diff -- `diff_base`/
+    `diff_head` commit ids) plus the restored `run.input_artifacts` content
+    (read from the source run's ledger namespace). Prepare has no work-repo
+    clone -- it never runs `_write_parent_diff` itself, only passes commit
+    ids.
+  - **execute** clones the public repo at `base_commit` itself (no clone
+    credential needed -- PD-5), materializes the transferred inputs,
+    generates `.agent-hq/diff.patch` from `diff_base`/`diff_head` when the
+    bundle requests it, runs the agent, and emits the work patch (excluding
+    both `run.input_artifacts` and the declared outputs), the normalized
+    `execute-result.json`, `control.json`, and the declared/input artifacts
+    staged (containment-checked) into a staging directory. `.git` is never
+    transferred.
+  - **collect** parses `execute-result.json` FIRST -- on `failure` (incl. a
+    normalized timeout) it does only failure/retry accounting and stops. On
+    `success`, it re-validates the transported staging dir's containment,
+    fresh-clones the repo, `git apply`s the work patch (a patch that fails
+    to apply fails the run), lands it on the per-issue stable branch
+    (`agent-hq/<issue-number>`, a plain fast-forward push using the
+    recorded head as the lease), persists the ledger, and owns the
+    create-or-get PR/gate/handoff bookkeeping.
 
 `intake_ticket` reads eligibility from `config.projects["intake"]` (no more
 `tasks/intake/` task -- intake is engine entry logic), rejects a public
@@ -32,6 +54,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from jsonschema import Draft202012Validator
+
 from engine import engine as eng
 from engine.adapters._github import GitHubClient
 from engine.config import Config, resolve_binding
@@ -45,11 +69,14 @@ from engine.engine import (
     resolve_target_repo,
     subst,
 )
-from engine.handoff import validate_handoffs
+from engine.handoff import _check_containment, validate_handoffs
 from engine.models import Event, RunState, TaskRun
 from engine.state import _now_iso
 
 _INJECTION_PATTERNS = ("ignore previous instructions", "disregard your")
+_EXECUTE_RESULT_SCHEMA_PATH = (
+    Path(__file__).resolve().parent.parent / "schemas" / "execute-result.schema.json"
+)
 
 
 # --------------------------------------------------------------------------
@@ -82,12 +109,30 @@ class GithubWorkflowApi:
 # --------------------------------------------------------------------------
 
 
+def _workdir(config: Config) -> str:
+    return config.components.get("agent-session", {}).get("settings", {}).get("workdir", ".")
+
+
 def worktree_for(config: Config, run_id: str) -> Path:
-    """Deterministic target worktree path, matching the claude-code-headless
-    adapter's `<workdir>/_target/<run_id>` so phases find each other's
-    artifacts without persisting the path in state."""
-    workdir = config.components.get("agent-session", {}).get("settings", {}).get("workdir", ".")
-    return Path(workdir) / "_target" / run_id
+    """Deterministic worktree path, matching the claude-code-headless
+    adapter's `<workdir>/_target/<run_id>` -- execute's own clone (Task 12:
+    prepare no longer clones; collect clones separately into
+    `_target/<run_id>-collect` via the same adapter method)."""
+    return Path(_workdir(config)) / "_target" / run_id
+
+
+def prepare_dir_for(config: Config, run_id: str) -> Path:
+    """Deterministic transport dir for prepare's manifest -- `bundle.json`
+    plus the restored `inputs/` -- downloaded by execute's job as an Actions
+    artifact (Task 12: prepare has no work-repo clone)."""
+    return Path(_workdir(config)) / "_prepare" / run_id
+
+
+def execute_dir_for(config: Config, run_id: str) -> Path:
+    """Deterministic transport dir for execute's output -- normalized
+    `execute-result.json`, `control.json`, the work patch, and the staged
+    declared/input artifacts under `outputs/` -- downloaded by collect's job."""
+    return Path(_workdir(config)) / "_execute" / run_id
 
 
 def _find_run(store, taskdefs, run_id: str):
@@ -106,15 +151,12 @@ def _rework_comments(store, ticket_id, run_id) -> str | None:
     return None
 
 
-def _write_parent_diff(worktree: Path, parent: dict | None) -> bool:
-    """Deterministically materialize the parent run's diff for read-only
-    child tasks (review has no git tool): `.agent-hq/diff.patch` =
-    parent.base_commit..parent.output_commit. Best-effort — a missing
-    commit or non-git worktree just skips the file."""
-    if not parent or not parent.get("output_commit"):
-        return False
-    base = parent.get("base_commit")
-    tip = parent["output_commit"]
+def _write_parent_diff(worktree: Path, base: str | None, tip: str) -> bool:
+    """Deterministically materialize the immediate parent's diff for
+    read-only child tasks (review has no git tool): `.agent-hq/diff.patch` =
+    base..tip. Computed in EXECUTE's own clone -- prepare has no clone, so it
+    only passes these commit ids via bundle.json's `diff_base`/`diff_head`.
+    Best-effort — a missing commit or non-git worktree just skips the file."""
     args = ["git", "-C", str(worktree), "diff", *( [f"{base}..{tip}"] if base else [tip] )]
     try:
         result = subprocess.run(args, capture_output=True, text=True)
@@ -246,13 +288,14 @@ def run_task(
     raise ValueError(f"unknown phase {phase!r}")
 
 
-def _restore_input_artifacts(store, worktree: Path, ticket_id: str, run: dict) -> None:
-    """Materialize `run.input_artifacts` into the worktree, read from the
+def _restore_input_artifacts(store, dest_dir: Path, ticket_id: str, run: dict) -> None:
+    """Materialize `run.input_artifacts` into `dest_dir` (prepare's transport
+    dir, NOT a worktree -- Task 12: prepare has no clone), read from the
     SOURCE (parent) run's ledger namespace -- the single input source a
-    handoff-spawned run's execute sees (PLAN.md "one artifact namespace,
-    one input source"). Best-effort: an artifact missing from the ledger
-    (shouldn't happen -- apply_handoffs already checked) is skipped, not a
-    hard failure here."""
+    handoff-spawned run sees (PLAN.md "one artifact namespace, one input
+    source"). Execute later materializes these into its own worktree.
+    Best-effort: an artifact missing from the ledger (shouldn't happen --
+    apply_handoffs already checked) is skipped, not a hard failure here."""
     parent_run_id = run.get("parent_run_id")
     if not parent_run_id:
         return
@@ -260,9 +303,45 @@ def _restore_input_artifacts(store, worktree: Path, ticket_id: str, run: dict) -
         content = store.read_artifact(ticket_id, parent_run_id, rel_path)
         if content is None:
             continue
-        full = worktree / rel_path
+        full = dest_dir / rel_path
         full.parent.mkdir(parents=True, exist_ok=True)
         full.write_text(content)
+
+
+def _materialize_inputs(inputs_dir: Path, worktree: Path) -> list[str]:
+    """Copy every file prepare transported (`inputs_dir`, from
+    `_restore_input_artifacts`) into execute's worktree; returns the
+    relative paths actually materialized -- the authoritative "input
+    artifacts present this run" set used for work-patch exclusion and
+    staging, rather than trusting `run.input_artifacts` blindly."""
+    paths: list[str] = []
+    if not inputs_dir.exists():
+        return paths
+    for src in sorted(p for p in inputs_dir.rglob("*") if p.is_file()):
+        rel = src.relative_to(inputs_dir)
+        dest = worktree / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(src.read_text())
+        paths.append(str(rel))
+    return paths
+
+
+def _stage_files(worktree: Path, candidates: list[str], staging: Path) -> None:
+    """Best-effort copy of each candidate (declared output ∪ restored input
+    artifact) into `staging`, containment-checked first -- the first
+    traversal boundary before this staging dir crosses the job boundary to
+    collect (Task 12), which re-runs the same check after transport. A
+    candidate that's missing or unsafe is skipped here, not a hard failure:
+    whether it was actually required (a declared output, already enforced
+    by `collect_outputs` above) or forwarded (a handoff artifact) is judged
+    downstream, against what actually survived transport."""
+    root = worktree.resolve()
+    for rel_path in candidates:
+        if _check_containment(root, rel_path) is not None:
+            continue
+        dest = staging / rel_path
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text((worktree / rel_path).read_text())
 
 
 def _prepare(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskdef) -> dict:
@@ -291,64 +370,123 @@ def _prepare(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskd
             config, "gate", gate_post[0]["adapter"], details.labels
         )
 
-    base_commit = None
+    ticket_doc = store.read_state(ticket_id) or {}
+    # base_commit resolution (Task 12): the first task on a repo branches
+    # from its configured base; every later task/rework bases on the
+    # recorded head of the ticket's stable per-repo branch -- never the base
+    # branch again, even after a downstream failure (the branch persists, so
+    # this needs no special-casing beyond reading it here).
+    work_repo = next((wr for wr in ticket_doc.get("work_repos", []) if wr["repo"] == repo), None)
+    base_commit = (work_repo or {}).get("recorded_head") or config.repos[repo]["base_branch"]
+
     parent = None
     if run.get("parent_run_id"):
         parent = next(
-            (r for r in store.read_state(ticket_id)["runs"] if r["run_id"] == run["parent_run_id"]),
-            None,
+            (r for r in ticket_doc.get("runs", []) if r["run_id"] == run["parent_run_id"]), None,
         )
-        # Only inherit the parent's commit as our base when we're continuing
-        # the SAME repo -- a fan-out handoff (e.g. breakdown -> implement on
-        # a different repo) must not seed a clone with a foreign-repo SHA.
-        if parent and parent.get("repo") == repo:
-            base_commit = parent.get("output_commit")
 
     store.write(
         lambda txn: txn.update_run(ticket_id, run_id, bindings=bindings, base_commit=base_commit)
     )
 
-    agent = adapter_fn("agent-session", bindings["agent-session"], repo=repo)
-    worktree = Path(agent.prepare_worktree(run_id, repo, base_commit))
-
-    _restore_input_artifacts(store, worktree, ticket_id, run)
-    _write_parent_diff(worktree, parent)
     rework = _rework_comments(store, ticket_id, run_id)
+    declared = [subst(a, ticket_id) for a in taskdef.get("outputs", {}).get("artifacts", [])]
     bundle = {
         "prompt": _assemble_prompt(taskdef, details, rework, parent, run={**run, "repo": repo}),
         "tools": taskdef.get("tools", []),
         "deadline": run.get("deadline"),
+        "repo": repo,
+        "base_commit": base_commit,
+        "output_paths": declared,
     }
-    bundle_path = worktree / ".agent-hq" / "bundle.json"
-    bundle_path.parent.mkdir(parents=True, exist_ok=True)
-    bundle_path.write_text(json.dumps(bundle, indent=2) + "\n")
+    # Only when the immediate parent left a commit -- the parent's diff,
+    # never the current run's own outgoing patch (that's `.agent-hq` for
+    # collect, not the agent's context).
+    if parent and parent.get("output_commit"):
+        bundle["diff_base"] = parent.get("base_commit")
+        bundle["diff_head"] = parent["output_commit"]
 
-    return {"claimed": True, "worktree": str(worktree), "bundle": bundle}
+    prep_dir = prepare_dir_for(config, run_id)
+    inputs_dir = prep_dir / "inputs"
+    inputs_dir.mkdir(parents=True, exist_ok=True)
+    _restore_input_artifacts(store, inputs_dir, ticket_id, run)
+    (prep_dir / "bundle.json").write_text(json.dumps(bundle, indent=2) + "\n")
+
+    return {"claimed": True, "prepare_dir": str(prep_dir), "bundle": bundle}
 
 
 def _execute(config, store, adapter_fn, run, taskdef) -> dict:
     run_id = run["run_id"]
-    worktree = worktree_for(config, run_id)
-    bundle = json.loads((worktree / ".agent-hq" / "bundle.json").read_text())
+    bundle = json.loads((prepare_dir_for(config, run_id) / "bundle.json").read_text())
     agent = adapter_fn("agent-session", run.get("bindings", {}).get("agent-session"), repo=None)
+
+    worktree = Path(agent.prepare_worktree(run_id, bundle["repo"], bundle.get("base_commit")))
+    input_paths = _materialize_inputs(prepare_dir_for(config, run_id) / "inputs", worktree)
+    if bundle.get("diff_head"):
+        _write_parent_diff(worktree, bundle.get("diff_base"), bundle["diff_head"])
+
     result = agent.run(
         {"prompt": bundle["prompt"], "worktree": str(worktree)},
         bundle.get("tools", []),
         bundle.get("deadline"),
     )
+
+    out_dir = execute_dir_for(config, run_id)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "execute-result.json").write_text(json.dumps(result, indent=2) + "\n")
+
+    if result.get("outcome") == "success":
+        control_src = worktree / ".agent-hq" / "control.json"
+        if control_src.exists():
+            (out_dir / "control.json").write_text(control_src.read_text())
+
+        declared = bundle.get("output_paths", [])
+        agent.collect_outputs(worktree, declared)  # raises if a declared artifact is missing
+
+        candidates = sorted(set(declared) | set(input_paths))
+        _stage_files(worktree, candidates, out_dir / "outputs")
+
+        patch_text = agent.materialize_work_patch(worktree, candidates)
+        (out_dir / "work.patch").write_text(patch_text)
+
     return result
+
+
+def _load_execute_result_schema() -> dict:
+    return json.loads(_EXECUTE_RESULT_SCHEMA_PATH.read_text())
+
+
+def _validate_execute_result(result: dict) -> str | None:
+    """None if `result` matches `schemas/execute-result.schema.json`; else a
+    rejection reason. Collect validates this ALWAYS -- a schema-invalid
+    execute-result.json (e.g. a stray `session_id`, an un-normalized
+    `timeout`) is never trusted, whatever it claims."""
+    validator = Draft202012Validator(_load_execute_result_schema())
+    errors = sorted(validator.iter_errors(result), key=lambda e: list(e.path))
+    if not errors:
+        return None
+    first = errors[0]
+    json_path = "/".join(str(p) for p in first.path) or "<root>"
+    return f"execute-result.json schema violation: {json_path}: {first.message}"
 
 
 def _collect(
     config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskdef, execute_outcome
 ) -> dict:
     run_id = run["run_id"]
-    worktree = worktree_for(config, run_id)
-    result_path = worktree / ".agent-hq" / "execute-result.json"
-    if result_path.exists():
-        result = json.loads(result_path.read_text())
-    else:
-        result = {"outcome": execute_outcome or "failure", "usage_known": False}
+    out_dir = execute_dir_for(config, run_id)
+    result_path = out_dir / "execute-result.json"
+    default_result = {
+        "outcome": execute_outcome or "failure", "usage_known": False, "cost_usd": None, "tokens": None,
+    }
+    result = json.loads(result_path.read_text()) if result_path.exists() else default_result
+
+    schema_reason = _validate_execute_result(result)
+    if schema_reason is not None:
+        result = {
+            "outcome": "failure", "usage_known": False, "cost_usd": None, "tokens": None,
+            "detail": schema_reason,
+        }
 
     outcome = result.get("outcome", "failure")
     usage_known = bool(result.get("usage_known", False))
@@ -392,19 +530,55 @@ def _collect(
         return result
 
     _collect_success(
-        config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskdef, worktree
+        config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskdef, out_dir
     )
     return result
 
 
-def _read_control(worktree: Path) -> dict:
-    path = Path(worktree) / ".agent-hq" / "control.json"
+def _read_control(path: Path) -> dict:
     if not path.exists():
         return {}
     try:
         return json.loads(path.read_text())
     except json.JSONDecodeError:
         return {}
+
+
+def _validate_staged_declared(staging_dir: Path, declared: list[str]) -> str | None:
+    """None if every declared output survived transport as a real,
+    contained file in `staging_dir` -- the SECOND containment check across
+    the job boundary (execute already checked once before staging, Task
+    12); else a rejection reason. Missing declared artifacts is a failure,
+    not a partial success -- the same contract `collect_outputs` enforced
+    at execute, re-checked here against what actually arrived."""
+    root = staging_dir.resolve()
+    reasons = [r for r in (_check_containment(root, p) for p in declared) if r]
+    if reasons:
+        return "missing declared artifacts: " + "; ".join(reasons)
+    return None
+
+
+def _fail_execute_artifact(store, config, taskdefs, taskdef, ticket_id, run, adapter_fn, reason: str) -> None:
+    """A transport-boundary failure discovered AFTER a trustworthy
+    execute-result (a declared output didn't survive transport, or the work
+    patch failed to `git apply`): same retry-per-budget/BLOCK policy as any
+    other run failure, audited distinctly from `handoff.rejected` since
+    control.json's handoffs were never even reached."""
+    run_id = run["run_id"]
+    eng._mark_failed(store, ticket_id, run_id, "run.failed", "failed")
+    store.write(
+        lambda txn: txn.append_event(
+            ticket_id,
+            Event(
+                event_id=f"{run_id}:artifact_rejected", kind="run.artifact_rejected",
+                ticket_id=ticket_id, run_id=run_id, detail=reason,
+            ).to_dict(),
+        )
+    )
+    _handle_failure(
+        store, config, taskdefs, taskdef, ticket_id, {**run, "state": "FAILED"}, adapter_fn,
+        block_on_unknown_usage=True,
+    )
 
 
 def _fail_control_invalid(store, config, taskdefs, taskdef, ticket_id, run, adapter_fn, reason: str) -> None:
@@ -446,19 +620,20 @@ def _block_from_control(store, config, adapter_fn, ticket_id, run_id, reason: st
 
 
 def _collect_success(
-    config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskdef, worktree
+    config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskdef, out_dir
 ) -> None:
     run_id = run["run_id"]
     tracker = adapter_fn("tracker", config.components["tracker"]["adapter"], repo=intake_repo(config))
     details = tracker.fetch_ticket(ticket_id)
     repo = run.get("repo") or resolve_target_repo(config, details) or next(iter(config.repos))
     base_commit = run.get("base_commit")
+    staging_dir = out_dir / "outputs"
 
     agent = adapter_fn("agent-session", run.get("bindings", {}).get("agent-session"), repo=repo)
 
-    control = _read_control(worktree)
+    control = _read_control(out_dir / "control.json")
     accepted, reason = validate_handoffs(
-        control, taskdef=taskdef, taskdefs=taskdefs, config=config, worktree=worktree,
+        control, taskdef=taskdef, taskdefs=taskdefs, config=config, worktree=staging_dir,
         run=TaskRun.from_dict(run),
     )
     if reason is not None:
@@ -473,65 +648,112 @@ def _collect_success(
         return
 
     declared = [subst(a, ticket_id) for a in taskdef.get("outputs", {}).get("artifacts", [])]
-    artifacts = agent.collect_outputs(worktree, declared)
+    bad = _validate_staged_declared(staging_dir, declared)
+    if bad is not None:
+        _fail_execute_artifact(store, config, taskdefs, taskdef, ticket_id, run, adapter_fn, bad)
+        return
 
-    # Snapshot the ledger for THIS run: every declared output, plus any
-    # inherited (input_artifacts) file an accepted handoff forwards -- so a
+    # Ledger for THIS run: every declared output, plus any inherited
+    # (input_artifacts) file an accepted handoff forwards -- so a
     # transitive handoff (e.g. arch-plan -> breakdown forwarding spec.md)
-    # finds it in the SOURCE run's own namespace. Then strip those paths
-    # (and this run's own inherited inputs) from the worktree before the
-    # work commit -- neither is work-repo code.
+    # finds it in the SOURCE run's own namespace. Read from the transported
+    # staging dir, never the work-repo clone -- neither is work-repo code.
     ledger_paths = set(declared) | {p for h in accepted for p in (h.artifacts or [])}
-    artifact_contents: dict[str, str] = {}
-    for rel_path in ledger_paths:
-        full = worktree / rel_path
-        if full.is_file():
-            artifact_contents[rel_path] = full.read_text()
-            full.unlink()
-    for rel_path in run.get("input_artifacts") or []:
-        full = worktree / rel_path
-        if full.is_file():
-            full.unlink()
+    artifact_contents = {
+        rel_path: (staging_dir / rel_path).read_text()
+        for rel_path in ledger_paths
+        if (staging_dir / rel_path).is_file()
+    }
 
-    output_commit = agent.build_pr_branch(run_id, worktree, base_commit)
-    branch = f"agent-hq/{run_id}"
+    # -- Land the work patch on the ticket's stable per-issue branch. This
+    # is the ONLY place a work-repo clone/push happens (Task 12: execute
+    # never holds a push credential) -- a fresh clone, `git apply` the
+    # transported patch (a patch that fails to apply fails the run), then a
+    # plain fast-forward push (the recorded head IS the lease: every attempt
+    # is built on it, so a rejection only ever means someone moved the
+    # branch since).
+    branch = f"agent-hq/{ticket_id}"
+    base_branch = config.repos[repo]["base_branch"]
+    collect_clone = Path(agent.prepare_worktree(f"{run_id}-collect", repo, base_commit))
+    patch_path = out_dir / "work.patch"
+    patch_text = patch_path.read_text() if patch_path.exists() else ""
+    if patch_text.strip():
+        try:
+            agent.apply_patch(collect_clone, patch_text)
+        except RuntimeError as exc:
+            _fail_execute_artifact(
+                store, config, taskdefs, taskdef, ticket_id, run, adapter_fn,
+                f"work patch failed to apply: {exc}",
+            )
+            return
+    land = agent.land_branch(run_id, collect_clone, branch, base_branch)
 
-    # opens_pr tasks (e.g. implement) have no approval gate but still need a
-    # PR opened so the work is reviewable -- a repo-side effect routed
-    # through the agent-session port (never a concrete GitHub adapter) so
-    # swapping the executor swaps this behavior too.
-    pr_ref = None
-    if taskdef.get("opens_pr"):
+    # PR is create-or-get: reuse a repo's already-recorded pr_ref (opened by
+    # an earlier task on this same ticket/repo) rather than opening a
+    # second one -- at most one PR per repo per ticket, opened only once the
+    # work has actually landed.
+    existing_work_repo = next(
+        (wr for wr in (store.read_state(ticket_id) or {}).get("work_repos", []) if wr["repo"] == repo),
+        None,
+    )
+    pr_ref = (existing_work_repo or {}).get("pr_ref")
+    if land["landed"] and taskdef.get("opens_pr") and not pr_ref:
         pr_ref = agent.open_draft_pr(
-            repo, branch, "main", details.title or f"hq: {ticket_id}", details.body,
+            repo, branch, base_branch, details.title or f"hq: {ticket_id}", details.body,
         )
 
-    def _write_ledger(txn) -> None:
+    result: dict = {}
+
+    def finalize(txn) -> None:
+        # Claim revalidation, inside the write transaction, FIRST: only the
+        # currently-claimed run (still RUNNING) may reconcile or block. A
+        # stale/zombie run (superseded since this collect started) treats
+        # its own land attempt -- landed or not -- as a no-op and never
+        # touches the ticket.
+        current = txn.get_run(ticket_id, run_id)
+        if current is None or current["state"] != "RUNNING":
+            result["zombie"] = True
+            return
+
+        if not land["landed"]:
+            txn.update_run(ticket_id, run_id, state="BLOCKED")
+            txn.append_event(
+                ticket_id,
+                Event(
+                    event_id=f"{run_id}:branch_conflict", kind="run.blocked", ticket_id=ticket_id,
+                    run_id=run_id, state=RunState.BLOCKED, detail="branch_conflict",
+                ).to_dict(),
+            )
+            txn.set_block(ticket_id, reason="branch_conflict", source="task", interrupted_run=run_id)
+            result["blocked"] = True
+            return
+
+        output_commit = land["head"]
+        txn.upsert_work_repo(
+            ticket_id, repo, branch=branch, base_branch=base_branch, recorded_head=output_commit,
+            pr_ref=pr_ref,
+        )
         for rel_path, content in artifact_contents.items():
             txn.write_artifact(ticket_id, run_id, rel_path, content)
 
-    gate_post = taskdef.get("gates", {}).get("post") if outcome == "handoff" else None
-    if gate_post:
-        gate_entry = gate_post[0]
-        gate = adapter_fn("gate", run.get("bindings", {}).get("gate", "pr-review"), repo=repo)
-        req = gate.request(
-            gate_entry["approvers"],
-            {
-                "repo": repo,
-                "ticket_id": ticket_id,
-                "run_id": run_id,
-                "task_id": taskdef["id"],
-                "branch": branch,
-                "title": details.title,
-                "body": details.body,
-            },
-        )
-
-        def open_gate(txn) -> None:
-            _write_ledger(txn)
+        if outcome == "handoff" and taskdef.get("gates", {}).get("post"):
+            gate_entry = taskdef["gates"]["post"][0]
+            gate = adapter_fn("gate", run.get("bindings", {}).get("gate", "pr-review"), repo=repo)
+            req = gate.request(
+                gate_entry["approvers"],
+                {
+                    "repo": repo,
+                    "ticket_id": ticket_id,
+                    "run_id": run_id,
+                    "task_id": taskdef["id"],
+                    "branch": branch,
+                    "title": details.title,
+                    "body": details.body,
+                },
+            )
             txn.update_run(
                 ticket_id, run_id,
-                artifacts=artifacts,
+                artifacts=declared,
                 output_commit=output_commit,
                 pr_ref=pr_ref,
                 gate_requested_at=now_iso,
@@ -539,8 +761,6 @@ def _collect_success(
                 state="WAITING_GATE",
             )
             txn.set_pending_handoffs(ticket_id, run_id, [h.to_dict() for h in accepted])
-            if pr_ref:
-                txn.upsert_work_repo(ticket_id, repo, pr_ref=pr_ref)
             txn.append_event(
                 ticket_id,
                 Event(
@@ -549,7 +769,7 @@ def _collect_success(
                     ticket_id=ticket_id,
                     run_id=run_id,
                     state=RunState.WAITING_GATE,
-                    artifacts=artifacts,
+                    artifacts=declared,
                 ).to_dict(),
             )
             for h in accepted:
@@ -560,14 +780,9 @@ def _collect_success(
                         ticket_id=ticket_id, run_id=run_id, detail=h.reason,
                     ).to_dict(),
                 )
+            result["gated"] = True
+            return
 
-        store.write(open_gate)
-        return
-
-    result: dict = {}
-
-    def succeed(txn) -> None:
-        _write_ledger(txn)
         for h in accepted:
             txn.append_event(
                 ticket_id,
@@ -584,13 +799,11 @@ def _collect_success(
                 return
         txn.update_run(
             ticket_id, run_id,
-            artifacts=artifacts,
+            artifacts=declared,
             output_commit=output_commit,
             pr_ref=pr_ref,
             state="SUCCEEDED",
         )
-        if pr_ref:
-            txn.upsert_work_repo(ticket_id, repo, pr_ref=pr_ref)
         txn.append_event(
             ticket_id,
             Event(
@@ -599,11 +812,23 @@ def _collect_success(
                 ticket_id=ticket_id,
                 run_id=run_id,
                 state=RunState.SUCCEEDED,
-                artifacts=artifacts,
+                artifacts=declared,
             ).to_dict(),
         )
 
-    store.write(succeed)
+    store.write(finalize)
+
+    if result.get("zombie") or result.get("gated"):
+        return
+
+    if result.get("blocked"):
+        _escalate(
+            store, config, adapter_fn, ticket_id, run_id,
+            "Work branch conflict: agent-hq/"
+            f"{ticket_id} moved unexpectedly since this run started; blocked pending operator review.",
+        )
+        return
+
     if result.get("apply_reason") is not None:
         eng._mark_failed(store, ticket_id, run_id, "run.failed", "failed")
 
@@ -625,7 +850,7 @@ def _collect_success(
         return
 
     _complete_if_queue_empty(
-        store, config, adapter_fn, ticket_id, {**run, "state": "SUCCEEDED", "artifacts": artifacts}
+        store, config, adapter_fn, ticket_id, {**run, "state": "SUCCEEDED", "artifacts": declared}
     )
 
 

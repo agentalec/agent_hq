@@ -15,9 +15,77 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Credentialed: claims the run and writes only the claim + bundle.json
+  # manifest (Task 12) -- no work-repo clone here, so no devcontainer needed.
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: agent-hq-state
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    outputs:
+      claimed: ${{ steps.run.outputs.claimed }}
+    env:
+      AGENT_HQ_TOKEN: ${{ secrets.AGENT_HQ_TOKEN }}
+      AGENT_HQ_ENGINE_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Prepare (claim + bundle.json; no work-repo clone -- execute owns it)
+        id: run
+        run: bash scripts/run-phases.sh "${{ inputs.run_id }}" prepare
+      - uses: actions/upload-artifact@v4
+        if: steps.run.outputs.claimed == 'true'
+        with:
+          name: bundle-${{ inputs.run_id }}
+          path: _prepare/${{ inputs.run_id }}
+          retention-days: 1
+
+  # Credential-free: permissions: {} and ONLY the dedicated no-repo-access
+  # Copilot bot-seat token -- never AGENT_HQ_TOKEN/GITHUB_TOKEN/GH_TOKEN
+  # (CLAUDE.md). Runs inside the project devcontainer -- the only phase that
+  # needs the `copilot`/`claude` CLI (.devcontainer/devcontainer.json).
   execute:
+    needs: prepare
+    if: needs.prepare.outputs.claimed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    permissions: {}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: bundle-${{ inputs.run_id }}
+          path: _prepare/${{ inputs.run_id }}
+      - uses: devcontainers/ci@v0.3
+        with:
+          push: never
+          runCmd: bash scripts/run-phases.sh "${{ inputs.run_id }}" execute
+          env: |
+            COPILOT_GITHUB_TOKEN=${{ secrets.AGENT_HQ_COPILOT_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: execute-out-${{ inputs.run_id }}
+          path: _execute/${{ inputs.run_id }}
+          retention-days: 1
+
+  # Credentialed: parses execute-result.json; only on success does it
+  # fresh-clone, `git apply` the work patch, and land/push/PR (Task 12) --
+  # execute never holds a push credential.
+  collect:
+    needs: [prepare, execute]
+    if: always() && needs.prepare.outputs.claimed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     concurrency:
       group: agent-hq-state
       cancel-in-progress: false
@@ -26,15 +94,20 @@ jobs:
       pull-requests: write
       issues: write
       actions: write
+    env:
+      AGENT_HQ_TOKEN: ${{ secrets.AGENT_HQ_TOKEN }}
+      AGENT_HQ_ENGINE_REPO: ${{ github.repository }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: devcontainers/ci@v0.3
+      - uses: ./.github/actions/setup
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
-          push: never
-          runCmd: bash scripts/run-phases.sh "${{ inputs.run_id }}"
-          env: |
-            AGENT_HQ_TOKEN=${{ secrets.AGENT_HQ_TOKEN }}
-            COPILOT_GITHUB_TOKEN=${{ secrets.AGENT_HQ_COPILOT_TOKEN }}
-            AGENT_HQ_ENGINE_REPO=${{ github.repository }}
+          name: execute-out-${{ inputs.run_id }}
+          path: _execute/${{ inputs.run_id }}
+      - name: Collect (failure/timeout stops here; success applies + lands + pushes)
+        run: >
+          bash scripts/run-phases.sh "${{ inputs.run_id }}" collect
+          "${{ needs.execute.result == 'success' && '0' || '1' }}"

@@ -4,7 +4,8 @@ Copilot seat instead of a direct Anthropic API key.
 
 Settings: `{"workdir": "<parent dir for clones>", "copilot_bin": "copilot",
 "model": "claude-sonnet-4.5"}`. Subclasses `ClaudeCodeHeadless` to inherit all
-git/PR plumbing (`prepare_worktree`, `build_pr_branch`, `collect_outputs`,
+git/PR plumbing (`prepare_worktree`, `collect_outputs`,
+`materialize_work_patch`, `apply_patch`, `land_branch`,
 `open_draft_pr`/`mark_pr_ready`/`request_reviewers`, `_git`,
 `_commit_if_dirty`) unchanged; only `run`, `_child_env`, and `healthcheck`
 differ from the parent.
@@ -110,13 +111,19 @@ class CopilotCli(ClaudeCodeHeadless):
             outcome = "timeout"
 
         # ponytail: premium-request billing; USD caps don't bind -- see docs.
+        # Task 12 normalization: no `session_id` (not part of the
+        # transported contract) and `timeout` maps to `failure` + `detail`
+        # (schemas/execute-result.schema.json only knows success/failure;
+        # collect already treats them identically for failure/retry
+        # accounting, so this is a schema fix, not a behavior change).
         result = {
-            "outcome": outcome,
+            "outcome": "failure" if outcome == "timeout" else outcome,
             "cost_usd": 0.0,
             "tokens": None,
             "usage_known": True,
-            "session_id": None,
         }
+        if outcome == "timeout":
+            result["detail"] = "execution timed out before the deadline"
         result_path = worktree / ".agent-hq" / "execute-result.json"
         result_path.parent.mkdir(parents=True, exist_ok=True)
         result_path.write_text(json.dumps(result, indent=2) + "\n")
