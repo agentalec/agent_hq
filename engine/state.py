@@ -13,10 +13,17 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import subprocess
+import time
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+# Bounded replay: fetch -> reset --hard -> re-run fn, only on a *confirmed*
+# non-fast-forward push rejection (see `_push_rejected`). Auth/network/server
+# errors are not CAS contention and fail on the first attempt.
+_MAX_WRITE_ATTEMPTS = 5
 
 
 def _now_iso() -> str:
@@ -26,6 +33,25 @@ def _now_iso() -> str:
 def _add_minutes(iso: str, minutes: float) -> str:
     dt = datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
     return (dt + timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _retry_backoff_seconds(attempt: int) -> float:
+    # ponytail: small jittered linear backoff; replays are local (same
+    # remote, orphan branch) so sub-second delay is plenty.
+    return random.uniform(0.02, 0.1) * attempt
+
+
+def _push_rejected(porcelain_stdout: str) -> bool:
+    """True only for a confirmed non-fast-forward rejection: a `!`-flagged
+    line in `git push --porcelain` output whose summary contains `[rejected`.
+    Parsed from the machine-readable porcelain format, not human-readable
+    stderr, so auth/network/server failures are never mistaken for CAS
+    contention (they must fail fast instead of being replayed)."""
+    for line in porcelain_stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 3 and parts[0] == "!" and "[rejected" in parts[2]:
+            return True
+    return False
 
 
 class Txn:
@@ -41,9 +67,11 @@ class Txn:
         self._tickets: dict[str, dict] = {}
         self._new_events: dict[str, list[dict]] = {}
         self._health: dict | None = None
+        self._artifacts: dict[tuple[str, str], dict[str, str]] = {}
         self.dirty_tickets: set[str] = set()
         self.dirty_events: set[str] = set()
         self.dirty_health = False
+        self.dirty_artifacts: set[str] = set()
 
     def _ticket(self, ticket_id: str) -> dict:
         if ticket_id not in self._tickets:
@@ -98,6 +126,32 @@ class Txn:
         self._health[f"{port}/{adapter}"] = {"ok": ok, "detail": detail, "ts": _now_iso()}
         self.dirty_health = True
 
+    def write_artifact(self, ticket_id: str, run_id: str, rel_path: str, content: str) -> None:
+        """Stage a ledger-artifact file under tickets/<id>/artifacts/<run_id>/,
+        namespaced by the PRODUCING run so a later sibling handoff's child can
+        never overwrite a shared path. Flushed and committed by `write()`
+        alongside any ticket/event changes in the same transaction -- never a
+        work-repo commit."""
+        self._artifacts.setdefault((ticket_id, run_id), {})[rel_path] = content
+        self.dirty_artifacts.add(ticket_id)
+
+    def set_pending_handoffs(self, ticket_id: str, run_id: str, handoffs: list[dict]) -> None:
+        """Store a gated source run's proposed handoffs pending gate approval."""
+        self.update_run(ticket_id, run_id, pending_handoffs=handoffs)
+
+    def set_block(
+        self, ticket_id: str, *, reason: str, source: str, interrupted_run: str | None = None
+    ) -> None:
+        """Flip a ticket to BLOCKED and record the lifecycle-block fields
+        (schemas/state.schema.json block_reason/block_source/interrupted_run_id)."""
+        self.set_ticket(
+            ticket_id,
+            status="BLOCKED",
+            block_reason=reason,
+            block_source=source,
+            interrupted_run_id=interrupted_run,
+        )
+
 
 class GitJsonStateStore:
     def __init__(self, worktree_path: str | Path):
@@ -125,7 +179,7 @@ class GitJsonStateStore:
         return []
 
     def _push(self) -> subprocess.CompletedProcess:
-        cmd = ["git", "-C", str(self.worktree_path), *self._cred_args(), "push"]
+        cmd = ["git", "-C", str(self.worktree_path), *self._cred_args(), "push", "--porcelain"]
         return subprocess.run(cmd, capture_output=True, text=True)
 
     def _current_branch(self) -> str:
@@ -139,6 +193,15 @@ class GitJsonStateStore:
 
     def _health_path(self) -> Path:
         return self.worktree_path / "health" / "latest.json"
+
+    def artifacts_dir(self, ticket_id: str, run_id: str) -> Path:
+        return self.worktree_path / "tickets" / ticket_id / "artifacts" / run_id
+
+    def read_artifact(self, ticket_id: str, run_id: str, rel_path: str) -> str | None:
+        path = self.artifacts_dir(ticket_id, run_id) / rel_path
+        if not path.exists():
+            return None
+        return path.read_text()
 
     def healthcheck(self) -> bool:
         return self.worktree_path.exists() and bool(self._git("remote").strip())
@@ -183,22 +246,32 @@ class GitJsonStateStore:
             with path.open("a") as f:
                 for event in txn._new_events[ticket_id]:
                     f.write(json.dumps(event) + "\n")
+        for (ticket_id, run_id), files in txn._artifacts.items():
+            base = self.artifacts_dir(ticket_id, run_id)
+            for rel_path, content in files.items():
+                path = base / rel_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content)
         if txn.dirty_health:
             path = self._health_path()
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(txn._health, indent=2) + "\n")
 
     def _commit_message(self, txn: Txn) -> str:
-        ids = sorted(txn.dirty_tickets | txn.dirty_events)
+        ids = sorted(txn.dirty_tickets | txn.dirty_events | txn.dirty_artifacts)
         if ids:
             return "state: " + ", ".join(ids)
         return "state: health update"
 
     def write(self, fn: Callable[[Txn], None]) -> None:
-        for attempt in (1, 2):
+        # ponytail: Actions concurrency group serializes writers (D5); this
+        # replay is a safety net, not the primary concurrency control.
+        for attempt in range(1, _MAX_WRITE_ATTEMPTS + 1):
             txn = Txn(self)
             fn(txn)
-            if not (txn.dirty_tickets or txn.dirty_events or txn.dirty_health):
+            if not (
+                txn.dirty_tickets or txn.dirty_events or txn.dirty_health or txn.dirty_artifacts
+            ):
                 return
             self._flush(txn)
             self._git("add", "-A")
@@ -206,9 +279,13 @@ class GitJsonStateStore:
             result = self._push()
             if result.returncode == 0:
                 return
-            if attempt == 2:
-                raise RuntimeError(f"state push rejected twice: {result.stderr}")
-            # ponytail: Actions concurrency group serializes writers; this retry is a safety net only
+            if not _push_rejected(result.stdout):
+                raise RuntimeError(f"state push failed: {result.stderr}")
+            if attempt == _MAX_WRITE_ATTEMPTS:
+                raise RuntimeError(
+                    f"state push rejected after {_MAX_WRITE_ATTEMPTS} attempts: {result.stderr}"
+                )
+            time.sleep(_retry_backoff_seconds(attempt))
             branch = self._current_branch()
             self._git("fetch", "origin", branch)
             self._git("reset", "--hard", f"origin/{branch}")

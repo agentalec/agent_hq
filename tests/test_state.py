@@ -176,9 +176,128 @@ def test_racing_claims_only_one_wins(tmp_path):
     # B claims first (wins the race); A's local view is now stale
     assert store_b.claim_run("ticket-1", "run-1", "2026-07-18T00:00:00Z", 30) is True
 
+    check_before = _clone_worktree(tmp_path, origin, "check_before")
+    log_before = _git("log", "--oneline", BRANCH, cwd=check_before).strip().splitlines()
+
     # A's first attempt sees stale QUEUED, push is rejected, retry sees RUNNING
+    # and declines -- a declined mutation after replay must commit nothing.
     assert store_a.claim_run("ticket-1", "run-1", "2026-07-18T00:01:00Z", 30) is False
+
+    check_after = _clone_worktree(tmp_path, origin, "check_after")
+    log_after = _git("log", "--oneline", BRANCH, cwd=check_after).strip().splitlines()
+    assert log_after == log_before  # no phantom commit landed on origin
 
     check = _clone_worktree(tmp_path, origin, "check")
     run = json.loads((check / "tickets" / "ticket-1" / "state.json").read_text())["runs"][0]
     assert run["attempt_started_at"] == "2026-07-18T00:00:00Z"  # B's claim stands
+
+
+def test_artifact_round_trip(tmp_path):
+    origin = _make_origin(tmp_path)
+    worktree = _clone_worktree(tmp_path, origin, "wt1")
+    store = GitJsonStateStore(worktree)
+
+    store.write(
+        lambda txn: txn.write_artifact("ticket-1", "run-1", "specs/ticket-1/spec.md", "hello")
+    )
+
+    assert store.artifacts_dir("ticket-1", "run-1") == (
+        worktree / "tickets" / "ticket-1" / "artifacts" / "run-1"
+    )
+    assert store.read_artifact("ticket-1", "run-1", "specs/ticket-1/spec.md") == "hello"
+    assert store.read_artifact("ticket-1", "run-1", "missing.md") is None
+
+    # pushed to origin, not just written locally
+    check = _clone_worktree(tmp_path, origin, "check")
+    path = check / "tickets" / "ticket-1" / "artifacts" / "run-1" / "specs" / "ticket-1" / "spec.md"
+    assert path.read_text() == "hello"
+
+
+def test_pending_handoffs_and_block_persist(tmp_path):
+    origin = _make_origin(tmp_path)
+    worktree = _clone_worktree(tmp_path, origin, "wt1")
+    store = GitJsonStateStore(worktree)
+
+    def setup(txn: Txn) -> None:
+        txn.set_ticket("ticket-1", status="ACTIVE", pinned_comment_id=None)
+        txn.put_run("ticket-1", dict(RUN))
+
+    store.write(setup)
+
+    handoff = {"key": "impl", "target_task": "implement", "reason": "ready", "source_run_id": "run-1"}
+    store.write(lambda txn: txn.set_pending_handoffs("ticket-1", "run-1", [handoff]))
+
+    state = store.read_state("ticket-1")
+    assert state["runs"][0]["pending_handoffs"] == [handoff]
+
+    store.write(
+        lambda txn: txn.set_block(
+            "ticket-1", reason="issue closed", source="issue_closed", interrupted_run="run-1"
+        )
+    )
+
+    state = store.read_state("ticket-1")
+    assert state["status"] == "BLOCKED"
+    assert state["block_reason"] == "issue closed"
+    assert state["block_source"] == "issue_closed"
+    assert state["interrupted_run_id"] == "run-1"
+
+
+def test_rejected_push_replay_converges_within_bounded_attempts(tmp_path, monkeypatch):
+    origin = _make_origin(tmp_path)
+    worktree = _clone_worktree(tmp_path, origin, "wt1")
+    store = GitJsonStateStore(worktree)
+
+    real_push = store._push
+    calls = {"n": 0}
+    rejected = subprocess.CompletedProcess(
+        args=["git", "push", "--porcelain"],
+        returncode=1,
+        stdout=(
+            "To origin\n"
+            "!\trefs/heads/agent-hq-state:refs/heads/agent-hq-state\t"
+            "[rejected] (non-fast-forward)\n"
+            "Done\n"
+        ),
+        stderr="",
+    )
+
+    def flaky_push():
+        calls["n"] += 1
+        if calls["n"] < 3:
+            return rejected
+        return real_push()
+
+    monkeypatch.setattr(store, "_push", flaky_push)
+
+    store.write(lambda txn: txn.set_ticket("ticket-1", status="ACTIVE", pinned_comment_id=None))
+
+    assert calls["n"] == 3  # two simulated rejections, converges on the third
+    check = _clone_worktree(tmp_path, origin, "check")
+    assert (check / "tickets" / "ticket-1" / "state.json").exists()
+
+
+def test_push_failure_that_is_not_a_rejection_fails_fast(tmp_path, monkeypatch):
+    """Auth/network/server errors are not CAS contention -- fail immediately,
+    no fetch/reset/replay."""
+    origin = _make_origin(tmp_path)
+    worktree = _clone_worktree(tmp_path, origin, "wt1")
+    store = GitJsonStateStore(worktree)
+
+    calls = {"n": 0}
+
+    def failing_push():
+        calls["n"] += 1
+        return subprocess.CompletedProcess(
+            args=["git", "push", "--porcelain"],
+            returncode=128,
+            stdout="",
+            stderr="fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+        )
+
+    monkeypatch.setattr(store, "_push", failing_push)
+
+    with pytest.raises(RuntimeError):
+        store.write(lambda txn: txn.set_ticket("ticket-1", status="ACTIVE", pinned_comment_id=None))
+
+    assert calls["n"] == 1
