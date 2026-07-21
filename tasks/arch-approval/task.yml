@@ -9,9 +9,10 @@ gates:
       timeout_working_hours: 48
 outputs:
   artifacts: []
-on_success:
-  enqueue:
-    - task: breakdown
+handoff:
+  allowed:
+    - breakdown
+  max: 1
 budget:
   max_cost_usd: 0.5
   max_runtime_min: 5

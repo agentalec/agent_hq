@@ -338,6 +338,15 @@ def test_post_closing_summary_second_call_short_circuits_via_local_cache(monkeyp
     assert len(fake.calls) == 2  # second call never hits the network
 
 
+def test_close_issue_patches_state_closed(monkeypatch):
+    fake = _install(monkeypatch, [FakeResponse(200, {"number": 123, "state": "closed"})])
+    tracker = GithubIssuesTracker({"repo": "o/r"})
+    tracker.close_issue("123")
+    assert fake.calls[0]["method"] == "PATCH"
+    assert fake.calls[0]["url"].endswith("/repos/o/r/issues/123")
+    assert fake.calls[0]["json"] == {"state": "closed"}
+
+
 def test_healthcheck_true_on_success(monkeypatch):
     _install(monkeypatch, [FakeResponse(200, {"rate": {}})])
     tracker = GithubIssuesTracker({"repo": "o/r"})

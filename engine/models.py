@@ -54,6 +54,12 @@ class TicketStatus(str, Enum):
 class GateDecision:
     status: GateStatus
     comments: str
+    # Audit metadata a comment-based gate (github_issue_comment_gate) attaches
+    # to its decision; unused (None) by a PR-review-style gate. The adapter
+    # only reports this -- the engine appends the deduped audit event.
+    comment_id: str | int | None = None
+    actor: str | None = None
+    decided_at: str | None = None
 
 
 @dataclass
@@ -223,4 +229,15 @@ def compute_run_id(parent_or_source: str, enqueue_index: int, task_id: str, atte
     string component cannot collide with the component boundary.
     """
     joined = repr((parent_or_source, enqueue_index, task_id, attempt))
+    return hashlib.sha1(joined.encode("utf-8")).hexdigest()[:16]
+
+
+def compute_handoff_run_id(source_run_id: str, handoff_key: str, attempt: int) -> str:
+    """Deterministic run id for a handoff-spawned run: (source_run_id,
+    handoff_key, attempt) only -- task_id is deliberately NOT part of it, so
+    a re-delivered key with a different target still yields the SAME run id
+    (the first accepted run wins; the mutation is a no-op). Retries of the
+    same handoff reuse `handoff_key` at a higher `attempt`.
+    """
+    joined = repr((source_run_id, handoff_key, attempt))
     return hashlib.sha1(joined.encode("utf-8")).hexdigest()[:16]

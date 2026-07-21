@@ -118,6 +118,13 @@ class GithubIssuesTracker:
         )
         self._applied_events.add(event_id)
 
+    def close_issue(self, ticket_id: str) -> None:
+        # No marker/cache needed (unlike the comment-posting methods above):
+        # PATCHing state=closed on an already-closed issue is naturally
+        # idempotent at the GitHub API, same as set_status_labels.
+        repo = self._require_repo()
+        self._client.patch(f"/repos/{repo}/issues/{ticket_id}", json={"state": "closed"})
+
     def healthcheck(self) -> bool:
         try:
             self._client.get("/rate_limit")

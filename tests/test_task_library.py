@@ -1,5 +1,9 @@
-"""P0 task library (Task 14): schema/library validity, the exact P0 enqueue
-chain, gate-adapter resolvability, and no-concrete-adapter-name discipline."""
+"""Task library: schema/library validity, handoff-target resolution,
+gate-adapter resolvability, and no-concrete-adapter-name discipline. The
+static P0_CHAIN (on_success/on_failure) is gone with the atomic handoff
+cutover (Task 9) -- every enqueue is a validated handoff, so this file
+asserts the generic properties every task must hold, not one fixed chain.
+"""
 
 from __future__ import annotations
 
@@ -17,73 +21,62 @@ SCHEMAS_DIR = REPO_ROOT / "schemas"
 TASKS_DIR = REPO_ROOT / "tasks"
 CONFIG_DIR = REPO_ROOT / "config"
 
-P0_CHAIN = {
-    "intake": [{"task": "spec"}],
-    "spec": [{"task": "arch-plan"}],
-    "arch-plan": [
-        {
-            "task": "arch-approval",
-            "when": {"field": "plan.classification", "op": "eq", "value": "beyond-crud"},
-        },
-        {
-            "task": "breakdown",
-            "when": {"field": "plan.classification", "op": "ne", "value": "beyond-crud"},
-        },
-    ],
-    "arch-approval": [{"task": "breakdown"}],
-    "breakdown": [{"task": "implement"}],
-    "implement": [{"task": "review"}],
-    "review": [{"task": "finalize"}],
-    "finalize": [],
+# Every wired task and its P1 (defined-but-unwired) siblings; no `intake` --
+# intake is engine entry logic (config.projects["intake"]/["initial_task"]),
+# not a task definition.
+EXPECTED_TASK_IDS = {
+    "spec", "arch-plan", "arch-approval", "breakdown", "implement", "review",
+    "finalize", "clinical", "poll", "qa", "docs",
 }
 
-# P1 task definitions exist in tasks/ but aren't wired into the P0 chain
-# above (see the activation comment at the top of each task.yml). This is
-# their own internal on_success/on_failure wiring, checked independently of
-# P0_CHAIN so a P1 activation edit can't silently go unnoticed.
-P1_ON_SUCCESS = {
-    "clinical": [{"task": "arch-plan"}],
-    "poll": [],
-    "qa": [{"task": "docs"}],
-    "docs": [{"task": "finalize"}],
-}
-P1_ON_FAILURE = {
-    "qa": [{"task": "implement"}],
+# The wired handoff graph a fresh P0 ticket walks (breakdown's fan-out is
+# capacity, not a fixed edge -- it emits 1..handoff.max `implement` handoffs
+# depending on how many repos a ticket touches).
+EXPECTED_HANDOFF_ALLOWED = {
+    "spec": (["arch-plan"], 1),
+    "arch-plan": (["arch-approval", "breakdown"], 1),
+    "arch-approval": (["breakdown"], 1),
+    "breakdown": (["implement"], 2),
+    "implement": (["review"], 1),
+    "review": (["finalize"], 1),
+    "finalize": ([], 0),
+    "clinical": (["arch-plan"], 1),
+    "poll": ([], 0),
+    "qa": (["docs"], 1),
+    "docs": (["finalize"], 1),
 }
 
-CONCRETE_ADAPTER_NAMES = ("github-issues", "github-comment", "pr-review", "claude-code-headless")
+CONCRETE_ADAPTER_NAMES = (
+    "github-issues", "github-comment", "pr-review", "github-issue-comment",
+    "claude-code-headless", "copilot-cli",
+)
 
 
 def test_task_library_loads_and_validates_clean():
     taskdefs = load_all(TASKS_DIR, SCHEMAS_DIR)
-    assert set(taskdefs) == set(P0_CHAIN) | set(P1_ON_SUCCESS)
+    assert set(taskdefs) == EXPECTED_TASK_IDS
     assert validate_library(taskdefs) == []
 
 
-def test_enqueue_graph_is_exactly_the_p0_chain():
-    """P0 tasks' on_success targets are unchanged by the P1 additions --
-    none of them enqueue into clinical/poll/qa/docs yet."""
+def test_handoff_targets_resolve_within_the_library():
+    """Every handoff.allowed target of every task resolves to a loaded task
+    id (validate_library's own check), and the P0 graph's specific
+    allowed-set/max matches the plan -- most tellingly breakdown's
+    handoff.max: 2, the pilot's two-repo fan-out point."""
     taskdefs = load_all(TASKS_DIR, SCHEMAS_DIR)
-    for task_id, expected in P0_CHAIN.items():
-        actual = taskdefs[task_id].get("on_success", {}).get("enqueue", [])
-        assert actual == expected, f"{task_id}: on_success.enqueue mismatch"
-
-
-def test_p1_task_definitions_have_their_own_internal_wiring():
-    taskdefs = load_all(TASKS_DIR, SCHEMAS_DIR)
-    for task_id, expected in P1_ON_SUCCESS.items():
-        actual = taskdefs[task_id].get("on_success", {}).get("enqueue", [])
-        assert actual == expected, f"{task_id}: on_success.enqueue mismatch"
-    for task_id, expected in P1_ON_FAILURE.items():
-        actual = taskdefs[task_id].get("on_failure", {}).get("enqueue", [])
-        assert actual == expected, f"{task_id}: on_failure.enqueue mismatch"
+    for task_id, (allowed, max_handoffs) in EXPECTED_HANDOFF_ALLOWED.items():
+        handoff = taskdefs[task_id].get("handoff", {})
+        assert handoff.get("allowed", []) == allowed, f"{task_id}: handoff.allowed mismatch"
+        assert handoff.get("max", 0) == max_handoffs, f"{task_id}: handoff.max mismatch"
+        for target in allowed:
+            assert target in taskdefs, f"{task_id}: handoff target '{target}' not in library"
 
 
 def test_gate_tasks_resolve_to_constructible_adapters():
     config = load_config(CONFIG_DIR, SCHEMAS_DIR)
     taskdefs = load_all(TASKS_DIR, SCHEMAS_DIR)
     gate_tasks = [t for t in taskdefs.values() if t.get("gates", {}).get("post")]
-    assert gate_tasks, "expected at least one gate task in the P0 library"
+    assert gate_tasks, "expected at least one gate task in the library"
     for taskdef in gate_tasks:
         for gate in taskdef["gates"]["post"]:
             adapter_name = resolve_binding(config, "gate", gate["adapter"], [])
@@ -91,11 +84,23 @@ def test_gate_tasks_resolve_to_constructible_adapters():
             assert adapter is not None
 
 
+def test_default_and_spec_approval_gate_bindings_use_the_issue_comment_gate():
+    """The atomic cutover repoints the default/spec-approval gate bindings
+    off pr-review onto the authorized issue-comment gate (docs/ports/gate.md)."""
+    config = load_config(CONFIG_DIR, SCHEMAS_DIR)
+    assert resolve_binding(config, "gate", "default", []) == "github-issue-comment"
+    assert resolve_binding(config, "gate", "spec-approval", []) == "github-issue-comment"
+
+
 def test_no_concrete_adapter_name_leaks_into_task_defs():
     for task_yml in TASKS_DIR.glob("*/task.yml"):
         text = task_yml.read_text()
         for name in CONCRETE_ADAPTER_NAMES:
             assert name not in text, f"{task_yml}: concrete adapter name '{name}' found"
+
+
+def test_no_intake_task_directory():
+    assert not (TASKS_DIR / "intake").exists()
 
 
 def test_cli_tasks_validate_exits_zero():

@@ -139,6 +139,38 @@ class Txn:
         """Store a gated source run's proposed handoffs pending gate approval."""
         self.update_run(ticket_id, run_id, pending_handoffs=handoffs)
 
+    def has_artifact(self, ticket_id: str, run_id: str, rel_path: str) -> bool:
+        """True if `rel_path` was staged in THIS transaction or already
+        persisted for (ticket_id, run_id) -- the state-dependent "ledger
+        entry exists" guard `apply_handoffs` enforces before appending a
+        child run that depends on it."""
+        staged = self._artifacts.get((ticket_id, run_id), {})
+        if rel_path in staged:
+            return True
+        return self._store.read_artifact(ticket_id, run_id, rel_path) is not None
+
+    def ticket_doc(self, ticket_id: str) -> dict:
+        """Current in-transaction view of the ticket doc (reflects any
+        mutation already applied earlier this attempt) -- for guards that
+        need to see runs appended earlier in the same transaction, e.g.
+        `apply_handoffs`'s loop/budget check."""
+        return self._ticket(ticket_id)
+
+    def upsert_work_repo(self, ticket_id: str, repo: str, **fields) -> None:
+        """Insert or update this ticket's `work_repos` entry for `repo`
+        (schemas/state.schema.json $defs/work_repo -- only `repo` required);
+        used whenever a task opens/updates a PR for a repo, so queue-empty
+        completion can find every repo's PR without walking run ancestry."""
+        ticket = self._ticket(ticket_id)
+        work_repos = ticket.setdefault("work_repos", [])
+        for wr in work_repos:
+            if wr["repo"] == repo:
+                wr.update(fields)
+                break
+        else:
+            work_repos.append({"repo": repo, **fields})
+        self.dirty_tickets.add(ticket_id)
+
     def set_block(
         self, ticket_id: str, *, reason: str, source: str, interrupted_run: str | None = None
     ) -> None:

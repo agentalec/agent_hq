@@ -2,9 +2,6 @@ id: build
 version: 1
 description: Implement the specification
 trigger: enqueue
-inputs:
-  artifacts:
-    - specs/{ticket}/spec.md
 opens_pr: true
 budget:
   max_cost_usd: 5
@@ -13,6 +10,7 @@ budget:
 outputs:
   artifacts:
     - impl/{ticket}.md
-on_success:
-  enqueue:
-    - task: finalize
+handoff:
+  allowed:
+    - finalize
+  max: 1

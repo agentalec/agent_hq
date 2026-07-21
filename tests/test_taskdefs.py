@@ -48,17 +48,13 @@ def test_prompt_inlines_task_instructions_context_and_required_outputs():
 
 
 def test_schema_violation_rejected_with_clear_error(tmp_path):
-    taskdef = _minimal_taskdef(
-        on_success={
-            "enqueue": [{"task": "other", "when": {"field": "x", "op": "nope", "value": 1}}]
-        }
-    )
+    taskdef = _minimal_taskdef(handoff={"allowed": ["other"], "max": -1})
     _write_task(tmp_path / "bad", taskdef)
 
     with pytest.raises(TaskDefError) as excinfo:
         load_task(tmp_path / "bad", SCHEMAS_DIR)
 
-    assert any("op" in e for e in excinfo.value.errors)
+    assert any("max" in e for e in excinfo.value.errors)
 
 
 def test_missing_skills_path_rejected(tmp_path):
@@ -80,26 +76,6 @@ def test_symbolic_context_refs_are_not_checked_for_existence(tmp_path):
     loaded = load_task(tmp_path / "ok", SCHEMAS_DIR)
 
     assert loaded["context"][0] == "capability-index@latest"
-
-
-def test_library_rejects_enqueue_target_not_in_library(tmp_path):
-    task_a = _minimal_taskdef("task-a", on_success={"enqueue": [{"task": "task-b"}]})
-    _write_task(tmp_path / "task-a", task_a)
-
-    taskdefs = load_all(tmp_path, SCHEMAS_DIR)
-    errors = validate_library(taskdefs)
-
-    assert any("task-b" in e for e in errors)
-
-
-def test_library_accepts_resolvable_enqueue_targets(tmp_path):
-    task_a = _minimal_taskdef("task-a", on_success={"enqueue": [{"task": "task-b"}]})
-    task_b = _minimal_taskdef("task-b")
-    _write_task(tmp_path / "task-a", task_a)
-    _write_task(tmp_path / "task-b", task_b)
-
-    taskdefs = load_all(tmp_path, SCHEMAS_DIR)
-    assert validate_library(taskdefs) == []
 
 
 def test_library_rejects_handoff_target_not_in_library(tmp_path):

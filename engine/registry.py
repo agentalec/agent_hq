@@ -16,6 +16,9 @@ _ADAPTERS: dict[tuple[str, str], str] = {
     ("tracker", "github-issues"): "engine.adapters.github_issues:GithubIssuesTracker",
     ("messaging", "github-comment"): "engine.adapters.github_comment:GithubCommentMessaging",
     ("gate", "pr-review"): "engine.adapters.pr_review:PrReviewGate",
+    ("gate", "github-issue-comment"): (
+        "engine.adapters.github_issue_comment_gate:GithubIssueCommentGate"
+    ),
     ("executor", "claude-code-headless"): (
         "engine.adapters.claude_code_headless:ClaudeCodeHeadless"
     ),

@@ -1,5 +1,5 @@
-# P1: activate by pointing tasks/spec/task.yml on_success at clinical
-# (spec still enqueues arch-plan directly until then). Uses the existing
+# P1: activate by pointing tasks/spec/task.yml handoff.allowed at clinical
+# (spec still hands off to arch-plan directly until then). Uses the existing
 # "default" gate adapter -- no new adapter needed.
 id: clinical
 version: 1
@@ -19,9 +19,10 @@ gates:
     - approvers: clinical-reviewers
       adapter: default
       timeout_working_hours: 48
-on_success:
-  enqueue:
-    - task: arch-plan
+handoff:
+  allowed:
+    - arch-plan
+  max: 1
 budget:
   max_cost_usd: 5
   max_runtime_min: 30

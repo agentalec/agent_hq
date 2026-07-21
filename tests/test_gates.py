@@ -1,6 +1,7 @@
 import pytest
 
-from engine.adapters import _github, pr_review
+from engine.adapters import _github, github_issue_comment_gate, pr_review
+from engine.adapters.github_issue_comment_gate import GithubIssueCommentGate
 from engine.adapters.pr_review import PrReviewGate, add_working_hours
 from engine.models import GateStatus
 
@@ -276,3 +277,164 @@ def test_add_working_hours_weekend_start_rolls_to_monday():
     deadline = add_working_hours("2026-07-18T06:30:00Z", 1, schedule)
     # rolls to Monday 09:00 IST, +1h = Monday 10:00 IST = 04:30:00Z
     assert deadline == "2026-07-20T04:30:00Z"
+
+
+# -- GithubIssueCommentGate ---------------------------------------------------
+
+
+def _issue_gate(**settings):
+    return GithubIssueCommentGate({"issue_repo": "engine-org/engine-repo", "approvers": APPROVERS, **settings})
+
+
+def _run(**over):
+    run = {
+        "ticket_id": "9",
+        "run_id": "run-abc123",
+        "gate_request_id": "555",
+        "gate_requested_at": "2026-07-16T09:00:00Z",
+        "approver_group": "product-owners",
+    }
+    run.update(over)
+    return run
+
+
+def test_issue_gate_request_creates_comment_with_marker_and_grammar(monkeypatch):
+    fake = _install(
+        monkeypatch,
+        [FakeResponse(200, []), FakeResponse(200, {"id": 42})],
+    )
+    gate = _issue_gate()
+    result = gate.request(
+        "product-owners",
+        {"ticket_id": "9", "run_id": "run-abc123", "task_id": "spec", "title": "Add backend endpoint"},
+    )
+    assert result.request_id == "42"
+    assert fake.calls[0]["method"] == "GET"
+    assert fake.calls[0]["url"].endswith("/repos/engine-org/engine-repo/issues/9/comments")
+    create_call = fake.calls[1]
+    assert create_call["method"] == "POST"
+    body = create_call["json"]["body"]
+    assert "<!--hq:gate:run-abc123-->" in body
+    assert "@example-alice" in body
+    assert "/agent-hq approve run-abc123" in body
+    assert "/agent-hq request-changes run-abc123 <reason>" in body
+    assert "/agent-hq reject run-abc123 <reason>" in body
+
+
+def test_issue_gate_request_reuses_existing_marker_comment(monkeypatch):
+    fake = _install(
+        monkeypatch,
+        [FakeResponse(200, [{"id": 7, "body": "<!--hq:gate:run-abc123-->\nalready asked"}])],
+    )
+    gate = _issue_gate()
+    result = gate.request(
+        "product-owners", {"ticket_id": "9", "run_id": "run-abc123", "task_id": "spec", "title": "t"}
+    )
+    assert result.request_id == "7"
+    assert len(fake.calls) == 1  # only the GET, no duplicate POST
+
+
+def test_issue_gate_status_approve_command_from_group_member(monkeypatch):
+    _install(
+        monkeypatch,
+        [FakeResponse(200, [
+            {"id": 1, "user": {"login": "example-alice"},
+             "body": "/agent-hq approve run-abc123", "created_at": "2026-07-16T10:00:00Z"},
+        ])],
+    )
+    decision = _issue_gate().status(_run())
+    assert decision.status == GateStatus.APPROVED
+    assert decision.comment_id == 1
+    assert decision.actor == "example-alice"
+    assert decision.decided_at == "2026-07-16T10:00:00Z"
+
+
+def test_issue_gate_status_request_changes_carries_reason(monkeypatch):
+    _install(
+        monkeypatch,
+        [FakeResponse(200, [
+            {"id": 2, "user": {"login": "example-alice"},
+             "body": "/agent-hq request-changes run-abc123 please fix the migration",
+             "created_at": "2026-07-16T10:00:00Z"},
+        ])],
+    )
+    decision = _issue_gate().status(_run())
+    assert decision.status == GateStatus.CHANGES_REQUESTED
+    assert decision.comments == "please fix the migration"
+
+
+def test_issue_gate_status_reject_command(monkeypatch):
+    _install(
+        monkeypatch,
+        [FakeResponse(200, [
+            {"id": 3, "user": {"login": "example-alice"},
+             "body": "/agent-hq reject run-abc123 not needed", "created_at": "2026-07-16T10:00:00Z"},
+        ])],
+    )
+    decision = _issue_gate().status(_run())
+    assert decision.status == GateStatus.REJECTED
+    assert decision.comments == "not needed"
+
+
+def test_issue_gate_status_ignores_non_member_commenter(monkeypatch):
+    _install(
+        monkeypatch,
+        [FakeResponse(200, [
+            {"id": 4, "user": {"login": "some-random-user"},
+             "body": "/agent-hq approve run-abc123", "created_at": "2026-07-16T10:00:00Z"},
+        ])],
+    )
+    decision = _issue_gate().status(_run())
+    assert decision.status == GateStatus.PENDING
+
+
+def test_issue_gate_status_ignores_comment_for_a_different_run(monkeypatch):
+    _install(
+        monkeypatch,
+        [FakeResponse(200, [
+            {"id": 5, "user": {"login": "example-alice"},
+             "body": "/agent-hq approve some-other-run", "created_at": "2026-07-16T10:00:00Z"},
+        ])],
+    )
+    decision = _issue_gate().status(_run())
+    assert decision.status == GateStatus.PENDING
+
+
+def test_issue_gate_status_latest_decision_wins(monkeypatch):
+    _install(
+        monkeypatch,
+        [FakeResponse(200, [
+            {"id": 6, "user": {"login": "example-alice"},
+             "body": "/agent-hq request-changes run-abc123 wait", "created_at": "2026-07-16T09:00:00Z"},
+            {"id": 7, "user": {"login": "example-alice"},
+             "body": "/agent-hq approve run-abc123", "created_at": "2026-07-16T10:00:00Z"},
+        ])],
+    )
+    decision = _issue_gate().status(_run())
+    assert decision.status == GateStatus.APPROVED
+    assert decision.comment_id == 7
+
+
+def test_issue_gate_status_pending_when_no_decision_and_not_expired(monkeypatch):
+    # Friday 2026-07-17 16:00 IST = 2026-07-17T10:30:00Z; +2 working hours
+    # (same fixture math as pr_review's equivalent test) expires Monday
+    # 2026-07-20 10:00 IST = 2026-07-20T04:30:00Z.
+    _install(monkeypatch, [FakeResponse(200, [])])
+    monkeypatch.setattr(github_issue_comment_gate, "_now_iso", lambda: "2026-07-20T04:00:00Z")
+    run = _run(gate_requested_at="2026-07-17T10:30:00Z", timeout_working_hours=2)
+    assert _issue_gate().status(run).status == GateStatus.PENDING
+
+
+def test_issue_gate_status_expires_after_timeout(monkeypatch):
+    _install(monkeypatch, [FakeResponse(200, [])])
+    monkeypatch.setattr(github_issue_comment_gate, "_now_iso", lambda: "2026-07-20T05:00:00Z")
+    run = _run(gate_requested_at="2026-07-17T10:30:00Z", timeout_working_hours=2)
+    assert _issue_gate().status(run).status == GateStatus.EXPIRED
+
+
+def test_issue_gate_healthcheck_true_and_false(monkeypatch):
+    _install(monkeypatch, [FakeResponse(200, {"rate": {}})])
+    assert _issue_gate().healthcheck() is True
+
+    _install(monkeypatch, [FakeResponse(500, text="boom")])
+    assert _issue_gate().healthcheck() is False

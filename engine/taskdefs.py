@@ -2,7 +2,7 @@
 
 Parses per-task task.yml files, schema-validates them, verifies that
 task-local skill/context references exist on disk, and cross-checks
-on_success/on_failure enqueue targets against the loaded task library.
+handoff.allowed targets against the loaded task library.
 """
 
 from __future__ import annotations
@@ -105,20 +105,12 @@ def validate_library(taskdefs: dict[str, dict]) -> list[str]:
 
     Ids are unique by construction (dict keys); this also flags a taskdef
     whose declared `id` doesn't match the key it's stored under. Every
-    on_success/on_failure enqueue target and every handoff.allowed target
-    must resolve to a loaded task id.
+    handoff.allowed target must resolve to a loaded task id.
     """
     errors: list[str] = []
     for task_id, taskdef in taskdefs.items():
         if taskdef.get("id") != task_id:
             errors.append(f"{task_id}: id: declared id '{taskdef.get('id')}' does not match")
-        for phase in ("on_success", "on_failure"):
-            for item in taskdef.get(phase, {}).get("enqueue", []):
-                target = item["task"]
-                if target not in taskdefs:
-                    errors.append(
-                        f"{task_id}: {phase}.enqueue: task '{target}' is not in the loaded library"
-                    )
         for target in taskdef.get("handoff", {}).get("allowed", []):
             if target not in taskdefs:
                 errors.append(

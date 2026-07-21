@@ -7,9 +7,10 @@ skills:
 opens_pr: true
 outputs:
   artifacts: []
-on_success:
-  enqueue:
-    - task: review
+handoff:
+  allowed:
+    - review
+  max: 1
 budget:
   max_cost_usd: 15
   max_runtime_min: 90

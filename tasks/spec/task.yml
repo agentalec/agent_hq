@@ -16,9 +16,10 @@ gates:
     - approvers: product-owners
       adapter: spec-approval
       timeout_working_hours: 48
-on_success:
-  enqueue:
-    - task: arch-plan
+handoff:
+  allowed:
+    - arch-plan
+  max: 1
 budget:
   max_cost_usd: 5
   max_runtime_min: 30

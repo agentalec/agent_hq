@@ -11,8 +11,7 @@ import os
 from collections.abc import Callable
 
 from engine.config import Config
-from engine.models import Event, RunState, TaskRun, compute_run_id
-from engine.predicates import PredicateError, evaluate
+from engine.models import Event, Handoff, RunState, TaskRun, compute_handoff_run_id, compute_run_id
 from engine.registry import build_adapter
 from engine.state import GitJsonStateStore, Txn, _add_minutes, _now_iso
 
@@ -30,6 +29,45 @@ ACTIVE_STATES = {"QUEUED", "RUNNING", "WAITING_GATE"}
 # States that make a ticket exclusive for dispatch: a QUEUED sibling merely
 # waits its turn and must not block dispatching the run under evaluation.
 EXCLUSIVE_STATES = {"RUNNING", "WAITING_GATE"}
+
+
+def _put_queued_run(txn: Txn, run_id: str, *, ticket_id: str, task_id: str, task_version: int,
+                    bindings: dict[str, str], **fields) -> bool:
+    """Insert a QUEUED run (idempotent by run_id) plus its run.queued event.
+    Returns True if newly inserted, False if it already existed (no-op) --
+    shared by every run-creation path (`enqueue`, `apply_handoffs`,
+    `reenqueue_same`'s handoff branch) so identity/idempotency is enforced
+    in exactly one place."""
+    if txn.get_run(ticket_id, run_id) is not None:
+        return False
+    run = TaskRun(
+        run_id=run_id,
+        task_id=task_id,
+        task_version=task_version,
+        ticket_id=ticket_id,
+        state=RunState.QUEUED,
+        bindings=bindings,
+        cost_usd=None,
+        tokens=None,
+        usage_known=False,
+        artifacts=[],
+        **fields,
+    )
+    txn.put_run(ticket_id, run.to_dict())
+    txn.append_event(
+        ticket_id,
+        Event(
+            event_id=f"{run_id}:queued",
+            kind="run.queued",
+            ticket_id=ticket_id,
+            run_id=run_id,
+            task_id=task_id,
+            task_version=task_version,
+            state=RunState.QUEUED,
+            bindings=bindings,
+        ).to_dict(),
+    )
+    return True
 
 
 def enqueue(
@@ -50,7 +88,8 @@ def enqueue(
     run_id is derived from the causal parent (a parent run's run_id, or a
     source event key for a root enqueue) plus enqueue_index/task_id/attempt,
     so a duplicate call with the same inputs is a no-op rather than a second
-    run record.
+    run record. Used for the intake root run only -- a handoff-spawned run
+    uses `compute_handoff_run_id` via `apply_handoffs`/`reenqueue_same`.
     """
     parent_or_source = parent_run["run_id"] if parent_run is not None else source_event_id
     if parent_or_source is None:
@@ -58,38 +97,11 @@ def enqueue(
     run_id = compute_run_id(parent_or_source, enqueue_index, task_id, attempt)
 
     def fn(txn: Txn) -> None:
-        if txn.get_run(ticket_id, run_id) is not None:
-            return
-        run = TaskRun(
-            run_id=run_id,
-            task_id=task_id,
-            task_version=task_version,
-            ticket_id=ticket_id,
-            state=RunState.QUEUED,
-            attempt=attempt,
-            bindings=bindings,
-            cost_usd=None,
-            tokens=None,
-            usage_known=False,
-            artifacts=[],
-            chain_depth=chain_depth,
+        _put_queued_run(
+            txn, run_id, ticket_id=ticket_id, task_id=task_id, task_version=task_version,
+            bindings=bindings, attempt=attempt, chain_depth=chain_depth,
             parent_run_id=parent_run["run_id"] if parent_run is not None else None,
-            source_event_id=source_event_id,
-            enqueue_index=enqueue_index,
-        )
-        txn.put_run(ticket_id, run.to_dict())
-        txn.append_event(
-            ticket_id,
-            Event(
-                event_id=f"{run_id}:queued",
-                kind="run.queued",
-                ticket_id=ticket_id,
-                run_id=run_id,
-                task_id=task_id,
-                task_version=task_version,
-                state=RunState.QUEUED,
-                bindings=bindings,
-            ).to_dict(),
+            source_event_id=source_event_id, enqueue_index=enqueue_index,
         )
 
     store.write(fn)
@@ -194,14 +206,17 @@ AdapterFn = Callable[..., object]
 
 
 def build_port_adapter(config: Config, port: str, adapter_name: str, repo: str | None = None):
-    """Assemble a port's settings from components.yml (+ approvers for gate,
-    + the resolved repo) and construct the adapter via the registry."""
+    """Assemble a port's settings from components.yml (+ approvers/issue_repo
+    for gate, + the resolved repo) and construct the adapter via the
+    registry. `issue_repo` is always the engine repo, for the issue-comment
+    gate; `pr-review` simply ignores the extra key."""
     comp = config.components.get(port, {}) if isinstance(config.components, dict) else {}
     settings = dict(comp.get("settings", {}))
     if repo:
         settings["repo"] = repo
     if port == "gate":
         settings["approvers"] = config.approvers
+        settings["issue_repo"] = intake_repo(config)
     return build_adapter(port, adapter_name, settings)
 
 
@@ -265,9 +280,27 @@ def _block_ticket(store, ticket_id, run_id, reason: str) -> None:
 
 
 def reenqueue_same(store, run: dict, taskdef: dict, attempt: int) -> str:
-    """Re-enqueue the same task at a new attempt, preserving causal linkage
-    (parent_run_id / source_event_id / enqueue_index) so the retry chains off
-    the same base as the original run."""
+    """Re-enqueue the same task at a new attempt.
+
+    A handoff-spawned run (has `handoff_key`) retries via
+    `compute_handoff_run_id`, preserving `handoff_key`/`repo`/
+    `input_artifacts` -- a retry must run against the same repo with the
+    same inputs. Anything else (the intake root run) retries via the
+    original causal (`source_event_id`/`enqueue_index`) identity.
+    """
+    if run.get("handoff_key"):
+        run_id = compute_handoff_run_id(run["parent_run_id"], run["handoff_key"], attempt)
+        store.write(
+            lambda txn: _put_queued_run(
+                txn, run_id, ticket_id=run["ticket_id"], task_id=run["task_id"],
+                task_version=taskdef["version"], bindings=run.get("bindings", {}),
+                attempt=attempt, chain_depth=run["chain_depth"],
+                parent_run_id=run.get("parent_run_id"), handoff_key=run["handoff_key"],
+                repo=run.get("repo"), input_artifacts=list(run.get("input_artifacts") or []),
+            )
+        )
+        return run_id
+
     parent = {"run_id": run["parent_run_id"]} if run.get("parent_run_id") else None
     return enqueue(
         store,
@@ -283,32 +316,59 @@ def reenqueue_same(store, run: dict, taskdef: dict, attempt: int) -> str:
     )
 
 
-def enqueue_targets(
-    store, taskdefs, run: dict, taskdef: dict, phase: str, values: dict, chain_depth: int
-) -> bool:
-    """Enqueue a task's on_success/on_failure targets (predicate-filtered),
-    each attempt 0, parent=this run. Returns whether anything was enqueued."""
-    items = taskdef.get(phase, {}).get("enqueue", [])
-    parent = {"run_id": run["run_id"]}
-    enqueued = False
-    for index, item in enumerate(items):
-        pred = item.get("when")
-        if pred and not evaluate(pred, values):
-            continue
-        target = taskdefs[item["task"]]
-        enqueue(
-            store,
-            ticket_id=run["ticket_id"],
-            parent_run=parent,
-            enqueue_index=index,
-            task_id=target["id"],
-            task_version=target["version"],
-            attempt=0,
-            bindings=run.get("bindings", {}),
-            chain_depth=chain_depth,
+def apply_handoffs(
+    txn: Txn, config: Config, taskdefs: dict, ticket_id: str, source_run: dict,
+    accepted: list[Handoff], attempt: int = 0,
+) -> tuple[list[str], str | None]:
+    """Enforce the state-dependent guards the pure validator
+    (`engine.handoff.validate_handoffs`) can't see -- each artifact's ledger
+    entry actually exists, and loop/budget/depth still hold -- then append
+    `accepted` as QUEUED runs in emitted order, idempotent by derived id
+    (`compute_handoff_run_id`). Any guard failure rejects the WHOLE set
+    (nothing is appended), the same all-or-nothing contract as
+    `validate_handoffs`. Must run inside the caller's own `store.write`
+    transaction alongside the source run's own terminal-state update, so a
+    crash between "succeeded" and "children queued" cannot happen.
+    """
+    for h in accepted:
+        for rel_path in h.artifacts or []:
+            if not txn.has_artifact(ticket_id, source_run["run_id"], rel_path):
+                return [], f"artifact '{rel_path}' missing from {source_run['run_id']}'s ledger"
+
+    ticket_doc = txn.ticket_doc(ticket_id)
+    loop_cfg = config.budgets["loop_guard"]
+    ok, _trace = check_loop_guard(ticket_doc, loop_cfg["max_runs"], loop_cfg["max_depth"])
+    if not ok:
+        return [], "loop guard would trip applying this handoff set"
+    for h in accepted:
+        budget = taskdefs[h.target_task]["budget"]
+        verdict = check_budget(ticket_doc, budget, config.budgets["ticket_cap_usd"])
+        if verdict["over_ticket_cap"] or verdict["insufficient_headroom"]:
+            return [], f"ticket budget exhausted for handoff target '{h.target_task}'"
+
+    applied: list[str] = []
+    for h in accepted:
+        target = taskdefs[h.target_task]
+        run_id = compute_handoff_run_id(source_run["run_id"], h.key, attempt)
+        _put_queued_run(
+            txn, run_id, ticket_id=ticket_id, task_id=target["id"], task_version=target["version"],
+            bindings=source_run.get("bindings", {}), attempt=attempt,
+            chain_depth=source_run["chain_depth"] + 1, parent_run_id=source_run["run_id"],
+            handoff_key=h.key, repo=h.repo or source_run.get("repo"),
+            input_artifacts=list(h.artifacts or []),
         )
-        enqueued = True
-    return enqueued
+        applied.append(run_id)
+        txn.append_event(
+            ticket_id,
+            Event(
+                event_id=f"{source_run['run_id']}:{h.key}:accepted",
+                kind="handoff.accepted",
+                ticket_id=ticket_id,
+                run_id=source_run["run_id"],
+                detail=h.reason,
+            ).to_dict(),
+        )
+    return applied, None
 
 
 def _handle_failure(
@@ -342,11 +402,7 @@ def _handle_failure(
     if run["attempt"] < taskdef["budget"]["retries"]:
         reenqueue_same(store, run, taskdef, run["attempt"] + 1)
         return
-    values = dict(run)
-    if not enqueue_targets(
-        store, taskdefs, run, taskdef, "on_failure", values, run["chain_depth"] + 1
-    ):
-        _block_ticket(store, ticket_id, run_id, "retries exhausted, no on_failure path")
+    _block_ticket(store, ticket_id, run_id, "retries exhausted")
 
 
 # --------------------------------------------------------------------------
@@ -399,27 +455,55 @@ def sweep(config, taskdefs, store, workflow_api, now_iso: str, adapter_fn: Adapt
         run_id = run["run_id"]
         gate_entry = (taskdef.get("gates", {}).get("post") or [{}])[0]
         timeout = gate_entry.get("timeout_working_hours")
-        repo = _target_repo(config, adapter_fn, ticket_id) or next(iter(config.repos))
+        repo = run.get("repo") or _target_repo(config, adapter_fn, ticket_id) or next(iter(config.repos))
         gate = adapter_fn("gate", run.get("bindings", {}).get("gate", "pr-review"), repo=repo)
         decision = gate.status(
             {**run, "timeout_working_hours": timeout, "approver_group": gate_entry.get("approvers")}
         )
         status = decision.status.value if hasattr(decision.status, "value") else decision.status
+
         if status == "APPROVED":
-            # Enqueue BEFORE marking SUCCEEDED: both are idempotent, and a
-            # crash after enqueue merely re-marks next sweep, while a crash
-            # after mark-first would orphan the chain forever (nothing ever
-            # re-drives a childless SUCCEEDED run).
-            enqueue_targets(
-                store, taskdefs, run, taskdef, "on_success", dict(run), run["chain_depth"] + 1
-            )
-            _mark_succeeded(store, ticket_id, run_id)
-        elif status in ("CHANGES_REQUESTED", "REJECTED"):
+            pending = [Handoff.from_dict(h) for h in (run.get("pending_handoffs") or [])]
+            result: dict = {}
+
+            def approve(txn: Txn) -> None:
+                applied_ids, apply_reason = apply_handoffs(
+                    txn, config, taskdefs, ticket_id, run, pending
+                )
+                result["applied_ids"] = applied_ids
+                result["apply_reason"] = apply_reason
+                if apply_reason is not None:
+                    return
+                txn.update_run(ticket_id, run_id, state="SUCCEEDED", pending_handoffs=[])
+                txn.append_event(
+                    ticket_id,
+                    Event(
+                        event_id=f"{run_id}:succeeded", kind="run.succeeded", ticket_id=ticket_id,
+                        run_id=run_id, state=RunState.SUCCEEDED,
+                    ).to_dict(),
+                )
+                if decision.comment_id is not None:
+                    txn.append_event(
+                        ticket_id,
+                        Event(
+                            event_id=f"{decision.comment_id}:approval", kind="gate.decided",
+                            ticket_id=ticket_id, run_id=run_id,
+                            detail=f"approved by {decision.actor} at {decision.decided_at}",
+                        ).to_dict(),
+                    )
+
+            store.write(approve)
+            if result["apply_reason"] is not None:
+                _mark_gate_terminal(store, ticket_id, run, "run.failed", "handoff_apply_failed")
+                _block_ticket(store, ticket_id, run_id, result["apply_reason"])
+                return
+            _complete_if_queue_empty(store, config, adapter_fn, ticket_id, {**run, "state": "SUCCEEDED"})
+        elif status == "CHANGES_REQUESTED":
             if run["attempt"] >= 2:
-                _mark_failed(store, ticket_id, run_id, "run.rework", "rework_final")
+                _mark_gate_terminal(store, ticket_id, run, "run.rework", "rework_final")
                 _block_ticket(store, ticket_id, run_id, "max rework cycles reached")
                 return
-            _mark_failed(store, ticket_id, run_id, "run.changes_requested", "changes_requested")
+            _mark_gate_terminal(store, ticket_id, run, "run.changes_requested", "changes_requested")
             new_run_id = reenqueue_same(store, run, taskdef, run["attempt"] + 1)
             store.write(
                 lambda txn: txn.append_event(
@@ -433,36 +517,17 @@ def sweep(config, taskdefs, store, workflow_api, now_iso: str, adapter_fn: Adapt
                     ).to_dict(),
                 )
             )
+        elif status == "REJECTED":
+            _mark_gate_terminal(store, ticket_id, run, "run.rejected", "rejected")
+            _block_ticket(store, ticket_id, run_id, decision.comments or "gate rejected")
         elif status == "EXPIRED":
-            _mark_failed(store, ticket_id, run_id, "run.gate_expired", "gate_expired")
+            _mark_gate_terminal(store, ticket_id, run, "run.gate_expired", "gate_expired")
             _block_ticket(store, ticket_id, run_id, "gate timed out")
             _escalate(
                 store, config, adapter_fn, ticket_id, run_id,
                 "Review gate expired without a decision; blocked pending escalation.",
             )
         # PENDING: leave the run WAITING_GATE.
-
-    def redrive_succeeded(taskdef, ticket_id, state, run) -> None:
-        """Self-heal a crash between success and downstream enqueue: a
-        SUCCEEDED run with declared on_success targets but no child runs gets
-        its (idempotent) enqueue re-driven, so an orphaned chain converges on
-        the next sweep instead of stalling forever."""
-        if not taskdef.get("on_success", {}).get("enqueue"):
-            return
-        has_child = any(
-            r.get("parent_run_id") == run["run_id"] for r in state.get("runs", [])
-        )
-        if has_child:
-            return
-        try:
-            enqueue_targets(
-                store, taskdefs, run, taskdef, "on_success", dict(run), run["chain_depth"] + 1
-            )
-        except PredicateError:
-            _block_ticket(
-                store, ticket_id, run["run_id"],
-                "cannot re-evaluate enqueue predicates after a crash; re-enqueue manually",
-            )
 
     for ticket_id in store.list_tickets():
         state = store.read_state(ticket_id)
@@ -474,25 +539,84 @@ def sweep(config, taskdefs, store, workflow_api, now_iso: str, adapter_fn: Adapt
                 handle_running(taskdef, ticket_id, run)
             elif run["state"] == "WAITING_GATE":
                 handle_gate(taskdef, ticket_id, run)
-            elif run["state"] == "SUCCEEDED":
-                redrive_succeeded(taskdef, ticket_id, state, run)
 
 
-def _mark_succeeded(store, ticket_id, run_id) -> None:
+def _mark_gate_terminal(store, ticket_id, run: dict, kind: str, event_suffix: str) -> None:
+    """Terminalize a WAITING_GATE run FAILED, clearing any `pending_handoffs`
+    and emitting `handoff.rejected` (each carrying that handoff's own
+    `reason`) for every one of them, all in the SAME write -- else
+    completion's "no pending handoffs" check never passes."""
+    run_id = run["run_id"]
+    pending = run.get("pending_handoffs") or []
+
     def fn(txn: Txn) -> None:
-        txn.update_run(ticket_id, run_id, state="SUCCEEDED")
+        txn.update_run(ticket_id, run_id, state="FAILED", pending_handoffs=[])
         txn.append_event(
             ticket_id,
             Event(
-                event_id=f"{run_id}:succeeded",
-                kind="run.succeeded",
+                event_id=f"{run_id}:{event_suffix}",
+                kind=kind,
                 ticket_id=ticket_id,
                 run_id=run_id,
-                state=RunState.SUCCEEDED,
+                state=RunState.FAILED,
             ).to_dict(),
         )
+        for h in pending:
+            txn.append_event(
+                ticket_id,
+                Event(
+                    event_id=f"{run_id}:{h['key']}:rejected",
+                    kind="handoff.rejected",
+                    ticket_id=ticket_id,
+                    run_id=run_id,
+                    detail=h.get("reason"),
+                ).to_dict(),
+            )
 
     store.write(fn)
+
+
+def _complete_if_queue_empty(store, config, adapter_fn, ticket_id, terminal_run: dict) -> None:
+    """After a terminal SUCCEEDED with nothing else in flight and no pending
+    handoffs anywhere on the ticket: DONE only if the TERMINAL run's own
+    recorded artifacts include the declared closing summary (so a reopened
+    ticket can't complete off a prior lifecycle's stale summary) -- read
+    that ledger copy, post the closing summary, mark every recorded work PR
+    ready, close the issue, and mark the ticket DONE; else pin "awaiting
+    human input". ponytail: idempotency keyed off `status == "ACTIVE"` (once
+    DONE this never re-fires) plus the tracker methods' own event-marker
+    dedup on the closing side effects, rather than a separate
+    `{ticket}:{run}:done` record.
+    """
+    state = store.read_state(ticket_id)
+    if state is None or state.get("status") != "ACTIVE":
+        return
+    runs = state.get("runs", [])
+    if any(r["state"] in NON_TERMINAL for r in runs):
+        return
+    if any(r.get("pending_handoffs") for r in runs):
+        return
+
+    tracker = adapter_fn("tracker", config.components["tracker"]["adapter"], repo=intake_repo(config))
+    summary_path = subst("specs/{ticket}/summary.md", ticket_id)
+    done_key = f"{ticket_id}:{terminal_run['run_id']}:done"
+    if summary_path not in (terminal_run.get("artifacts") or []):
+        tracker.upsert_pinned_comment(
+            ticket_id, "Queue is empty; awaiting human input.", f"{done_key}:awaiting"
+        )
+        return
+
+    summary = store.read_artifact(ticket_id, terminal_run["run_id"], summary_path) or ""
+    tracker.post_closing_summary(ticket_id, summary, f"{done_key}:closing-summary")
+    for work_repo in state.get("work_repos", []):
+        if work_repo.get("pr_ref"):
+            agent = adapter_fn(
+                "agent-session", config.components["agent-session"]["adapter"],
+                repo=work_repo["repo"],
+            )
+            agent.mark_pr_ready(work_repo["pr_ref"])
+    tracker.close_issue(ticket_id)
+    store.write(lambda txn: txn.set_ticket(ticket_id, status="DONE"))
 
 
 def _target_repo(config, adapter_fn, ticket_id) -> str | None:

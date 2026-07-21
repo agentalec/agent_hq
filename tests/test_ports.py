@@ -9,6 +9,7 @@ EXPECTED_PAIRS = {
     ("tracker", "github-issues"),
     ("messaging", "github-comment"),
     ("gate", "pr-review"),
+    ("gate", "github-issue-comment"),
     ("executor", "claude-code-headless"),
     ("agent-session", "claude-code-headless"),
     ("executor", "copilot-cli"),

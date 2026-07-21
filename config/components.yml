@@ -14,9 +14,12 @@ agent-session:
     model: claude-sonnet-4.5
 messaging:
   adapter: github-comment
+# Orchestration approvals default to an authorized issue-comment gate on the
+# engine issue (see docs/ports/gate.md); pr-review remains available for a
+# task that binds to it explicitly (code-review approvals on a work-repo PR).
 gate:
-  adapter: pr-review
+  adapter: github-issue-comment
   named:
-    spec-approval: pr-review
+    spec-approval: github-issue-comment
 label_overrides:
   - "hq:executor="

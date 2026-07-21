@@ -1,4 +1,4 @@
-"""Three-phase runner + intake + the GitHub workflow dispatch API (Task 13).
+"""Three-phase runner + intake + the GitHub workflow dispatch API.
 
 The runner drives one task run through three separately-invoked phases
 (`prepare` / `execute` / `collect`), each a distinct GitHub Actions step so a
@@ -6,17 +6,23 @@ lost runner simply restarts the phase (D1: no checkpoint/resume). State is
 handed between phases through deterministic on-disk artifacts in the target
 worktree (`<workdir>/_target/<run_id>/.agent-hq/`):
 
-  - prepare writes `bundle.json` (prompt, tools, deadline) for execute;
-  - execute writes `execute-result.json` (outcome + usage) for collect.
+  - prepare writes `bundle.json` (prompt, tools, deadline) and materializes
+    `run.input_artifacts` (restored from the source run's ledger namespace)
+    for execute;
+  - execute writes `execute-result.json` (outcome + usage) and
+    `control.json` (outcome/handoffs) for collect.
 
-`intake_ticket` executes the intake task declaratively (label gate,
-double-intake guard, eligibility, injection flagging) and enqueues the spec
-run on acceptance.
+`intake_ticket` reads eligibility from `config.projects["intake"]` (no more
+`tasks/intake/` task -- intake is engine entry logic), rejects a public
+deployment's ticket missing `public_safe_label` before any state/artifact
+write, and enqueues `config.projects["initial_task"]` with the root run's
+resolved repo on acceptance.
 
-Predicate convention: on_success `when` predicates evaluate against the run
-record dict; if the agent wrote `specs/<ticket>/classification.json` into the
-worktree, collect loads it under the `plan` key so predicates can reference
-e.g. `plan.classification` (used to branch beyond-CRUD work).
+A task's own transition is driven entirely by its `.agent-hq/control.json`
+outcome (`schemas/control.schema.json`) -- `handoff` (validate + apply/gate),
+`complete` (SUCCEEDED, feeds queue-empty completion), or `blocked` (ticket
+BLOCKED, escalate, no retry). See `engine.handoff.validate_handoffs` and
+`engine.engine.apply_handoffs`.
 """
 
 from __future__ import annotations
@@ -30,16 +36,17 @@ from engine import engine as eng
 from engine.adapters._github import GitHubClient
 from engine.config import Config, resolve_binding
 from engine.engine import (
-    _block_ticket,
+    _complete_if_queue_empty,
+    _escalate,
     _handle_failure,
+    apply_handoffs,
     enqueue,
-    enqueue_targets,
     intake_repo,
     resolve_target_repo,
     subst,
 )
-from engine.predicates import PredicateError
-from engine.models import Event, RunState
+from engine.handoff import validate_handoffs
+from engine.models import Event, RunState, TaskRun
 from engine.state import _now_iso
 
 _INJECTION_PATTERNS = ("ignore previous instructions", "disregard your")
@@ -121,7 +128,9 @@ def _write_parent_diff(worktree: Path, parent: dict | None) -> bool:
     return True
 
 
-def _assemble_prompt(taskdef, details, rework: str | None, parent: dict | None = None) -> str:
+def _assemble_prompt(
+    taskdef, details, rework: str | None, parent: dict | None = None, run: dict | None = None,
+) -> str:
     parts = [
         f"# Task: {taskdef['id']}",
         taskdef.get("description", ""),
@@ -169,29 +178,42 @@ def _assemble_prompt(taskdef, details, rework: str | None, parent: dict | None =
         parts.append("## Upstream work\n" + "\n".join(lineage))
     if rework:
         parts.append("## Requested changes\n" + rework)
+
+    # Generic, task-agnostic control-output contract -- every task needs
+    # this regardless of whether it includes constitution.md.
+    if run is not None:
+        handoff_cfg = taskdef.get("handoff", {})
+        allowed = handoff_cfg.get("allowed", [])
+        max_handoffs = handoff_cfg.get("max", 0)
+        control_lines = [
+            "Before finishing, write `.agent-hq/control.json` -- exactly one JSON object:",
+            '- `{"outcome": "complete"}` if this task is done with nothing further to hand off.',
+            '- `{"outcome": "blocked", "reason": "..."}` if you cannot proceed.',
+        ]
+        if allowed and max_handoffs:
+            control_lines.append(
+                '- `{"outcome": "handoff", "handoffs": [{"key": "...", "task": "...", '
+                '"reason": "...", "repo": "...", "artifacts": [...]}]}` to hand off to up to '
+                f"{max_handoffs} of: {', '.join(allowed)}. Each `artifacts` entry must be a "
+                "file you produced (a required output above) or were given (see Available "
+                "inputs below) -- an unrelated worktree file is rejected."
+            )
+        parts.append("## Control output\n" + "\n".join(control_lines))
+
+        if run.get("repo"):
+            parts.append(
+                f"## Work repo\nYour assigned repository for this task is `{run['repo']}`. "
+                "Work only on that repository's slice; do not touch other repos."
+            )
+        if run.get("input_artifacts"):
+            parts.append(
+                "## Available inputs\nThese files were handed to you by the task that handed "
+                "off to you and are present in your worktree; you may forward any of them in a "
+                "handoff's `artifacts`:\n"
+                + "\n".join(f"- `{path}`" for path in run["input_artifacts"])
+            )
+
     return "\n\n".join(p for p in parts if p)
-
-
-def _find_ancestor_pr_ref(store, ticket_id: str, run: dict) -> str | None:
-    """Walk `parent_run_id` up from `run` until a run with `pr_ref` set is
-    found (the `opens_pr` run earlier in the chain, e.g. implement)."""
-    runs_by_id = {r["run_id"]: r for r in store.read_state(ticket_id)["runs"]}
-    current = runs_by_id.get(run.get("parent_run_id"))
-    while current is not None:
-        if current.get("pr_ref"):
-            return current["pr_ref"]
-        current = runs_by_id.get(current.get("parent_run_id"))
-    return None
-
-
-def _load_plan(worktree: Path, ticket_id: str) -> dict | None:
-    path = worktree / "specs" / ticket_id / "classification.json"
-    if not path.exists():
-        return None
-    try:
-        return json.loads(path.read_text())
-    except json.JSONDecodeError:
-        return None
 
 
 # --------------------------------------------------------------------------
@@ -224,6 +246,25 @@ def run_task(
     raise ValueError(f"unknown phase {phase!r}")
 
 
+def _restore_input_artifacts(store, worktree: Path, ticket_id: str, run: dict) -> None:
+    """Materialize `run.input_artifacts` into the worktree, read from the
+    SOURCE (parent) run's ledger namespace -- the single input source a
+    handoff-spawned run's execute sees (PLAN.md "one artifact namespace,
+    one input source"). Best-effort: an artifact missing from the ledger
+    (shouldn't happen -- apply_handoffs already checked) is skipped, not a
+    hard failure here."""
+    parent_run_id = run.get("parent_run_id")
+    if not parent_run_id:
+        return
+    for rel_path in run.get("input_artifacts") or []:
+        content = store.read_artifact(ticket_id, parent_run_id, rel_path)
+        if content is None:
+            continue
+        full = worktree / rel_path
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_text(content)
+
+
 def _prepare(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskdef) -> dict:
     run_id = run["run_id"]
     claimed = store.claim_run(ticket_id, run_id, now_iso, taskdef["budget"]["max_runtime_min"])
@@ -235,7 +276,7 @@ def _prepare(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskd
 
     tracker = adapter_fn("tracker", config.components["tracker"]["adapter"], repo=intake_repo(config))
     details = tracker.fetch_ticket(ticket_id)
-    repo = resolve_target_repo(config, details) or next(iter(config.repos))
+    repo = run.get("repo") or resolve_target_repo(config, details) or next(iter(config.repos))
 
     bindings = {
         port: resolve_binding(config, port, taskdef.get("components", {}).get(port), details.labels)
@@ -254,7 +295,11 @@ def _prepare(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskd
             (r for r in store.read_state(ticket_id)["runs"] if r["run_id"] == run["parent_run_id"]),
             None,
         )
-        base_commit = parent.get("output_commit") if parent else None
+        # Only inherit the parent's commit as our base when we're continuing
+        # the SAME repo -- a fan-out handoff (e.g. breakdown -> implement on
+        # a different repo) must not seed a clone with a foreign-repo SHA.
+        if parent and parent.get("repo") == repo:
+            base_commit = parent.get("output_commit")
 
     store.write(
         lambda txn: txn.update_run(ticket_id, run_id, bindings=bindings, base_commit=base_commit)
@@ -263,10 +308,11 @@ def _prepare(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskd
     agent = adapter_fn("agent-session", bindings["agent-session"], repo=repo)
     worktree = Path(agent.prepare_worktree(run_id, repo, base_commit))
 
+    _restore_input_artifacts(store, worktree, ticket_id, run)
     _write_parent_diff(worktree, parent)
     rework = _rework_comments(store, ticket_id, run_id)
     bundle = {
-        "prompt": _assemble_prompt(taskdef, details, rework, parent),
+        "prompt": _assemble_prompt(taskdef, details, rework, parent, run={**run, "repo": repo}),
         "tools": taskdef.get("tools", []),
         "deadline": run.get("deadline"),
     }
@@ -344,28 +390,107 @@ def _collect(
     return result
 
 
+def _read_control(worktree: Path) -> dict:
+    path = Path(worktree) / ".agent-hq" / "control.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text())
+    except json.JSONDecodeError:
+        return {}
+
+
+def _fail_control_invalid(store, config, taskdefs, taskdef, ticket_id, run, adapter_fn, reason: str) -> None:
+    """A control.json that the pure validator (or apply_handoffs' state-
+    dependent guards) rejected: same retry-per-budget/BLOCK policy as any
+    other run failure, plus one generic handoff.rejected audit event (no
+    handoff keys are trustworthy here -- the whole set was rejected)."""
+    run_id = run["run_id"]
+    eng._mark_failed(store, ticket_id, run_id, "run.failed", "failed")
+    store.write(
+        lambda txn: txn.append_event(
+            ticket_id,
+            Event(
+                event_id=f"{run_id}:handoff_rejected", kind="handoff.rejected", ticket_id=ticket_id,
+                run_id=run_id, detail=reason,
+            ).to_dict(),
+        )
+    )
+    _handle_failure(
+        store, config, taskdefs, taskdef, ticket_id, {**run, "state": "FAILED"}, adapter_fn,
+        block_on_unknown_usage=True,
+    )
+
+
+def _block_from_control(store, config, adapter_fn, ticket_id, run_id, reason: str) -> None:
+    def fn(txn) -> None:
+        txn.update_run(ticket_id, run_id, state="BLOCKED")
+        txn.append_event(
+            ticket_id,
+            Event(
+                event_id=f"{run_id}:blocked", kind="run.blocked", ticket_id=ticket_id,
+                run_id=run_id, state=RunState.BLOCKED, detail=reason,
+            ).to_dict(),
+        )
+        txn.set_block(ticket_id, reason=reason, source="task", interrupted_run=run_id)
+
+    store.write(fn)
+    _escalate(store, config, adapter_fn, ticket_id, run_id, f"Task reported blocked: {reason}")
+
+
 def _collect_success(
     config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskdef, worktree
 ) -> None:
     run_id = run["run_id"]
     tracker = adapter_fn("tracker", config.components["tracker"]["adapter"], repo=intake_repo(config))
     details = tracker.fetch_ticket(ticket_id)
-    repo = resolve_target_repo(config, details) or next(iter(config.repos))
+    repo = run.get("repo") or resolve_target_repo(config, details) or next(iter(config.repos))
     base_commit = run.get("base_commit")
 
     agent = adapter_fn("agent-session", run.get("bindings", {}).get("agent-session"), repo=repo)
+
+    control = _read_control(worktree)
+    accepted, reason = validate_handoffs(
+        control, taskdef=taskdef, taskdefs=taskdefs, config=config, worktree=worktree,
+        run=TaskRun.from_dict(run),
+    )
+    if reason is not None:
+        _fail_control_invalid(store, config, taskdefs, taskdef, ticket_id, run, adapter_fn, reason)
+        return
+
+    outcome = control.get("outcome")
+    if outcome == "blocked":
+        _block_from_control(
+            store, config, adapter_fn, ticket_id, run_id, control.get("reason", "blocked by task")
+        )
+        return
+
     declared = [subst(a, ticket_id) for a in taskdef.get("outputs", {}).get("artifacts", [])]
     artifacts = agent.collect_outputs(worktree, declared)
+
+    # Snapshot the ledger for THIS run: every declared output, plus any
+    # inherited (input_artifacts) file an accepted handoff forwards -- so a
+    # transitive handoff (e.g. arch-plan -> breakdown forwarding spec.md)
+    # finds it in the SOURCE run's own namespace. Then strip those paths
+    # (and this run's own inherited inputs) from the worktree before the
+    # work commit -- neither is work-repo code.
+    ledger_paths = set(declared) | {p for h in accepted for p in (h.artifacts or [])}
+    artifact_contents: dict[str, str] = {}
+    for rel_path in ledger_paths:
+        full = worktree / rel_path
+        if full.is_file():
+            artifact_contents[rel_path] = full.read_text()
+            full.unlink()
+    for rel_path in run.get("input_artifacts") or []:
+        full = worktree / rel_path
+        if full.is_file():
+            full.unlink()
+
     output_commit = agent.build_pr_branch(run_id, worktree, base_commit)
     branch = f"agent-hq/{run_id}"
 
-    plan = _load_plan(worktree, ticket_id)
-    values = {**run, "plan": plan} if plan is not None else dict(run)
-
     # opens_pr tasks (e.g. implement) have no approval gate but still need a
-    # PR opened so the work is reviewable; finalize -- the chain's terminal
-    # task -- posts the closing summary, requests reviewers, and marks that
-    # ancestor PR ready once it completes. Both are repo-side effects routed
+    # PR opened so the work is reviewable -- a repo-side effect routed
     # through the agent-session port (never a concrete GitHub adapter) so
     # swapping the executor swaps this behavior too.
     pr_ref = None
@@ -373,19 +498,12 @@ def _collect_success(
         pr_ref = agent.open_draft_pr(
             repo, branch, "main", details.title or f"hq: {ticket_id}", details.body,
         )
-    elif taskdef["id"] == "finalize":
-        ancestor_pr_ref = _find_ancestor_pr_ref(store, ticket_id, run)
-        if ancestor_pr_ref:
-            # collect_outputs already guaranteed the declared summary exists.
-            summary = (worktree / "specs" / ticket_id / "summary.md").read_text()
-            tracker.post_closing_summary(ticket_id, summary, f"{run_id}:closing-summary")
-            # ponytail: P0 default reviewer group; a per-task-configured
-            # group is the upgrade if finalize ever needs a different one.
-            members = config.approvers.get("groups", {}).get("product-owners", {}).get("members", [])
-            agent.request_reviewers(ancestor_pr_ref, members)
-            agent.mark_pr_ready(ancestor_pr_ref)
 
-    gate_post = taskdef.get("gates", {}).get("post")
+    def _write_ledger(txn) -> None:
+        for rel_path, content in artifact_contents.items():
+            txn.write_artifact(ticket_id, run_id, rel_path, content)
+
+    gate_post = taskdef.get("gates", {}).get("post") if outcome == "handoff" else None
     if gate_post:
         gate_entry = gate_post[0]
         gate = adapter_fn("gate", run.get("bindings", {}).get("gate", "pr-review"), repo=repo)
@@ -394,6 +512,8 @@ def _collect_success(
             {
                 "repo": repo,
                 "ticket_id": ticket_id,
+                "run_id": run_id,
+                "task_id": taskdef["id"],
                 "branch": branch,
                 "title": details.title,
                 "body": details.body,
@@ -401,15 +521,19 @@ def _collect_success(
         )
 
         def open_gate(txn) -> None:
+            _write_ledger(txn)
             txn.update_run(
                 ticket_id, run_id,
                 artifacts=artifacts,
                 output_commit=output_commit,
-                pr_ref=f"{repo}#{req.request_id}",
+                pr_ref=pr_ref,
                 gate_requested_at=now_iso,
                 gate_request_id=req.request_id,
                 state="WAITING_GATE",
             )
+            txn.set_pending_handoffs(ticket_id, run_id, [h.to_dict() for h in accepted])
+            if pr_ref:
+                txn.upsert_work_repo(ticket_id, repo, pr_ref=pr_ref)
             txn.append_event(
                 ticket_id,
                 Event(
@@ -421,11 +545,36 @@ def _collect_success(
                     artifacts=artifacts,
                 ).to_dict(),
             )
+            for h in accepted:
+                txn.append_event(
+                    ticket_id,
+                    Event(
+                        event_id=f"{run_id}:{h.key}:proposed", kind="handoff.proposed",
+                        ticket_id=ticket_id, run_id=run_id, detail=h.reason,
+                    ).to_dict(),
+                )
 
         store.write(open_gate)
         return
 
+    result: dict = {}
+
     def succeed(txn) -> None:
+        _write_ledger(txn)
+        for h in accepted:
+            txn.append_event(
+                ticket_id,
+                Event(
+                    event_id=f"{run_id}:{h.key}:proposed", kind="handoff.proposed",
+                    ticket_id=ticket_id, run_id=run_id, detail=h.reason,
+                ).to_dict(),
+            )
+        if accepted:
+            applied_ids, apply_reason = apply_handoffs(txn, config, taskdefs, ticket_id, run, accepted)
+            result["applied_ids"] = applied_ids
+            result["apply_reason"] = apply_reason
+            if apply_reason is not None:
+                return
         txn.update_run(
             ticket_id, run_id,
             artifacts=artifacts,
@@ -433,6 +582,8 @@ def _collect_success(
             pr_ref=pr_ref,
             state="SUCCEEDED",
         )
+        if pr_ref:
+            txn.upsert_work_repo(ticket_id, repo, pr_ref=pr_ref)
         txn.append_event(
             ticket_id,
             Event(
@@ -446,19 +597,29 @@ def _collect_success(
         )
 
     store.write(succeed)
-    try:
-        enqueue_targets(
-            store, taskdefs, {**run, "artifacts": artifacts}, taskdef, "on_success", values,
-            run["chain_depth"] + 1,
+    if result.get("apply_reason") is not None:
+        eng._mark_failed(store, ticket_id, run_id, "run.failed", "failed")
+
+        def reject_txn(txn) -> None:
+            for h in accepted:
+                txn.append_event(
+                    ticket_id,
+                    Event(
+                        event_id=f"{run_id}:{h.key}:rejected", kind="handoff.rejected",
+                        ticket_id=ticket_id, run_id=run_id, detail=h.reason,
+                    ).to_dict(),
+                )
+
+        store.write(reject_txn)
+        _handle_failure(
+            store, config, taskdefs, taskdef, ticket_id, {**run, "state": "FAILED"}, adapter_fn,
+            block_on_unknown_usage=True,
         )
-    except PredicateError as exc:
-        # Same graceful path as the sweep's redrive: a missing/malformed
-        # predicate source (e.g. classification.json) blocks loudly instead
-        # of crashing collect.
-        _block_ticket(
-            store, ticket_id, run_id,
-            f"enqueue predicates unevaluable ({exc}); fix the artifact and re-enqueue manually",
-        )
+        return
+
+    _complete_if_queue_empty(
+        store, config, adapter_fn, ticket_id, {**run, "state": "SUCCEEDED", "artifacts": artifacts}
+    )
 
 
 # --------------------------------------------------------------------------
@@ -467,14 +628,16 @@ def _collect_success(
 
 
 def intake_ticket(issue_ref: str, event_key: str, config, taskdefs, store, adapter_fn=None) -> str:
-    """Run the intake task declaratively. Returns one of
+    """Engine entry logic -- no `tasks/intake/` task. Returns one of
     "skipped" / "blocked" / "enqueued".
 
     `issue_ref` is a bare issue id in `config.projects["engine_repo"]` --
     intake has exactly one repo, so a stale `org/repo#N` form (a work repo
-    naming itself) is ignored: only the trailing number is honored."""
+    naming itself) is ignored: only the trailing number is honored.
+    Eligibility (incl. the public-safe-label gate) comes from
+    `config.projects["intake"]`/`["public"]`, not a task definition; a
+    rejection happens before any state/artifact write."""
     adapter_fn = adapter_fn or eng._default_adapter_fn(config)
-    intake_task = taskdefs["intake"]
 
     tracker = adapter_fn("tracker", config.components["tracker"]["adapter"], repo=intake_repo(config))
     details = tracker.fetch_ticket(issue_ref.rsplit("#", 1)[-1])
@@ -487,7 +650,7 @@ def intake_ticket(issue_ref: str, event_key: str, config, taskdefs, store, adapt
     if existing and any(r["state"] in eng.NON_TERMINAL for r in existing.get("runs", [])):
         return "skipped"
 
-    reasons = _eligibility_reasons(config, intake_task, details)
+    reasons = _eligibility_reasons(config, details)
     event_id = f"intake:{event_key}"
     if reasons:
         body = "This ticket cannot be picked up automatically:\n" + "\n".join(
@@ -542,32 +705,41 @@ def intake_ticket(issue_ref: str, event_key: str, config, taskdefs, store, adapt
         lambda txn: txn.set_ticket(ticket_id, status="ACTIVE", pinned_comment_id=pinned_id)
     )
 
-    spec = taskdefs[intake_task["on_success"]["enqueue"][0]["task"]]
-    enqueue(
+    repo = resolve_target_repo(config, details)
+    initial_task = taskdefs[config.projects["initial_task"]]
+    run_id = enqueue(
         store,
         ticket_id=ticket_id,
         source_event_id=event_key,
         enqueue_index=0,
-        task_id=spec["id"],
-        task_version=spec["version"],
+        task_id=initial_task["id"],
+        task_version=initial_task["version"],
         attempt=0,
         bindings={},
         chain_depth=0,
     )
+    # The root run's repo -- set from resolve_target_repo(details), not the
+    # handoff-copied `repo or source.repo` apply_handoffs uses -- so the
+    # first task has a concrete clone target and every downstream child
+    # inherits a repo (never null for a wired task).
+    store.write(lambda txn: txn.update_run(ticket_id, run_id, repo=repo))
     return "enqueued"
 
 
-def _eligibility_reasons(config, intake_task, details) -> list[str]:
-    elig = intake_task.get("eligibility", {})
+def _eligibility_reasons(config, details) -> list[str]:
+    intake_cfg = config.projects.get("intake", {})
     reasons: list[str] = []
-    min_words = elig.get("min_body_words", 0)
+    min_words = intake_cfg.get("min_body_words", 0)
     if len(details.body.split()) < min_words:
         reasons.append(f"description too short (needs >= {min_words} words)")
-    for label in elig.get("excluded_labels", []):
+    for label in intake_cfg.get("excluded_labels", []):
         if label in details.labels:
             reasons.append(f"excluded label '{label}'")
     if resolve_target_repo(config, details) is None:
         reasons.append("no product area matches a configured repo")
+    public_safe_label = config.projects.get("public_safe_label")
+    if config.projects.get("public") and public_safe_label not in details.labels:
+        reasons.append(f"missing required label '{public_safe_label}' (public deployment)")
     return reasons
 
 

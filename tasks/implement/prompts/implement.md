@@ -1,13 +1,15 @@
 # Implement prompt
 
-Read `constitution.md` and `specs/{ticket}/tasks.md`.
+Read `constitution.md` and `specs/{ticket}/tasks.md` (handed to you -- see
+Available inputs below).
 
-Implement the tasks in `tasks.md` in order, in the repo(s) they name. For
-each task:
+Implement, in order, only the tasks in `tasks.md` that apply to your
+assigned repository (see Work repo below); skip tasks scoped to a different
+repo -- another `implement` run handles those. For each task that applies:
 
 - write the code and its tests
 - commit with a Conventional Commits message (`feat:`, `fix:`, `test:`, ...)
 - keep the diff scoped to that task; don't fold in unrelated tasks
 
-Never touch files outside the repo(s) named in `tasks.md`. Commit as you go
-rather than batching everything into one commit at the end.
+Never touch files outside your assigned repository. Commit as you go rather
+than batching everything into one commit at the end.

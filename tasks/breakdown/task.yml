@@ -7,9 +7,12 @@ skills:
 outputs:
   artifacts:
     - specs/{ticket}/tasks.md
-on_success:
-  enqueue:
-    - task: implement
+handoff:
+  allowed:
+    - implement
+  # Fan-out point: the pilot's two configured repos (config/repos.yml) mean
+  # a two-repo ticket needs one `implement` handoff per affected repo.
+  max: 2
 budget:
   max_cost_usd: 5
   max_runtime_min: 30

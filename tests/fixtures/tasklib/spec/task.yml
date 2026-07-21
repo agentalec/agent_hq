@@ -14,6 +14,7 @@ gates:
     - approvers: product-owners
       adapter: spec-approval
       timeout_working_hours: 8
-on_success:
-  enqueue:
-    - task: build
+handoff:
+  allowed:
+    - build
+  max: 1

@@ -45,16 +45,17 @@ def registered_fake_gate(monkeypatch):
 def _resolve_and_build(config, taskdef, monkeypatch):
     gate_spec = taskdef["gates"]["post"][0]
     adapter_name = resolve_binding(config, "gate", gate_spec["adapter"], [])
-    if adapter_name == "pr-review":
-        # No network call at construction: PrReviewGate.__init__ only reads
-        # settings and builds a client -- prove it by making any actual
-        # network call fail loudly if one were attempted.
+    if adapter_name in ("pr-review", "github-issue-comment"):
+        # No network call at construction: both real gate adapters'
+        # __init__ only read settings and build a client -- prove it by
+        # making any actual network call fail loudly if one were attempted.
         monkeypatch.setattr(
             "requests.request",
             lambda *a, **k: (_ for _ in ()).throw(AssertionError("network call at init")),
         )
     settings = {
         "repo": next(iter(config.repos)),
+        "issue_repo": config.projects["engine_repo"],
         "approvers": config.approvers,
         "default_base": "main",
     }
@@ -68,10 +69,10 @@ def test_gate_binding_swaps_via_config_only(monkeypatch, registered_fake_gate):
     assert taskdef["gates"]["post"][0]["adapter"] == "spec-approval"
 
     real_name, real_adapter = _resolve_and_build(config, taskdef, monkeypatch)
-    assert real_name == "pr-review"
-    from engine.adapters.pr_review import PrReviewGate
+    assert real_name == "github-issue-comment"
+    from engine.adapters.github_issue_comment_gate import GithubIssueCommentGate
 
-    assert isinstance(real_adapter, PrReviewGate)
+    assert isinstance(real_adapter, GithubIssueCommentGate)
 
     swapped_config = copy.deepcopy(config)
     swapped_config.components["gate"]["named"]["spec-approval"] = "fake-gate"

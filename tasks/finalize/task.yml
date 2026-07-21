@@ -5,8 +5,6 @@ trigger: enqueued_by
 outputs:
   artifacts:
     - specs/{ticket}/summary.md
-on_success:
-  enqueue: []
 budget:
   max_cost_usd: 2
   max_runtime_min: 15

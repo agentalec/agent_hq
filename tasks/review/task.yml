@@ -15,9 +15,10 @@ tools:
 outputs:
   artifacts:
     - specs/{ticket}/review.md
-on_success:
-  enqueue:
-    - task: finalize
+handoff:
+  allowed:
+    - finalize
+  max: 1
 budget:
   max_cost_usd: 5
   max_runtime_min: 30

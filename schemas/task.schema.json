@@ -111,32 +111,6 @@
       "type": "boolean",
       "description": "Open (or reuse) a draft PR for agent-hq/<run_id> on success, independent of any approval gate."
     },
-    "on_success": {
-      "description": "Deprecated: superseded by `handoff.allowed`/`handoff.max`; removed in the atomic handoff cutover.",
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "enqueue": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/enqueueItem"
-          }
-        }
-      }
-    },
-    "on_failure": {
-      "description": "Deprecated: superseded by `handoff.allowed`/`handoff.max`; removed in the atomic handoff cutover.",
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "enqueue": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/enqueueItem"
-          }
-        }
-      }
-    },
     "handoff": {
       "description": "Validated child-task handoffs this task may propose via control.json.",
       "type": "object",
@@ -181,60 +155,6 @@
         "retries": {
           "type": "integer",
           "minimum": 0
-        }
-      }
-    },
-    "eligibility": {
-      "type": "object",
-      "description": "Intake-only eligibility filter",
-      "additionalProperties": false,
-      "properties": {
-        "min_body_words": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "excluded_labels": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        }
-      }
-    }
-  },
-  "$defs": {
-    "enqueueItem": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "task"
-      ],
-      "properties": {
-        "task": {
-          "type": "string"
-        },
-        "when": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "field",
-            "op",
-            "value"
-          ],
-          "properties": {
-            "field": {
-              "type": "string"
-            },
-            "op": {
-              "type": "string",
-              "enum": [
-                "eq",
-                "ne",
-                "in"
-              ]
-            },
-            "value": {}
-          }
         }
       }
     }
