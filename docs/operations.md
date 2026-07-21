@@ -114,3 +114,42 @@ The exact offline, devcontainer, Copilot, and live sandbox checks are in
 [`docs/local-testing.md`](local-testing.md). Do not start a production pilot
 until the open blockers in [`docs/project-review.md`](project-review.md) are
 closed.
+
+## 8. Clean-state cutover
+
+The hardening plan
+(`.hyperclaude/plans/20260721-2056-harden-the-existing-plan-at.md`, Task 9)
+replaces the current static `on_success.enqueue` chain with validated
+handoffs and a new `runs`-only state shape (`docs/architecture.md`,
+"Lifecycle"). That schema change must start from a clean `tickets/` area on
+`agent-hq-state`, not a mix of old- and new-shape ticket directories:
+
+1. Confirm no live ticket depends on an existing `tickets/<n>/` directory
+   written under the pre-cutover schema (no `ACTIVE` ticket mid-flight when
+   the cutover lands).
+2. **MANUAL (operator):** on the `agent-hq-state` branch, archive those
+   `tickets/<n>/` directories outside the active `tickets/` namespace (or
+   remove them) before Task 9's commit lands. This is a direct edit to the
+   orphan state branch, not something the engine does for you.
+3. **Atomic-cutover rule:** the `on_success.enqueue` -> handoff swap lands in
+   the single Task 9 commit. No production interval may run the old static
+   enqueue and the new handoff progression side by side — do not dispatch
+   against a `tickets/` area that mixes pre- and post-cutover run shapes.
+
+## 9. Public-data governance
+
+Per PLAN.md decision 15, the pilot targets public repositories only, and
+intake must reject content that is not public-safe. The enforceable gate:
+when `config/projects.yml`'s `public` is `true`, a configured
+`public_safe_label` (e.g. `hq:public-safe`) is required on the parent issue;
+intake rejects a ticket missing that label **before the first state or
+artifact write** — so no unreviewed content ever reaches `agent-hq-state` or
+a work-repo artifact. The `public`/`public_safe_label` config fields
+(`schemas/projects.schema.json`) land in Task 6 of the hardening plan; the
+enforcing intake-rejection logic lands in Task 9.
+
+Private deployments do not get a public dashboard: use the operator CLI
+(`agent-hq` commands, §2 and `docs/project-review.md`) instead of GitHub
+Pages. `pages.yml` gating on `public: false` (skip new deploys, and the
+one-time manual unpublish step for an install that was previously public)
+lands in Task 17.
