@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-hq.dev/schemas/execute-result.schema.json",
+  "title": "Agent execute result (execute-result.json)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["outcome", "usage_known", "cost_usd", "tokens"],
+  "properties": {
+    "outcome": {
+      "type": "string",
+      "enum": ["success", "failure"]
+    },
+    "usage_known": { "type": "boolean" },
+    "cost_usd": { "type": ["number", "null"] },
+    "tokens": { "type": ["integer", "null"] },
+    "detail": { "type": "string" }
+  }
+}

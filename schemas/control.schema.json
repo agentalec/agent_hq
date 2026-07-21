@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-hq.dev/schemas/control.schema.json",
+  "title": "Agent control output (.agent-hq/control.json)",
+  "description": "Handoff identity = <source-run-id>:<handoff-key>.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["outcome"],
+  "properties": {
+    "outcome": {
+      "type": "string",
+      "enum": ["handoff", "complete", "blocked"]
+    },
+    "handoffs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/handoff" }
+    },
+    "reason": {
+      "type": "string"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "outcome": { "const": "handoff" } },
+        "required": ["outcome"]
+      },
+      "then": {
+        "required": ["handoffs"],
+        "properties": {
+          "handoffs": { "minItems": 1 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "outcome": { "enum": ["complete", "blocked"] } },
+        "required": ["outcome"]
+      },
+      "then": {
+        "not": { "required": ["handoffs"] }
+      }
+    },
+    {
+      "if": {
+        "properties": { "outcome": { "const": "blocked" } },
+        "required": ["outcome"]
+      },
+      "then": {
+        "required": ["reason"]
+      }
+    }
+  ],
+  "$defs": {
+    "handoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "task", "reason"],
+      "properties": {
+        "key": { "type": "string" },
+        "task": { "type": "string" },
+        "reason": { "type": "string" },
+        "repo": { "type": "string" },
+        "artifacts": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}
