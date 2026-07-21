@@ -3,20 +3,23 @@
 ## Flow
 
 1. A GitHub issue labeled `hq:intake` is the intended entry point. `intake.yml`
-   (triggered on issue open/label in the engine repo) reads it via the
-   `tracker` port, records a ticket on the state branch, and enqueues the
-   `spec` task.
+   (triggered on issue open/label in the engine repo) calls
+   `engine.runner.intake_ticket` -- engine entry logic, not a task file. It
+   reads the ticket via the `tracker` port, checks eligibility from
+   `config.projects["intake"]`/`["public"]`/`["public_safe_label"]` (rejecting
+   before any state/artifact write), records the ticket on the state branch,
+   and enqueues `config.projects["initial_task"]` (`spec` in the pilot config)
+   with the root run's repo resolved from the ticket.
    Cross-repository event delivery and repo-qualified ticket identity are not
    implemented; this is a pilot blocker in `docs/project-review.md`.
 
    The parent issue's repository is a configured value,
    `config.projects["engine_repo"]` (PLAN.md decision 3) — distinct from the
    work repositories tasks target — and that issue number is the ticket's
-   canonical key. This is recorded as a frozen decision here; wiring
-   `intake_repo()` and every tracker/messaging call through it is a routing
-   change that ships in Task 3 of the hardening plan
-   (`.hyperclaude/plans/20260721-2056-harden-the-existing-plan-at.md`), not
-   this one.
+   canonical key. Every tracker/messaging call that needs the engine's own
+   issue tracker routes through `engine.engine.intake_repo(config)`, which
+   returns `engine_repo`; `resolve_target_repo` separately selects a work
+   repo for code and PRs.
 2. State lives on an orphan `agent-hq-state` branch (`engine.state.GitJsonStateStore`,
    plain JSON files, one fixed implementation per PD-7 — not a port, no
    adapter to swap). All state-writing workflows share the
@@ -28,16 +31,24 @@
    `workflow_dispatch` for anything ready to execute.
 4. `run.yml` executes one task phase for a run inside the project
    devcontainer (`devcontainers/ci`, D7 — Codespaces parity), running
-   `scripts/run-phases.sh`: **prepare** (clone target repo, build the prompt
+   `scripts/run-phases.sh`: **prepare** (clone target repo, restore any
+   handoff `input_artifacts` from the source run's ledger, build the prompt
    bundle) -> **execute** (spawn `copilot -p "<prompt>" -s --no-ask-user
    --model claude-sonnet-4.5`, billed through a GitHub Copilot seat rather
    than a direct Anthropic key) -> **collect** (parse
-   `.agent-hq/execute-result.json`, commit outputs, open/update the artifact
-   PR, record adapter health).
-5. Tasks with a `gates.post` entry (e.g. `spec`'s `spec-approval`) stop after
-   collect until the gate's adapter reports `APPROVED`; `dispatch.yml`'s
-   sweep polls gate status and advances the ticket via `on_success.enqueue`
-   once approved. Merge is always a human action — no task auto-merges a PR.
+   `.agent-hq/execute-result.json`; on success, validate `.agent-hq/control.json`
+   against the three control outcomes, commit outputs, open a PR only when the
+   task declares `opens_pr`, persist declared outputs to this run's ledger
+   namespace, and record adapter health).
+5. A task's own transition is driven entirely by its validated
+   `.agent-hq/control.json` outcome (`schemas/control.schema.json` --
+   "Control outcomes" below), not a static `on_success` list. A `handoff`
+   outcome on a task with a `gates.post` entry (e.g. `spec`'s
+   `spec-approval`) stores the proposed handoffs pending and stops the run
+   at `WAITING_GATE` until the gate's adapter reports `APPROVED`;
+   `dispatch.yml`'s sweep polls gate status, applies the stored handoffs on
+   approval, and completes the run. Merge is always a human action — no task
+   auto-merges a PR.
 6. `pages.yml` renders a static dashboard (ticket/run state table, spend,
    waiting-on-humans list) after intake/dispatch/collect and on a `*/5`
    schedule.
@@ -48,29 +59,39 @@ The issue, agent workspace, PR, and state branch have different jobs:
 
 | Concern | Location | Durable? | Role |
 |---|---|---:|---|
-| Request and human conversation | GitHub issue in the intake repo | Yes | Control plane: intake, status, escalation, rework, and closing summary |
+| Request and human conversation | GitHub issue in the engine repo (`config.projects["engine_repo"]`) | Yes | Control plane: intake, status, escalation, gate approvals/reopen, and closing summary |
 | Active agent workspace | Target-repo clone at `<workdir>/_target/<run_id>` inside the Actions devcontainer | No | Where the agent reads, edits, and tests during one run |
-| Runner-only metadata | `.agent-hq/bundle.json`, `.agent-hq/diff.patch`, and `.agent-hq/execute-result.json` in that clone | No | Handoff between prepare, execute, and collect; excluded from pushed work |
+| Runner-only metadata | `.agent-hq/bundle.json`, `.agent-hq/diff.patch`, `.agent-hq/execute-result.json`, and `.agent-hq/control.json` in that clone | No | Handoff between prepare, execute, and collect; excluded from pushed work |
 | Produced work | `agent-hq/<run_id>` branch in the target repo | Yes | Canonical output commit for that task and the base for its child task |
-| Human review | Draft PR in the target repo, when the task has a post gate or `opens_pr: true` | Yes | Approval/review surface; not the engine state store |
+| Human review | Draft PR in the target repo, only when the task declares `opens_pr: true` | Yes | Approval/review surface; not the engine state store |
 | Orchestration memory | Orphan `agent-hq-state` branch in the engine repo | Yes | Canonical ticket, run, event, gate, artifact, cost, and adapter-health state |
 | Dashboard | GitHub Pages projection of the state branch | Rebuildable | Read-only operator view, not a source of truth |
 | Agent session/conversation memory | None in P0 | No | A retry starts a new process and clone; there is no saved LLM session to resume |
 
 Every successful task's collect phase pushes its result as
-`agent-hq/<run_id>`. A PR is more selective: `spec` and `arch-approval` open
-draft artifact PRs because they have human gates, while `implement` opens the
-draft implementation PR because it declares `opens_pr: true`. `breakdown`,
-`review`, and `finalize` still produce durable task branches/output commits,
-but do not open separate PRs. `finalize` finds the earlier implementation PR,
-posts `summary.md` to the issue, requests reviewers, and marks that PR ready;
-merge remains human-only.
+`agent-hq/<run_id>` in its resolved work repo (`run.repo`). A PR is more
+selective: only `implement` opens one, because it declares `opens_pr: true`.
+Every other task -- including `spec` and `arch-approval`, which carry human
+gates -- produces a durable task branch/output commit with no separate PR of
+its own; their gates are authorized comments on the parent engine issue
+(`github-issue-comment`, `docs/ports/gate.md`), not PR reviews. `finalize`
+writes `specs/<ticket>/summary.md` and emits `complete`; queue-empty
+completion (`engine.engine._complete_if_queue_empty`) is what then posts the
+closing summary to the issue, marks every recorded work-repo PR ready
+(`ticket.work_repos[].pr_ref` -- i.e. `implement`'s PR, if any), and closes
+the issue. Merge remains human-only.
 
 The state branch is the engine's durable memory, stored as:
 
 - `tickets/<id>/state.json` — current ticket and run snapshots, including
-  bindings, deadlines, artifacts, output commits, and PR/gate references.
-- `tickets/<id>/events.jsonl` — append-only lifecycle and rework events.
+  bindings, deadlines, artifacts, output commits, `pending_handoffs`, and
+  PR/gate references.
+- `tickets/<id>/artifacts/<run_id>/` — the ledger: each run's declared
+  `outputs.artifacts` (plus any inherited artifact an accepted handoff
+  forwards), namespaced by the producing run so a sibling handoff can never
+  overwrite another run's snapshot.
+- `tickets/<id>/events.jsonl` — append-only lifecycle, handoff
+  (`proposed`/`accepted`/`rejected`), and rework events.
 - `health/latest.json` — latest adapter health observations.
 
 The next task reconstructs its context from the GitHub issue, its inlined task
@@ -82,10 +103,12 @@ vector store, transcript archive, or session checkpoint/resume mechanism.
 ## Lifecycle
 
 Frozen by Phase 0 of the hardening plan
-(`.hyperclaude/plans/20260721-2056-harden-the-existing-plan-at.md`, Task 1);
-the routing, schema, and engine changes that implement it land task-by-task
-through that plan's later phases — this section documents the contract, not
-the current runtime.
+(`.hyperclaude/plans/20260721-2056-harden-the-existing-plan-at.md`, Task 1).
+The control-outcome/handoff mechanics, gate-approval completion, and
+queue-empty completion below are **live** as of the atomic cutover (Task 9);
+the mid-flight close/operator-block/reopen edges and the stable per-issue
+work branch are **planned** (Tasks 12, 14, 16, 18 of that plan) and marked
+as such below.
 
 A ticket carries one of three lifecycle states (`engine.models.TicketStatus`):
 
@@ -95,26 +118,33 @@ A ticket carries one of three lifecycle states (`engine.models.TicketStatus`):
 | `BLOCKED` | A non-engine issue close or operator `block` interrupted active work; the queue and any pending gate are preserved for resume. |
 | `DONE` | Engine complete — see below. Merge status is never tracked or implied. |
 
-Edges:
+A ticket also reaches `BLOCKED` **today** whenever a run's own accounting
+says it must stop: a `blocked` control outcome, a rejected/expired gate, a
+failed `apply_handoffs` guard, retries exhausted, or a tripped loop guard/
+budget cap (`engine.engine._block_ticket` and its callers). The edges below
+are the hardening plan's dedicated close/reopen machinery layered on top of
+that:
 
-- `ACTIVE` -> `BLOCKED` — a non-engine issue close with work/gate/current
-  remaining, or an operator `block`: the state fence commits first
-  (terminalize any `RUNNING` run as `interrupted_run_id`; a `WAITING_GATE` run
-  is left as-is), then the Actions run is cancelled and the pinned comment
-  updated.
-- `BLOCKED` -> `ACTIVE` — an authorized `/agent-hq reopen <reason>` command,
-  the native `issues: reopened` event, or operator `unblock`: retains the
-  queue and pending gates, and enqueues attempt+1 of any `interrupted_run_id`.
-- `ACTIVE` -> `DONE` — queue, current, and pending gates are exhausted and the
-  terminal run's own recorded artifacts include the closing summary: required
-  work PRs are marked ready and the issue is closed. `DONE` is displayed as
+- **[planned, Task 16]** `ACTIVE` -> `BLOCKED` — a non-engine issue close
+  with work/gate/current remaining, or an operator `block`: the state fence
+  commits first (terminalize any `RUNNING` run as `interrupted_run_id`; a
+  `WAITING_GATE` run is left as-is), then the Actions run is cancelled and
+  the pinned comment updated.
+- **[planned, Tasks 14/16/18]** `BLOCKED` -> `ACTIVE` — an authorized
+  `/agent-hq reopen <reason>` command, the native `issues: reopened` event,
+  or operator `unblock`: retains the queue and pending gates, and enqueues
+  attempt+1 of any `interrupted_run_id`.
+- **[live, Task 9]** `ACTIVE` -> `DONE` — queue, current, and pending gates
+  are exhausted and the terminal run's own recorded artifacts include the
+  closing summary: required work PRs are marked ready and the issue is
+  closed (`engine.engine._complete_if_queue_empty`). `DONE` is displayed as
   **"engine complete; merge status not tracked"** (PLAN.md decision 12) —
   whether a human subsequently merges those PRs is out of scope for ticket
   state.
-- `DONE` -> `ACTIVE` — an authorized reopen/native reopen when every recorded
-  work PR is still open or none exists: enqueues the configured
-  `initial_task`. Any recorded PR already merged or closed keeps the ticket
-  `DONE` and requires a new ticket.
+- **[planned, Task 16]** `DONE` -> `ACTIVE` — an authorized reopen/native
+  reopen when every recorded work PR is still open or none exists: enqueues
+  the configured `initial_task`. Any recorded PR already merged or closed
+  keeps the ticket `DONE` and requires a new ticket.
 
 ### Control outcomes
 
@@ -134,7 +164,7 @@ silently ignored:
   recorded blocked and the ticket moves to `BLOCKED` with that reason,
   escalating to a human with no auto-retry.
 
-### Work branches
+### Work branches [planned, Task 12]
 
 Each work repository a ticket touches gets exactly one stable branch,
 `agent-hq/<issue-number>` (PLAN.md decision 4 — not `agent-hq/<run_id>`;
@@ -149,7 +179,11 @@ memory live" above; the isolated-job cutover that lands it is Task 12.
 
 Orchestration approvals and reopen use the same authorized-comment grammar on
 the parent (engine-repository) issue, verified against the configured
-approver group and deduped by comment id:
+approver group and deduped by comment id. The approve/request-changes/reject
+grammar is **live** (`github_issue_comment_gate.py`'s `status()`, landed with
+the Task 9 cutover); `reopen` is **planned** (Task 14/16) -- it needs the
+`issue_comment`/`issues` event routing Task 14 adds and the guarded-reopen
+transition Task 16 builds:
 
 - `/agent-hq approve <run-id>` -> gate `APPROVED`.
 - `/agent-hq request-changes <run-id> <reason>` -> gate `CHANGES_REQUESTED`
@@ -157,9 +191,10 @@ approver group and deduped by comment id:
   applied).
 - `/agent-hq reject <run-id> <reason>` -> gate `REJECTED` (terminal for that
   proposal; `pending_handoffs` are cleared).
-- `/agent-hq reopen <reason>` -> resumes a `BLOCKED` or `DONE` ticket per the
-  edges above (PLAN.md decision 14); native `issues: reopened` is the
-  equivalent signal, still subject to the same guards.
+- **[planned]** `/agent-hq reopen <reason>` -> resumes a `BLOCKED` or `DONE`
+  ticket per the edges above (PLAN.md decision 14); native
+  `issues: reopened` is the equivalent signal, still subject to the same
+  guards.
 
 ## Ports and adapters
 
@@ -174,7 +209,7 @@ contracts: [`docs/ports/README.md`](ports/README.md).
 | `executor` | `copilot-cli` | spawns `copilot -p` (Claude Sonnet 4.5, billed through Copilot); one-line config swap to `claude-code-headless` (spawns `claude -p` on a direct Anthropic key) |
 | `agent-session` | `copilot-cli` | worktree prepare/run/collect (same class as `executor`); `CopilotCli` subclasses `ClaudeCodeHeadless` and inherits its git/PR plumbing unchanged |
 | `messaging` | `github-comment` | status/escalation comments |
-| `gate` | `pr-review` | spec and architecture approval are both PR reviews on the artifact PR (D2) |
+| `gate` | `github-issue-comment` | the `default`/`spec-approval` logical bindings resolve here (`config/components.yml`) -- an authorized-comment approval on the parent engine issue (`docs/ports/gate.md`); `pr-review` remains registered for a task that binds to it explicitly for code-review-style approval on a work-repo PR, but no wired P0 task currently does |
 | `poll` | — | Protocol only (`engine.ports.Poll`); no adapter ships in P0 (D3) |
 | `qa-env` | — | Protocol only (`engine.ports.QaEnv`); no adapter ships in P0 (D3) |
 | `state-store` | `git-json` | fixed implementation, not a port (PD-7) — `engine.state.GitJsonStateStore` is constructed directly, never through the registry |
@@ -226,8 +261,12 @@ The full decision record is `.hyperclaude/decisions/20260718-p0-scope-cut.md`
 Summarized here so this doc is self-contained:
 
 1. **TE-11 waived** — no checkpoint/resume; see "Retry semantics" above.
-2. **Gates: `pr-review` only** — no `github-environment` native-approval
-   adapter in P0; both spec and architecture approval are PR reviews.
+2. **Gates: `pr-review` only in the original P0 cut** — no
+   `github-environment` native-approval adapter ships; the hardening plan's
+   atomic cutover (Task 9) repoints the `default`/`spec-approval` bindings
+   onto the authorized `github-issue-comment` gate instead
+   (`docs/ports/gate.md`), keeping `pr-review` registered for a task that
+   wants code-review-style approval on a work-repo PR explicitly.
 3. **Six adapters, not eight** — `poll` (`github-issue-reactions`) and
    `qa-env` (`docker-compose`) ship as Protocols only; no P0 task consumes
    them.
@@ -235,8 +274,11 @@ Summarized here so this doc is self-contained:
    scoped to the pilot repos, not a dedicated least-privilege App
    installation.
 5. **Serialized state writes, not transactions** — the `agent-hq-state`
-   Actions concurrency group serializes writes; no reload-and-reapply
-   conflict resolution.
+   Actions concurrency group is still the primary concurrency control (D5).
+   The hardening plan (Task 7) adds a bounded fetch/reset/reapply replay
+   (`engine.state.GitJsonStateStore.write`, `_MAX_WRITE_ATTEMPTS`) as a
+   safety net on a confirmed non-fast-forward push rejection, not a
+   general-purpose transaction/conflict-resolution layer.
 6. **Minimal dashboard** — one static state table (ticket/run, spend,
    artifact/PR links, waiting-on-humans), not the full kanban/timeline/spend
    breakdown view.
