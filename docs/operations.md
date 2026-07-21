@@ -190,3 +190,35 @@ over. To recover:
    built on `recorded_head`, now matching the reset branch). `unblock` is
    only for an operator/`issue_closed` block, not this one; `reconcile`
    would just reproduce the same conflict.
+
+## 11. Push/replay as cross-ticket serialization (Task 13)
+
+There is no lock on `agent-hq-state` beyond two things: per-ticket run
+exclusivity (at most one `RUNNING`/`WAITING_GATE` run per ticket, enforced
+in `claim_run`) and every state write being a short transaction -- read,
+mutate in memory, commit, push. A write whose push is rejected (someone
+else's commit landed first) just replays: fetch, `reset --hard`, re-run the
+same mutation against fresh state (`engine/state.py`'s bounded retry). That
+push/replay loop, not a separate lock, is what serializes concurrent writers
+across *different* tickets sharing the one `agent-hq-state` branch.
+
+Collect never holds that transaction open across its external side effects
+(branch push, PR open, gate request) -- it does those first, then commits
+whatever the result was in one final write. That gap between "did the
+external thing" and "recorded it" is exactly why collect revalidates its own
+claim twice before committing anything the ticket doesn't already know
+about:
+
+- **Early, read-only, immediately before the branch push/PR-open/gate
+  request**: if the ticket isn't `ACTIVE` or this run isn't `RUNNING`
+  anymore (superseded -- e.g. the dispatcher's lost-run sweep already
+  retried it under a new run_id), collect stops before attempting any of
+  them.
+- **Final, inside the write transaction**: the same check, re-read fresh at
+  commit time, is the authoritative fence -- even if a race let a push slip
+  past the early check, the run's result is simply never recorded.
+
+A re-driven (retried) lost run therefore never duplicates a comment, PR, or
+state entry, even if its original attempt is still straggling: the
+straggler observes its own claim is gone and stops, rather than relying
+solely on the branch's fast-forward rejection to keep it harmless.

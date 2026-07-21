@@ -736,6 +736,69 @@ def test_collect_unknown_usage_blocks_never_retries(config, taskdefs, store, tmp
     assert adapters.messaging.calls  # escalation notified
 
 
+def test_collect_ticket_blocked_mid_collect_is_zombie_noop(config, taskdefs, store, tmp_path):
+    """Task 13: a block observed mid-collect (the ticket flips BLOCKED via a
+    concurrent path -- e.g. a future mid-flight-close fence -- while this
+    run's own collect job is executing) makes the rest of collect a no-op:
+    no branch push, no PR, no run-state mutation. The narrowed close-fencing
+    contract is 'no NEW side effect starts once the block is observed', not
+    'no side effect can be in flight' -- so this is checked read-only before
+    the push/PR is even attempted, not only inside the final write."""
+    _seed(store, _run_dict("buildrun", "build", state="RUNNING"))
+    _stage(config, "buildrun", "impl/7.md", "the impl")
+    _write_execute_result(config, "buildrun")
+    _write_control(config, "buildrun", {"outcome": "complete"})
+    store.write(lambda txn: txn.set_ticket("7", status="BLOCKED"))
+    agent = FakeAgent(tmp_path / "work")
+    adapters = _adapters(tracker=FakeTracker(_details()), agent=agent)
+    run_task("buildrun", "collect", config, taskdefs, store,
+             now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
+
+    assert agent.landed == []
+    assert agent.opened_prs == []
+    state = store.read_state("7")
+    assert state["status"] == "BLOCKED"  # untouched
+    assert state["runs"][0]["state"] == "RUNNING"  # never flipped to SUCCEEDED
+    assert not state.get("work_repos")
+
+
+def test_collect_redriven_lost_run_creates_no_duplicate_side_effects(
+    config, taskdefs, store, tmp_path
+):
+    """Task 13: the dispatcher's lost-run sweep retires a RUNNING run and
+    queues a replacement attempt before its original (straggling) collect
+    job actually finishes. When that original run's collect finally runs, it
+    must be a pure no-op -- no duplicate branch push, PR, or state entry --
+    even though its own execute-result/control.json look like an ordinary
+    success."""
+    _seed(store, _run_dict(
+        "buildrun", "build", state="RUNNING", attempt=0, source_event_id="evt", enqueue_index=0,
+        deadline="2026-07-19T00:00:00Z", attempt_started_at="2026-07-18T08:00:00Z",
+    ))
+    wf = FakeWorkflowApi()  # no active workflow -- "lost"
+    tracker = FakeTracker(_details())
+    sweep(config, taskdefs, store, wf, "2026-07-18T09:00:00Z", _adapters(tracker=tracker))
+    runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
+    assert runs["buildrun"]["state"] == "FAILED"
+    retries = [r for r in runs.values() if r["task_id"] == "build" and r["attempt"] == 1]
+    assert len(retries) == 1
+
+    # The original run's collect job, unaware it's been retired, finally
+    # lands -- a zombie by now (its own run state is no longer RUNNING).
+    _stage(config, "buildrun", "impl/7.md", "the impl")
+    _write_execute_result(config, "buildrun")
+    _write_control(config, "buildrun", {"outcome": "complete"})
+    agent = FakeAgent(tmp_path / "work")
+    run_task("buildrun", "collect", config, taskdefs, store,
+             now_iso="2026-07-18T09:05:00Z", adapter_fn=_adapters(tracker=tracker, agent=agent))
+
+    assert agent.landed == []
+    assert agent.opened_prs == []
+    state = store.read_state("7")
+    assert state["runs"][0]["state"] == "FAILED"  # unchanged by the late zombie collect
+    assert not state.get("work_repos")
+
+
 # --------------------------------------------------------------------------
 # Sweep.
 # --------------------------------------------------------------------------

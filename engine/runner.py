@@ -64,6 +64,7 @@ from engine.engine import (
     _escalate,
     _handle_failure,
     apply_handoffs,
+    check_claim_active,
     enqueue,
     intake_repo,
     resolve_target_repo,
@@ -665,6 +666,18 @@ def _collect_success(
         if (staging_dir / rel_path).is_file()
     }
 
+    # Narrowed close-fencing contract (Task 13): revalidate the claim, read-
+    # only, immediately before any external side effect -- a stale/zombie run
+    # (e.g. already retried by the dispatcher's lost-run sweep, or its ticket
+    # blocked by a concurrent path) stops here rather than attempting a push/
+    # PR/gate-request it can no longer own. This is NOT the authoritative
+    # fence (a race can still slip a push through -- fenced by the recorded-
+    # head fast-forward -- and comment/PR dedupe markers); the FINAL write
+    # transaction below re-checks fresh and is what actually decides whether
+    # anything gets recorded.
+    if not check_claim_active(store.read_state(ticket_id), run_id):
+        return
+
     # -- Land the work patch on the ticket's stable per-issue branch. This
     # is the ONLY place a work-repo clone/push happens (Task 12: execute
     # never holds a push credential) -- a fresh clone, `git apply` the
@@ -705,13 +718,14 @@ def _collect_success(
     result: dict = {}
 
     def finalize(txn) -> None:
-        # Claim revalidation, inside the write transaction, FIRST: only the
-        # currently-claimed run (still RUNNING) may reconcile or block. A
-        # stale/zombie run (superseded since this collect started) treats
-        # its own land attempt -- landed or not -- as a no-op and never
-        # touches the ticket.
-        current = txn.get_run(ticket_id, run_id)
-        if current is None or current["state"] != "RUNNING":
+        # Claim revalidation, inside the write transaction, FIRST -- the
+        # AUTHORITATIVE fence: only a run that's still the ticket's current,
+        # ACTIVE-ticket, RUNNING claim may reconcile or block. A stale/zombie
+        # run (superseded since this collect started, or its ticket blocked
+        # by a concurrent path since the early check above) treats its own
+        # land attempt -- landed or not -- as a no-op and never touches the
+        # ticket.
+        if not check_claim_active(txn.ticket_doc(ticket_id), run_id):
             result["zombie"] = True
             return
 

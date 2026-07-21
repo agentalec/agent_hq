@@ -149,6 +149,28 @@ def check_concurrency(
     return other_active < in_flight_cap
 
 
+def check_claim_active(ticket_doc: dict | None, run_id: str) -> bool:
+    """True if `run_id` is still the ticket's live, currently-claimed run --
+    the ticket is `ACTIVE` and this run is `RUNNING`.
+
+    False means a stale/zombie claim: the ticket was blocked by a concurrent
+    path since this run started, or the run itself was superseded (e.g. the
+    dispatcher's lost-run sweep already retried it under a new run_id). This
+    is the narrowed close-fencing predicate (Task 13) collect's `_collect_
+    success` revalidates twice: read-only, immediately before any external
+    side effect (branch push/PR-open/gate-request), and, authoritatively,
+    re-read fresh inside the FINAL write transaction right before commit --
+    so a zombie's late land never sets a ticket-wide `branch_conflict` and
+    never records a result, even if a race let its push/PR slip through the
+    early check. Pure (a state doc in, a verdict out) like the other guards
+    above, so it needs no state-store read of its own.
+    """
+    if ticket_doc is None or ticket_doc.get("status") != "ACTIVE":
+        return False
+    run = next((r for r in ticket_doc.get("runs", []) if r["run_id"] == run_id), None)
+    return run is not None and run["state"] == "RUNNING"
+
+
 def check_loop_guard(
     state_doc: dict, max_runs: int = 25, max_depth: int = 12
 ) -> tuple[bool, list[dict] | None]:
