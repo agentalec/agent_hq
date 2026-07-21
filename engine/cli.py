@@ -145,7 +145,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     intake_parser = subparsers.add_parser("intake", help="Intake a new ticket")
     _add_common_args(intake_parser)
-    intake_parser.add_argument("--issue", required=True, help="Issue ref (number or org/repo#N)")
+    intake_parser.add_argument(
+        "--issue", required=True, help="Issue number in the configured engine_repo"
+    )
     intake_parser.add_argument("--event-key", required=True, help="Source-stable event key")
     intake_parser.set_defaults(func=_intake)
 

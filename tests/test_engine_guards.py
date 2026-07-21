@@ -1,12 +1,16 @@
 from pathlib import Path
 
+from engine.config import Config
 from engine.engine import (
     check_budget,
     check_concurrency,
     check_loop_guard,
     enqueue,
+    intake_repo,
     kill_switch_active,
+    resolve_target_repo,
 )
+from engine.models import TicketDetails
 from engine.state import GitJsonStateStore
 from test_state import _clone_worktree, _make_origin
 
@@ -207,3 +211,22 @@ def test_predicate_in_with_scalar_value_raises():
 
     with _pytest.raises(PredicateError):
         evaluate({"field": "a", "op": "in", "value": "beyond-crud"}, {"a": "beyond"})
+
+
+def test_intake_repo_returns_engine_repo():
+    config = Config(
+        components={}, repos={}, projects={"engine_repo": "org/engine"}, approvers={}, budgets={},
+    )
+    assert intake_repo(config) == "org/engine"
+
+
+def test_resolve_target_repo_still_returns_a_work_repo():
+    config = Config(
+        components={},
+        repos={"org/product-be": {"product_area": "billing"}},
+        projects={"engine_repo": "org/engine"},
+        approvers={},
+        budgets={},
+    )
+    details = TicketDetails(ticket_id="1", title="Billing bug", body="", labels=[])
+    assert resolve_target_repo(config, details) == "org/product-be"

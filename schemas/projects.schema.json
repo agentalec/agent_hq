@@ -4,13 +4,17 @@
   "title": "Projects config",
   "type": "object",
   "additionalProperties": false,
-  "required": ["repos", "intake_label"],
+  "required": ["repos", "intake_label", "engine_repo"],
   "properties": {
     "repos": {
       "type": "array",
       "items": { "type": "string" },
       "minItems": 1
     },
-    "intake_label": { "type": "string" }
+    "intake_label": { "type": "string" },
+    "engine_repo": {
+      "type": "string",
+      "description": "org/repo hosting the engine's own issue tracker (intake, pinned comments, escalations) -- distinct from the work repos in repos.yml"
+    }
   }
 }

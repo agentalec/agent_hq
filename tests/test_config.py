@@ -15,6 +15,7 @@ def test_pilot_config_loads_clean():
     assert config.components["executor"]["adapter"] == "copilot-cli"
     assert "example-org/product-be" in config.repos
     assert config.projects["intake_label"] == "hq:intake"
+    assert config.projects["engine_repo"] == "example-org/agent-hq"
     assert "product-owners" in config.approvers["groups"]
     assert config.budgets["ticket_cap_usd"] == 25
 

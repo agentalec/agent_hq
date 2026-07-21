@@ -213,11 +213,10 @@ def _default_adapter_fn(config: Config) -> AdapterFn:
 
 
 def intake_repo(config: Config) -> str | None:
-    """The repo whose issue tracker intake reads/writes. Pilot assumption: the
-    first configured project repo. ponytail: single intake repo for the pilot;
-    per-repo routing lands with multi-tenant intake."""
-    repos = config.projects.get("repos") or list(config.repos)
-    return repos[0] if repos else None
+    """The repo whose issue tracker intake, pinned comments, and escalations
+    read/write -- the engine's own repo, distinct from the work repos a
+    ticket's code lands in (see `resolve_target_repo`)."""
+    return config.projects.get("engine_repo")
 
 
 def resolve_target_repo(config: Config, details) -> str | None:

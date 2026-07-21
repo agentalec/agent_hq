@@ -10,6 +10,9 @@ from argparse import Namespace
 from pathlib import Path
 
 from engine import cli
+from engine.config import Config
+from engine.models import TicketDetails
+from engine.runner import intake_ticket
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -44,3 +47,58 @@ def test_run_execute_prints_json(monkeypatch, capsys):
     monkeypatch.setattr("engine.runner.run_task", lambda *a, **k: {"outcome": "success"})
     cli._run(_args(phase="execute"), REPO_ROOT)
     assert json.loads(capsys.readouterr().out) == {"outcome": "success"}
+
+
+class _FakeTracker:
+    """Records the repo it was built with and the ref it was fetched with."""
+
+    def __init__(self, repo):
+        self.repo = repo
+        self.fetched_ref = None
+
+    def fetch_ticket(self, ref):
+        self.fetched_ref = ref
+        return TicketDetails(ticket_id="42", title="t", body="b", labels=[])
+
+
+class _FakeStore:
+    def read_state(self, ticket_id):
+        return None
+
+
+def _intake_config():
+    return Config(
+        components={"tracker": {"adapter": "github-issues"}}, repos={},
+        projects={"engine_repo": "engine-org/engine-repo", "intake_label": "hq:intake"},
+        approvers={}, budgets={},
+    )
+
+
+def _adapter_fn(captured):
+    def fn(port, adapter_name, repo=None):
+        tracker = _FakeTracker(repo)
+        captured.append(tracker)
+        return tracker
+
+    return fn
+
+
+def test_intake_bare_issue_id_touches_only_engine_repo():
+    captured = []
+    result = intake_ticket(
+        "42", "evt-1", _intake_config(), {"intake": {}}, _FakeStore(), _adapter_fn(captured)
+    )
+    assert captured[0].repo == "engine-org/engine-repo"
+    assert captured[0].fetched_ref == "42"
+    assert result == "skipped"
+
+
+def test_intake_stale_org_repo_ref_form_is_ignored_not_honored():
+    captured = []
+    result = intake_ticket(
+        "other-org/other-repo#42", "evt-1", _intake_config(), {"intake": {}},
+        _FakeStore(), _adapter_fn(captured),
+    )
+    assert captured[0].repo == "engine-org/engine-repo"
+    assert captured[0].fetched_ref == "42"
+    assert result == "skipped"

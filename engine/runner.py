@@ -92,15 +92,6 @@ def _find_run(store, taskdefs, run_id: str):
     raise KeyError(f"run {run_id} not found in any ticket state")
 
 
-def _repo_from_ref(config: Config, ref: str) -> str | None:
-    """`org/repo#123` carries its own repo; a bare number falls back to the
-    configured intake repo."""
-    head = ref.split("#", 1)[0]
-    if "/" in head:
-        return head
-    return intake_repo(config)
-
-
 def _rework_comments(store, ticket_id, run_id) -> str | None:
     for event in reversed(store.read_events(ticket_id)):
         if event.get("run_id") == run_id and event.get("kind") == "run.rework":
@@ -477,14 +468,16 @@ def _collect_success(
 
 def intake_ticket(issue_ref: str, event_key: str, config, taskdefs, store, adapter_fn=None) -> str:
     """Run the intake task declaratively. Returns one of
-    "skipped" / "blocked" / "enqueued"."""
+    "skipped" / "blocked" / "enqueued".
+
+    `issue_ref` is a bare issue id in `config.projects["engine_repo"]` --
+    intake has exactly one repo, so a stale `org/repo#N` form (a work repo
+    naming itself) is ignored: only the trailing number is honored."""
     adapter_fn = adapter_fn or eng._default_adapter_fn(config)
     intake_task = taskdefs["intake"]
 
-    tracker = adapter_fn(
-        "tracker", config.components["tracker"]["adapter"], repo=_repo_from_ref(config, issue_ref)
-    )
-    details = tracker.fetch_ticket(issue_ref)
+    tracker = adapter_fn("tracker", config.components["tracker"]["adapter"], repo=intake_repo(config))
+    details = tracker.fetch_ticket(issue_ref.rsplit("#", 1)[-1])
     ticket_id = details.ticket_id
 
     if config.projects["intake_label"] not in details.labels:

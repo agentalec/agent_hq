@@ -3,3 +3,4 @@ repos:
   - example-org/product-be
   - example-org/product-fe
 intake_label: hq:intake
+engine_repo: example-org/agent-hq
