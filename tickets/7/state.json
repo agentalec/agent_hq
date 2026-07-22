@@ -61,6 +61,30 @@
       "deadline": "2026-07-22T11:40:03Z",
       "attempt_started_at": "2026-07-22T10:10:03Z",
       "base_commit": "dbd221992b4569412c1969bffff99f2642160205"
+    },
+    {
+      "run_id": "b7b1c96bf4e8e4a0",
+      "task_id": "implement",
+      "task_version": 1,
+      "ticket_id": "7",
+      "state": "QUEUED",
+      "attempt": 1,
+      "bindings": {
+        "tracker": "github-issues",
+        "agent-session": "copilot-cli",
+        "messaging": "github-comment"
+      },
+      "cost_usd": null,
+      "tokens": null,
+      "usage_known": false,
+      "artifacts": [],
+      "chain_depth": 1,
+      "parent_run_id": "cb1cd1421abcd8e8",
+      "handoff_key": "implement-glossary",
+      "repo": "agentalec/care_docs",
+      "input_artifacts": [
+        "specs/7/spec.md"
+      ]
     }
   ],
   "work_repos": [
