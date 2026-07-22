@@ -2,3 +2,7 @@
 {"event_id": "cb1cd1421abcd8e8:collected", "kind": "run.collected", "ticket_id": "7", "run_id": "cb1cd1421abcd8e8", "cost_usd": 0.0}
 {"event_id": "cb1cd1421abcd8e8:waiting_gate", "kind": "run.waiting_gate", "ticket_id": "7", "run_id": "cb1cd1421abcd8e8", "state": "WAITING_GATE", "artifacts": ["specs/7/spec.md"]}
 {"event_id": "cb1cd1421abcd8e8:implement-glossary:proposed", "kind": "handoff.proposed", "ticket_id": "7", "run_id": "cb1cd1421abcd8e8", "detail": "Specification approved. Create glossary page with domain term definitions, integrate into sidebar navigation, and ensure availability across documentation versions."}
+{"event_id": "c81d09d02227bb14:queued", "kind": "run.queued", "ticket_id": "7", "run_id": "c81d09d02227bb14", "task_id": "implement", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment", "gate": "github-issue-comment"}}
+{"event_id": "cb1cd1421abcd8e8:implement-glossary:accepted", "kind": "handoff.accepted", "ticket_id": "7", "run_id": "cb1cd1421abcd8e8", "detail": "Specification approved. Create glossary page with domain term definitions, integrate into sidebar navigation, and ensure availability across documentation versions."}
+{"event_id": "cb1cd1421abcd8e8:succeeded", "kind": "run.succeeded", "ticket_id": "7", "run_id": "cb1cd1421abcd8e8", "state": "SUCCEEDED"}
+{"event_id": "5044556135:approval", "kind": "gate.decided", "ticket_id": "7", "run_id": "cb1cd1421abcd8e8", "detail": "approved by agentalec at 2026-07-22T10:09:27Z"}
