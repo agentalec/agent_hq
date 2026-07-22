@@ -8,7 +8,7 @@
       "task_id": "spec",
       "task_version": 1,
       "ticket_id": "5",
-      "state": "RUNNING",
+      "state": "SUCCEEDED",
       "attempt": 0,
       "bindings": {
         "tracker": "github-issues",
@@ -19,14 +19,27 @@
       "cost_usd": 0.0,
       "tokens": null,
       "usage_known": true,
-      "artifacts": [],
+      "artifacts": [
+        "specs/5/spec.md"
+      ],
       "chain_depth": 0,
       "source_event_id": "5:labeled:2026-07-22T08:31:39Z",
       "enqueue_index": 0,
       "repo": "agentalec/care_docs",
       "deadline": "2026-07-22T09:02:42Z",
       "attempt_started_at": "2026-07-22T08:32:42Z",
-      "base_commit": "dbd221992b4569412c1969bffff99f2642160205"
+      "base_commit": "dbd221992b4569412c1969bffff99f2642160205",
+      "output_commit": "dbd221992b4569412c1969bffff99f2642160205",
+      "pr_ref": null
+    }
+  ],
+  "work_repos": [
+    {
+      "repo": "agentalec/care_docs",
+      "branch": "agent-hq/5",
+      "base_branch": "main",
+      "recorded_head": "dbd221992b4569412c1969bffff99f2642160205",
+      "pr_ref": null
     }
   ]
 }
