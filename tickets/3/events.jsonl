@@ -1,3 +1,4 @@
 {"event_id": "34ec7b95644fcf2a:queued", "kind": "run.queued", "ticket_id": "3", "run_id": "34ec7b95644fcf2a", "task_id": "spec", "task_version": 1, "state": "QUEUED", "bindings": {}}
 {"event_id": "34ec7b95644fcf2a:collected", "kind": "run.collected", "ticket_id": "3", "run_id": "34ec7b95644fcf2a"}
 {"event_id": "34ec7b95644fcf2a:failed", "kind": "run.failed", "ticket_id": "3", "run_id": "34ec7b95644fcf2a", "state": "FAILED"}
+{"event_id": "34ec7b95644fcf2a:blocked", "kind": "ticket.blocked", "ticket_id": "3", "run_id": "34ec7b95644fcf2a", "detail": "attempt failed with unknown spend"}
