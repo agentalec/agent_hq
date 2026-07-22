@@ -37,7 +37,10 @@ set -e
 
 case "$exit_code" in
   0)
-    git -c credential.helper="$CRED_HELPER" clone --branch agent-hq-state --single-branch "$URL" ./_state
+    # --depth 1: checkout cost stays independent of state-branch history
+    # (PLAN.md "State and branch layout"). Push/fetch/reset all work from a
+    # shallow clone; later fetches deepen only by the session's new commits.
+    git -c credential.helper="$CRED_HELPER" clone --depth 1 --branch agent-hq-state --single-branch "$URL" ./_state
     set_bot_identity ./_state
     git -C ./_state config credential.helper "$CRED_HELPER"
     ;;

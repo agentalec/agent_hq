@@ -24,10 +24,10 @@ NON_TERMINAL = {"QUEUED", "RUNNING", "WAITING_GATE"}
 # Ports whose concrete adapter a run records at prepare time.
 BINDABLE_PORTS = ("tracker", "agent-session", "messaging")
 
-# In-flight (pipeline-occupying) states, used for the global ticket cap.
-ACTIVE_STATES = {"QUEUED", "RUNNING", "WAITING_GATE"}
-# States that make a ticket exclusive for dispatch: a QUEUED sibling merely
-# waits its turn and must not block dispatching the run under evaluation.
+# States that make a ticket exclusive for dispatch (and count towards the
+# global in-flight cap): a QUEUED run merely waits its turn -- counting it
+# would let a batch of already-queued tickets starve every future dispatch
+# once the cap is reached (mirrors `state._EXCLUSIVE_STATES` in `claim_run`).
 EXCLUSIVE_STATES = {"RUNNING", "WAITING_GATE"}
 
 
@@ -127,8 +127,9 @@ def check_concurrency(
     Refused when the ticket has another run in an EXCLUSIVE state
     (RUNNING/WAITING_GATE — a QUEUED sibling just waits, and the run under
     evaluation never blocks itself), unless parallel_ok; or when the number
-    of OTHER tickets with any in-flight run has already reached the global
-    cap (the run's own ticket occupies one slot by definition).
+    of OTHER tickets with a RUNNING/WAITING_GATE run has already reached the
+    global cap (QUEUED-only tickets never count, matching `claim_run` -- else
+    cap+1 queued tickets would starve every unscoped dispatch pass forever).
     """
 
     def has_exclusive(doc: dict) -> bool:
@@ -137,14 +138,13 @@ def check_concurrency(
             for r in doc.get("runs", [])
         )
 
-    def has_active(doc: dict) -> bool:
-        return any(r["state"] in ACTIVE_STATES for r in doc.get("runs", []))
-
     if not parallel_ok and has_exclusive(state_docs.get(ticket_id, {})):
         return False
 
     other_active = sum(
-        1 for tid, doc in state_docs.items() if tid != ticket_id and has_active(doc)
+        1 for tid, doc in state_docs.items()
+        if tid != ticket_id
+        and any(r["state"] in EXCLUSIVE_STATES for r in doc.get("runs", []))
     )
     return other_active < in_flight_cap
 
@@ -365,8 +365,18 @@ def apply_handoffs(
 
     ticket_doc = txn.ticket_doc(ticket_id)
     loop_cfg = config.budgets["loop_guard"]
-    ok, _trace = check_loop_guard(ticket_doc, loop_cfg["max_runs"], loop_cfg["max_depth"])
-    if not ok:
+    # Prospective: account for the WHOLE batch about to be inserted (not just
+    # the current, pre-insertion state) -- a two-handoff batch checked only
+    # once against the current run count could otherwise land both runs even
+    # though the second one pushes the ticket past max_runs. Same for depth:
+    # every accepted handoff in this batch lands at the SAME child depth
+    # (source_run's chain_depth + 1), which the current runs' own recorded
+    # depths don't yet reflect.
+    existing_runs = ticket_doc.get("runs", [])
+    existing_max_depth = max((r.get("chain_depth", 0) for r in existing_runs), default=0)
+    projected_runs = len(existing_runs) + len(accepted)
+    projected_depth = max(existing_max_depth, source_run["chain_depth"] + 1)
+    if projected_runs > loop_cfg["max_runs"] or projected_depth > loop_cfg["max_depth"]:
         return [], "loop guard would trip applying this handoff set"
     for h in accepted:
         budget = taskdefs[h.target_task]["budget"]
@@ -730,10 +740,19 @@ def dispatch(
                 continue
             run_id = run["run_id"]
 
-            ok, _trace = check_loop_guard(
-                state, budgets["loop_guard"]["max_runs"], budgets["loop_guard"]["max_depth"]
-            )
-            if not ok:
+            # Current-state check, not the prospective (pre-insertion) one
+            # `check_loop_guard` implements: this run was already accepted
+            # onto the ticket (possibly exactly AT max_runs/max_depth), so
+            # only reject dispatch if the ticket is ALREADY beyond the
+            # configured limit -- reusing the enqueue-time "<" ceiling here
+            # would block a legitimately-queued boundary run before it ever
+            # executes.
+            runs = state.get("runs", [])
+            max_chain_depth = max((r.get("chain_depth", 0) for r in runs), default=0)
+            if (
+                len(runs) > budgets["loop_guard"]["max_runs"]
+                or max_chain_depth > budgets["loop_guard"]["max_depth"]
+            ):
                 _block_ticket(store, ticket_id, run_id, "loop guard tripped")
                 break
 
