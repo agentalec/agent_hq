@@ -19,3 +19,4 @@
 {"event_id": "2d0278ed8e0afa55:queued", "kind": "run.queued", "ticket_id": "7", "run_id": "2d0278ed8e0afa55", "task_id": "finalize", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "77fcc46d50eb8121:finalize:accepted", "kind": "handoff.accepted", "ticket_id": "7", "run_id": "77fcc46d50eb8121", "detail": "Glossary implementation complete. All acceptance criteria met: 42 terms defined (20+ required), linked from navigation in all versions, terms link to concept/reference pages, and glossary exists in versions 3.0, 3.1, and current docs. Build passes successfully."}
 {"event_id": "77fcc46d50eb8121:succeeded", "kind": "run.succeeded", "ticket_id": "7", "run_id": "77fcc46d50eb8121", "state": "SUCCEEDED", "artifacts": []}
+{"event_id": "2d0278ed8e0afa55:collected", "kind": "run.collected", "ticket_id": "7", "run_id": "2d0278ed8e0afa55", "cost_usd": 0.0}
