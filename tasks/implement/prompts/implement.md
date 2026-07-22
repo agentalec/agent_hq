@@ -14,3 +14,8 @@ applies:
 
 Never touch files outside your assigned repository. Commit as you go rather
 than batching everything into one commit at the end.
+
+When the work is committed, propose a single `finalize` handoff in your
+`.agent-hq/control.json` (see Control output below), forwarding
+`specs/{ticket}/spec.md` in `artifacts` so finalize can summarize the
+outcome against the spec.
