@@ -20,7 +20,10 @@ dev = ["pytest", "ruff"]
 agent-hq = "engine.cli:main"
 
 [tool.setuptools]
-packages = ["engine", "engine.adapters"]
+packages = ["engine", "engine.adapters", "schemas"]
+
+[tool.setuptools.package-data]
+schemas = ["*.json"]
 
 [tool.ruff]
 line-length = 100
