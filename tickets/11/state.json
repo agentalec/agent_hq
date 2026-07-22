@@ -8,7 +8,7 @@
       "task_id": "spec",
       "task_version": 1,
       "ticket_id": "11",
-      "state": "RUNNING",
+      "state": "WAITING_GATE",
       "attempt": 0,
       "bindings": {
         "tracker": "github-issues",
@@ -19,14 +19,41 @@
       "cost_usd": 0.0,
       "tokens": null,
       "usage_known": true,
-      "artifacts": [],
+      "artifacts": [
+        "specs/11/spec.md"
+      ],
       "chain_depth": 0,
       "source_event_id": "11:labeled:2026-07-22T12:36:51Z",
       "enqueue_index": 0,
       "repo": "agentalec/care_fe",
       "deadline": "2026-07-22T13:07:54Z",
       "attempt_started_at": "2026-07-22T12:37:54Z",
-      "base_commit": "5466816828ba496f9d4e6099e77360eb516ece31"
+      "base_commit": "5466816828ba496f9d4e6099e77360eb516ece31",
+      "output_commit": "5466816828ba496f9d4e6099e77360eb516ece31",
+      "pr_ref": null,
+      "gate_requested_at": "2026-07-22T12:41:58Z",
+      "gate_request_id": "5045887822",
+      "pending_handoffs": [
+        {
+          "key": "implement-clinical-age-format",
+          "target_task": "implement",
+          "reason": "Specification complete. Ready to implement clinical age format rules in formatPatientAge() function, add tooltip for full age breakdown, and update tests.",
+          "repo": "agentalec/care_fe",
+          "artifacts": [
+            "specs/11/spec.md"
+          ],
+          "source_run_id": "3060b51f6f0f917b"
+        }
+      ]
+    }
+  ],
+  "work_repos": [
+    {
+      "repo": "agentalec/care_fe",
+      "branch": "agent-hq/11",
+      "base_branch": "develop",
+      "recorded_head": "5466816828ba496f9d4e6099e77360eb516ece31",
+      "pr_ref": null
     }
   ]
 }
