@@ -6,3 +6,4 @@
 {"event_id": "3060b51f6f0f917b:implement-clinical-age-format:accepted", "kind": "handoff.accepted", "ticket_id": "11", "run_id": "3060b51f6f0f917b", "detail": "Specification complete. Ready to implement clinical age format rules in formatPatientAge() function, add tooltip for full age breakdown, and update tests."}
 {"event_id": "3060b51f6f0f917b:succeeded", "kind": "run.succeeded", "ticket_id": "11", "run_id": "3060b51f6f0f917b", "state": "SUCCEEDED"}
 {"event_id": "5045896580:approval", "kind": "gate.decided", "ticket_id": "11", "run_id": "3060b51f6f0f917b", "detail": "approved by agentalec at 2026-07-22T12:43:01Z"}
+{"event_id": "5b3f802d4b0502a7:collected", "kind": "run.collected", "ticket_id": "11", "run_id": "5b3f802d4b0502a7", "cost_usd": 0.0}
