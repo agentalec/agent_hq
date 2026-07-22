@@ -1,8 +1,6 @@
-# Staged: activate by pointing tasks/implement/task.yml handoff.allowed at
-# review (the minimal route hands implement straight to finalize).
 id: review
 version: 1
-description: Review the implementation against the spec and plan; write findings.
+description: Review the implementation against the spec; loop back to implement or finish.
 trigger: enqueued_by
 context:
   - constitution
@@ -19,6 +17,7 @@ outputs:
     - specs/{ticket}/review.md
 handoff:
   allowed:
+    - implement
     - finalize
   max: 1
 budget:

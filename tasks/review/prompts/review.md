@@ -1,18 +1,36 @@
 # Review prompt
 
-Read `constitution.md`, `specs/{ticket}/spec.md`, `specs/{ticket}/plan.md`,
-and **`.agent-hq/diff.patch`** — the full diff the implement task produced,
-materialized for you by the engine (your worktree is checked out at the
-implement result, and you have no git tool).
+Read `constitution.md`, `specs/{ticket}/spec.md`, and **`.agent-hq/diff.patch`**
+— the changes the most recent `implement` round produced (materialized for
+you by the engine; your worktree is checked out at the implement result and
+you have no git tool).
 
-Check the diff against the spec and plan. Classify each finding `blocker`,
-`should-fix`, or `nit`.
+## Round memory
 
-Also run:
-- an over-engineering pass -- flag speculative abstractions, unused
+If `specs/{ticket}/review.md` was handed to you, read it first — it holds the
+findings from earlier rounds as `## Round 1`, `## Round 2`, … sections. This
+is round **N = (number of existing `## Round` sections) + 1**.
+
+Append a new `## Round N` section to `specs/{ticket}/review.md` (create the
+file on round 1). In it, check the diff against the spec's acceptance
+criteria and classify each finding `blocker`, `should-fix`, or `nit`, grouped
+by severity. Also run:
+- an over-engineering pass — flag speculative abstractions, unused
   flexibility, or code for scenarios that can't happen here
-- a security pass -- hardcoded secrets, injection points, missing authz
-  checks, and any new dependency without a stated justification
+- a security pass — hardcoded secrets, injection points, missing authz
+  checks, any new dependency without a stated justification
 
-Write findings to `specs/{ticket}/review.md`, grouped by severity. Your
-tools are read-only -- do not edit the implementation.
+Never edit the implementation — your tools are read-only. Keep every prior
+round's section intact; only append.
+
+## Decide the handoff (see Control output below)
+
+- **No blockers remain** (only should-fix / nits, or clean): hand off to
+  `finalize`, forwarding `specs/{ticket}/spec.md` and `specs/{ticket}/review.md`.
+- **Blockers remain and N < 3**: hand off to `implement`, forwarding
+  `specs/{ticket}/spec.md` and `specs/{ticket}/review.md`; the handoff
+  `reason` must name the blockers to fix.
+- **Blockers remain and N == 3** (the round cap): do **not** hand off. Emit
+  `{"outcome": "complete"}`. The engine posts your accumulated findings to
+  the ticket thread and leaves the PR in draft for a human — do not loop a
+  fourth implement round.

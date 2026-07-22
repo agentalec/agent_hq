@@ -211,8 +211,11 @@ before the ticket moves.
 
 From there the pilot route runs: `spec` (fans out one `implement` handoff
 per affected repo) → `implement` (the only task that opens a PR, one draft
-PR per repo per ticket) → `finalize`. The fuller route (`arch-plan` →
-`arch-approval` → `breakdown` → `review`) is staged — each task's header
+PR per repo per ticket) → `review`, which loops back to `implement` while it
+finds blockers (prompt-capped at 3 rounds — on the cap the engine posts the
+accumulated findings to the ticket thread and parks awaiting a human, PR
+left in draft) or hands to `finalize` when clean. The fuller route
+(`arch-plan` → `arch-approval` → `breakdown`) is staged — each task's header
 names its activation edit. When `finalize` completes and the queue is empty,
 the engine posts the closing summary from `specs/<ticket>/summary.md`,
 marks each recorded PR ready for review, closes the issue, and sets the
