@@ -86,7 +86,8 @@
         "specs/7/spec.md"
       ],
       "deadline": "2026-07-22T11:48:07Z",
-      "attempt_started_at": "2026-07-22T10:18:07Z"
+      "attempt_started_at": "2026-07-22T10:18:07Z",
+      "base_commit": "dbd221992b4569412c1969bffff99f2642160205"
     }
   ],
   "work_repos": [
