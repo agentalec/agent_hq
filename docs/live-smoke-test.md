@@ -12,7 +12,7 @@ the bottom is the checklist to burn down. Complements `docs/local-testing.md`
 |---|---|
 | Engine repo | `agentalec/agent_hq` (issues = tickets; state on `agent-hq-state`) |
 | Work repos | `agentalec/care` (`backend`, base `develop`), `agentalec/care_fe` (`frontend`, base `develop`), `agentalec/care_docs` (`docs`, base `main`) |
-| Route | intake → `spec` (product-owner gate; fans out ≤3 `implement`) → `implement` (draft PR) → `finalize` (summary, close) |
+| Route | intake → `spec` (product-owner gate; fans out ≤3 `implement`) → `implement` (draft PR) ↔ `review` (loops to `implement` on blockers, prompt-capped 3 rounds → park; else `finalize`) → `finalize` (summary, close) |
 | Executor | `copilot-cli`, `claude-sonnet-4.5`, billed via Copilot seat (`cost_usd` records 0.0 — deviation 9) |
 | Approver (all gates) | `agentalec` |
 
@@ -134,6 +134,13 @@ gh variable set AGENT_HQ_KILL_SWITCH --repo agentalec/agent_hq --body "0"   # re
 - [ ] Multi-repo fan-out (ticket spanning two routing keywords)
 - [ ] Unknown-spend blocked ticket recovery (`/hq-recover`; tickets #3, #5
       still parked from rounds 1–2)
+- [ ] `implement` → `review` → `finalize` clean path (review finds no
+      blockers first pass)
+- [ ] `review` → `implement` loop (review finds a blocker, implement fixes
+      it, review clears it) — check `review.md` accumulates `## Round N`
+- [ ] Round cap: 3 implement rounds with a persistent blocker → engine posts
+      the accumulated findings comment and parks awaiting-human, PR left
+      draft (needs a ticket the agent can't fully satisfy)
 
 ## Known limits until pending phases land
 

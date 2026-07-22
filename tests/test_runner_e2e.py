@@ -25,7 +25,7 @@ from pathlib import Path
 import pytest
 
 from engine.config import load_config
-from engine.engine import dispatch, sweep
+from engine.engine import _complete_if_queue_empty, dispatch, sweep
 from engine.models import GateDecision, GateRequest, GateStatus, TicketDetails
 from engine.runner import execute_dir_for, intake_ticket, prepare_dir_for, run_task
 from engine.state import GitJsonStateStore
@@ -696,6 +696,29 @@ def test_collect_completion_pins_awaiting_human_input_without_summary(config, ta
 
     assert store.read_state("7")["status"] == "ACTIVE"
     assert any("awaiting human input" in body for _, body, _ in tracker.pinned)
+
+
+def test_review_park_posts_findings_comment_then_awaits_human(config, taskdefs, store):
+    """Review-park endpoint: a terminal run that parks (no summary artifact)
+    but recorded a review.md surfaces its accumulated findings as a ticket-
+    thread comment before pinning awaiting-human -- the PR is left in draft.
+    Keyed on the review.md filename, not a task name."""
+    review = _run_dict("revrun", "review", state="SUCCEEDED", artifacts=["specs/7/review.md"])
+    _seed(store, review)
+    store.write(
+        lambda txn: txn.write_artifact(
+            "7", "revrun", "specs/7/review.md", "## Round 3\n- blocker: auth check still missing\n"
+        )
+    )
+    tracker = FakeTracker(_details())
+    adapters = _adapters(tracker=tracker)
+    _complete_if_queue_empty(store, config, adapters, "7", review)
+
+    findings = [c for c in adapters.messaging.calls if c[2] == "7:revrun:done:review-findings"]
+    assert len(findings) == 1
+    assert "auth check still missing" in findings[0][1]
+    assert any("awaiting human input" in body for _, body, _ in tracker.pinned)
+    assert store.read_state("7")["status"] == "ACTIVE"  # parked, not DONE; PR left in draft
 
 
 def test_collect_failure_records_spend_then_retries(config, taskdefs, store, tmp_path):

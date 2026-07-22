@@ -228,8 +228,8 @@ no terminal action.
 | arch-plan | Converted, defined, **unwired** -- its header names the activation edit (point `spec`'s `handoff.allowed` back at it). `handoff.allowed: [arch-approval, breakdown]`. |
 | arch-approval | Converted, defined, **unwired** (activated with `arch-plan`, its only in-edge). Confirms the plan artifacts, no changes; gated (`default`); `handoff.allowed: [breakdown]`. |
 | breakdown | Converted, defined, **unwired** (activated with the `arch-plan` chain). `handoff.max: 2`, one `implement` handoff per affected repo when wired. |
-| implement | Converted (wired). `opens_pr: true`; `handoff.allowed: [finalize]`. |
-| review | Converted, defined, **unwired** -- its header names the activation edit (point `implement`'s `handoff.allowed` at it). `handoff.allowed: [finalize]`. |
+| implement | Converted (wired). `opens_pr: true`; `handoff.allowed: [review]`. |
+| review | Converted (wired). `handoff.allowed: [implement, finalize]` -- loops back to `implement` while blockers remain (prompt-capped at 3 rounds; on the cap it emits `complete` and the engine posts the accumulated `review.md` findings to the thread, parking awaiting-human with the PR left in draft), else hands to `finalize`. Round memory is `review.md` forwarded around the loop as an input artifact. |
 | finalize | Converted (wired). Terminal task: writes `summary.md`, always `complete`, feeds queue-empty completion (see above). No task-name special case; any task ending this way completes the same way. |
 | clinical | Converted, defined, **unwired** until an accepted handoff selects it -- its own header names the one-line activation edit (point `spec`'s `handoff.allowed` at it). Gated (`clinical-reviewers`, `default` adapter). |
 | poll | Converted, defined, **unwired** -- needs the P1 reaction-based `poll` adapter (`docs/roadmap.md`); no task currently hands off to it. |

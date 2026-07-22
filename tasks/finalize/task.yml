@@ -2,6 +2,10 @@ id: finalize
 version: 1
 description: Summarize the ticket outcome.
 trigger: enqueued_by
+context:
+  - specs/{ticket}/*
+skills:
+  - prompts/finalize.md
 outputs:
   artifacts:
     - specs/{ticket}/summary.md

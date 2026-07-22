@@ -277,17 +277,22 @@ def subst(template: str, ticket_id: str) -> str:
     return template.replace("{ticket}", ticket_id)
 
 
-def _escalate(store, config, adapter_fn, ticket_id, run_id, message: str) -> None:
+def notify_ticket(config, adapter_fn, ticket_id, message: str, event_id: str, mentions=None) -> None:
+    """Post one plain comment to the ticket thread, idempotent by `event_id`
+    (the messaging adapter dedupes on its `<!--hq:evt:...-->` marker). The
+    single primitive for engine-authored ticket-thread comments -- escalation
+    and the review-park findings notice both go through here."""
     messaging = adapter_fn(
         "messaging", config.components["messaging"]["adapter"], repo=intake_repo(config)
     )
-    members = config.approvers.get("groups", {}).get("escalation", {}).get("members", [])
     messaging.notify(
-        {"ticket_id": ticket_id, "mentions": members},
-        message,
-        [],
-        f"{run_id}:escalation",
+        {"ticket_id": ticket_id, "mentions": mentions or []}, message, [], event_id
     )
+
+
+def _escalate(store, config, adapter_fn, ticket_id, run_id, message: str) -> None:
+    members = config.approvers.get("groups", {}).get("escalation", {}).get("members", [])
+    notify_ticket(config, adapter_fn, ticket_id, message, f"{run_id}:escalation", mentions=members)
 
 
 def _block_ticket(store, ticket_id, run_id, reason: str) -> None:
@@ -655,6 +660,20 @@ def _complete_if_queue_empty(store, config, adapter_fn, ticket_id, terminal_run:
     summary_path = subst("specs/{ticket}/summary.md", ticket_id)
     done_key = f"{ticket_id}:{terminal_run['run_id']}:done"
     if summary_path not in (terminal_run.get("artifacts") or []):
+        # A terminal run that parks with a review.md (the review-park
+        # endpoint: rounds exhausted, no handoff) surfaces its accumulated
+        # findings to the thread before pinning awaiting-human -- the PR is
+        # deliberately left in draft. review.md is a filename convention,
+        # same as summary.md above; the engine special-cases no task name.
+        review_path = subst("specs/{ticket}/review.md", ticket_id)
+        if review_path in (terminal_run.get("artifacts") or []):
+            findings = store.read_artifact(ticket_id, terminal_run["run_id"], review_path) or ""
+            notify_ticket(
+                config, adapter_fn, ticket_id,
+                "Review rounds exhausted with unresolved findings; the PR is left in "
+                "draft for human review.\n\n" + findings,
+                f"{done_key}:review-findings",
+            )
         tracker.upsert_pinned_comment(
             ticket_id, "Queue is empty; awaiting human input.", f"{done_key}:awaiting"
         )

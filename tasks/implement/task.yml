@@ -9,7 +9,7 @@ outputs:
   artifacts: []
 handoff:
   allowed:
-    - finalize
+    - review
   max: 1
 budget:
   max_cost_usd: 15
