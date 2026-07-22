@@ -11,3 +11,4 @@
 {"event_id": "97d058b92a0c55fe:queued", "kind": "run.queued", "ticket_id": "11", "run_id": "97d058b92a0c55fe", "task_id": "review", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "5b3f802d4b0502a7:review:accepted", "kind": "handoff.accepted", "ticket_id": "11", "run_id": "5b3f802d4b0502a7", "detail": "Implementation complete. Ready for review of clinical age format changes including: (1) Clinical age-format rules for all age ranges, (2) Tooltip with full age breakdown on hover, (3) Comprehensive unit and E2E tests, (4) Lint fixes."}
 {"event_id": "5b3f802d4b0502a7:succeeded", "kind": "run.succeeded", "ticket_id": "11", "run_id": "5b3f802d4b0502a7", "state": "SUCCEEDED", "artifacts": []}
+{"event_id": "97d058b92a0c55fe:collected", "kind": "run.collected", "ticket_id": "11", "run_id": "97d058b92a0c55fe", "cost_usd": 0.0}
