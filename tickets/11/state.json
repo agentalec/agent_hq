@@ -162,7 +162,7 @@
       "task_id": "implement",
       "task_version": 1,
       "ticket_id": "11",
-      "state": "RUNNING",
+      "state": "SUCCEEDED",
       "attempt": 0,
       "bindings": {
         "tracker": "github-issues",
@@ -183,7 +183,34 @@
       ],
       "deadline": "2026-07-22T14:56:45Z",
       "attempt_started_at": "2026-07-22T13:26:45Z",
-      "base_commit": "366d47649ce85f8f7cd2e7e7a7aee32609baf355"
+      "base_commit": "366d47649ce85f8f7cd2e7e7a7aee32609baf355",
+      "output_commit": "6819a4f7730935bbb053d553c44426313f17fc43",
+      "pr_ref": "agentalec/care_fe#1"
+    },
+    {
+      "run_id": "0dfc7128660a8b91",
+      "task_id": "review",
+      "task_version": 1,
+      "ticket_id": "11",
+      "state": "QUEUED",
+      "attempt": 0,
+      "bindings": {
+        "tracker": "github-issues",
+        "agent-session": "copilot-cli",
+        "messaging": "github-comment"
+      },
+      "cost_usd": null,
+      "tokens": null,
+      "usage_known": false,
+      "artifacts": [],
+      "chain_depth": 6,
+      "parent_run_id": "3ea1f879ad250553",
+      "handoff_key": "review",
+      "repo": "agentalec/care_fe",
+      "input_artifacts": [
+        "specs/11/spec.md",
+        "specs/11/review.md"
+      ]
     }
   ],
   "work_repos": [
@@ -191,7 +218,7 @@
       "repo": "agentalec/care_fe",
       "branch": "agent-hq/11",
       "base_branch": "develop",
-      "recorded_head": "366d47649ce85f8f7cd2e7e7a7aee32609baf355",
+      "recorded_head": "6819a4f7730935bbb053d553c44426313f17fc43",
       "pr_ref": "agentalec/care_fe#1"
     }
   ]
