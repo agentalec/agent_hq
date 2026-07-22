@@ -111,16 +111,29 @@ gh variable set AGENT_HQ_KILL_SWITCH --repo agentalec/agent_hq --body "0"   # re
   explicitly (PR #6). Ticket #5 left awaiting input; closing it manually is
   fine.
 
-## Not yet validated (round-3+ checklist)
+**2026-07-22 — round 3 (ticket #7, glossary page): full route validated**
+- spec → gate → implement → finalize end-to-end ✅: post-PR-#6 spec proposed
+  the `implement` handoff, the gate comment posted, `/agent-hq approve
+  <run-id>` advanced it, implement landed on `agent-hq/7` and opened
+  `agentalec/care_docs#1` (draft), finalize wrote `summary.md`, posted the
+  closing summary, marked the PR ready, closed the issue, ticket `DONE`.
+- Known-usage retry ✅: implement attempt 0 failed in collect and was
+  auto-re-enqueued (contrast round 1's unknown-spend block). Root cause was
+  an engine bug — `apply_patch` passed the patch path relative to the
+  process cwd into `git apply` running with `cwd=worktree`, so the
+  workdir-relative clone paths of `run-phases.sh` doubled up ("can't open
+  patch"); unit tests only used absolute paths. Fixed + regression test
+  (PR #8). Attempt 1 burned pre-merge via the 15-min cron (kill switch was
+  set too late); attempt 2 succeeded on the fixed code.
+- Ops lesson: when a fix must merge before a queued run may retry, set the
+  kill switch **immediately** on diagnosing — the cron dispatcher races you.
 
-- [ ] Spec proposes the `implement` handoff (post-PR-#6 prompt)
-- [ ] Spec gate comment posted; `/agent-hq approve <run-id>` advances it
+## Not yet validated
+
 - [ ] `request-changes` / `reject` / gate timeout paths
-- [ ] Implement commits on `agent-hq/<issue>` and opens a draft PR
-- [ ] Finalize: summary comment, PR ready, issue closed, ticket DONE
 - [ ] Multi-repo fan-out (ticket spanning two routing keywords)
-- [ ] Retry path where an attempt fails *with* known usage (should re-drive,
-      unlike round 1's unknown-spend block)
+- [ ] Unknown-spend blocked ticket recovery (`/hq-recover`; tickets #3, #5
+      still parked from rounds 1–2)
 
 ## Known limits until pending phases land
 
