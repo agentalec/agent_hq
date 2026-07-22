@@ -290,6 +290,17 @@ def notify_ticket(config, adapter_fn, ticket_id, message: str, event_id: str, me
     )
 
 
+def post_pr_comment(config, adapter_fn, pr_ref: str, message: str, event_id: str) -> None:
+    """Post one comment on a work-repo PR (`pr_ref` = 'org/repo#N'), idempotent
+    by `event_id`. Reuses the `messaging` adapter bound to the work repo (a PR
+    is an issue). Only the credentialed collect phase calls this -- the
+    read-only review agent holds no push credential (PD-5), so review findings
+    reach the PR from the engine, never from the agent child."""
+    repo, number = pr_ref.split("#", 1)
+    messaging = adapter_fn("messaging", config.components["messaging"]["adapter"], repo=repo)
+    messaging.notify({"ticket_id": number}, message, [], event_id)
+
+
 def _escalate(store, config, adapter_fn, ticket_id, run_id, message: str) -> None:
     members = config.approvers.get("groups", {}).get("escalation", {}).get("members", [])
     notify_ticket(config, adapter_fn, ticket_id, message, f"{run_id}:escalation", mentions=members)

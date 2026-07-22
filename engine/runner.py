@@ -143,6 +143,15 @@ def _rework_comments(store, ticket_id, run_id) -> str | None:
     return None
 
 
+def _latest_review_round(review_md: str) -> str:
+    """The last `## Round N` section of an accumulated review.md -- what a
+    single review pass reflects onto its PR (the whole file is the
+    ticket-thread park comment). Falls back to the whole text if the reviewer
+    left no round headers."""
+    idx = review_md.rfind("\n## Round ")
+    return review_md[idx + 1:] if idx != -1 else review_md
+
+
 def _write_parent_diff(worktree: Path, base: str | None, tip: str) -> bool:
     """Deterministically materialize the immediate parent's diff for
     read-only child tasks (review has no git tool): `.agent-hq/diff.patch` =
@@ -862,6 +871,20 @@ def _collect_success(
             block_on_unknown_usage=True,
         )
         return
+
+    # Any run that produced a review.md and has a PR reflects its findings onto
+    # that PR (keyed on the filename convention, no task name). Post-write side
+    # effect like mark_pr_ready/escalate; idempotent by event id.
+    # ponytail: lost only if a crash lands between the SUCCEEDED write and this
+    # post AND the re-drive is zombied -- same ceiling as the sibling PR/comment
+    # side effects, acceptable for a comment.
+    review_path = subst("specs/{ticket}/review.md", ticket_id)
+    if pr_ref and review_path in declared:
+        eng.post_pr_comment(
+            config, adapter_fn, pr_ref,
+            "### agent-hq review\n\n" + _latest_review_round(artifact_contents.get(review_path, "")),
+            f"{run_id}:pr-review",
+        )
 
     _complete_if_queue_empty(
         store, config, adapter_fn, ticket_id, {**run, "state": "SUCCEEDED", "artifacts": declared}
