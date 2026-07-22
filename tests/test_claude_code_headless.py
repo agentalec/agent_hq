@@ -278,6 +278,27 @@ def test_apply_patch_applies_cleanly_on_a_fresh_clone(monkeypatch, tmp_path):
     assert not (landing / ".agent-hq-work.patch").exists()
 
 
+def test_apply_patch_accepts_a_relative_worktree_path(monkeypatch, tmp_path):
+    """run-phases.sh hands collect a workdir-relative clone path; git runs
+    with cwd=worktree, so the patch must be addressed relative to it (live
+    failure: ticket 7 implement, 'can't open patch')."""
+    origin = _make_origin(tmp_path)
+    base_commit = _git("rev-parse", "main", cwd=tmp_path / "_seed").strip()
+    monkeypatch.setattr(cch, "_clone_url", lambda repo: str(origin))
+
+    executor = ClaudeCodeHeadless({"workdir": "work"})
+    monkeypatch.chdir(tmp_path)
+    source = executor.prepare_worktree("run-1", "o/r", base_commit)
+    (source / "code.py").write_text("print('hi')\n")
+    patch = executor.materialize_work_patch(source, [])
+
+    landing = executor.prepare_worktree("run-1-collect", "o/r", base_commit)
+    assert not Path(landing).is_absolute()
+    executor.apply_patch(landing, patch)
+
+    assert (Path(landing) / "code.py").read_text() == "print('hi')\n"
+
+
 def test_apply_patch_raises_on_a_patch_that_does_not_apply(monkeypatch, tmp_path):
     origin = _make_origin(tmp_path)
     base_commit = _git("rev-parse", "main", cwd=tmp_path / "_seed").strip()

@@ -222,7 +222,9 @@ class ClaudeCodeHeadless:
         patch_path = worktree / ".agent-hq-work.patch"
         patch_path.write_text(patch_text)
         try:
-            self._git("apply", str(patch_path), cwd=worktree)
+            # Bare filename: git runs with cwd=worktree, and a relative
+            # worktree path (run-phases.sh) would otherwise double up.
+            self._git("apply", ".agent-hq-work.patch", cwd=worktree)
         finally:
             patch_path.unlink(missing_ok=True)
 
