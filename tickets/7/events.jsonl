@@ -12,3 +12,4 @@
 {"event_id": "b7b1c96bf4e8e4a0:queued", "kind": "run.queued", "ticket_id": "7", "run_id": "b7b1c96bf4e8e4a0", "task_id": "implement", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "b7b1c96bf4e8e4a0:collected", "kind": "run.collected", "ticket_id": "7", "run_id": "b7b1c96bf4e8e4a0", "cost_usd": 0.0}
 {"event_id": "b7b1c96bf4e8e4a0:failed", "kind": "run.failed", "ticket_id": "7", "run_id": "b7b1c96bf4e8e4a0", "state": "FAILED"}
+{"event_id": "b7b1c96bf4e8e4a0:artifact_rejected", "kind": "run.artifact_rejected", "ticket_id": "7", "run_id": "b7b1c96bf4e8e4a0", "detail": "work patch failed to apply: git apply _target/b7b1c96bf4e8e4a0-collect/.agent-hq-work.patch failed: error: can't open patch '_target/b7b1c96bf4e8e4a0-collect/.agent-hq-work.patch': No such file or directory\n"}
