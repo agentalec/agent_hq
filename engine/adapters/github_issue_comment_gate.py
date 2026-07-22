@@ -57,18 +57,33 @@ class GithubIssueCommentGate:
             raise ValueError("settings missing 'issue_repo' (engine issue repo)")
         return self.issue_repo
 
+    def _list_comments(self, repo: str, ticket_id: str) -> list[dict]:
+        """All issue comments, paginated -- a dedupe marker or decision can
+        land on any page once an issue accumulates more than one page of
+        comments (GitHubClient exposes no Link header, so pagination stops
+        the standard way: a short page is the last page)."""
+        comments: list[dict] = []
+        page = 1
+        while True:
+            batch = (
+                self._client.get(
+                    f"/repos/{repo}/issues/{ticket_id}/comments",
+                    params={"per_page": 100, "page": page},
+                )
+                or []
+            )
+            comments.extend(batch)
+            if len(batch) < 100:
+                return comments
+            page += 1
+
     def request(self, group: str, subject: dict) -> GateRequest:
         repo = self._require_issue_repo()
         ticket_id = subject["ticket_id"]
         run_id = subject["run_id"]
         marker = _MARKER.format(run_id=run_id)
 
-        comments = (
-            self._client.get(
-                f"/repos/{repo}/issues/{ticket_id}/comments", params={"per_page": 100}
-            )
-            or []
-        )
+        comments = self._list_comments(repo, ticket_id)
         existing = next((c for c in comments if marker in (c.get("body") or "")), None)
         if existing:
             return GateRequest(request_id=str(existing["id"]))
@@ -100,12 +115,7 @@ class GithubIssueCommentGate:
         approver_group = run.get("approver_group")
         members = set(self.approvers.get("groups", {}).get(approver_group, {}).get("members", []))
 
-        comments = (
-            self._client.get(
-                f"/repos/{repo}/issues/{ticket_id}/comments", params={"per_page": 100}
-            )
-            or []
-        )
+        comments = self._list_comments(repo, ticket_id)
         decisions = []
         for comment in comments:
             parsed = _parse_decision(comment.get("body") or "")

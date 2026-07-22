@@ -47,8 +47,10 @@ def test_invalid_config_reports_violations_from_every_file(tmp_path):
     assert any("budgets.yml" in e for e in errors)
 
 
-def _config(components: dict) -> Config:
-    return Config(components=components, repos={}, projects={}, approvers={}, budgets={})
+def _config(components: dict, projects: dict | None = None) -> Config:
+    return Config(
+        components=components, repos={}, projects=projects or {}, approvers={}, budgets={},
+    )
 
 
 def test_resolve_binding_defaults_to_port_adapter():
@@ -90,14 +92,32 @@ def test_validate_task_bindings_rejects_unconfigured_port():
 
 
 def test_validate_task_bindings_accepts_configured_port():
-    config = _config({"executor": {"adapter": "claude-code-headless"}, "label_overrides": []})
+    config = _config(
+        {"executor": {"adapter": "claude-code-headless"}, "label_overrides": []},
+        projects={"initial_task": "sample"},
+    )
     taskdefs = {"sample": {"id": "sample", "components": {"executor": "default"}}}
 
     assert validate_task_bindings(taskdefs, config) == []
 
 
 def test_validate_task_bindings_ignores_task_with_no_components():
-    config = _config({"executor": {"adapter": "claude-code-headless"}, "label_overrides": []})
+    config = _config(
+        {"executor": {"adapter": "claude-code-headless"}, "label_overrides": []},
+        projects={"initial_task": "qa"},
+    )
     taskdefs = {"qa": {"id": "qa"}}
 
     assert validate_task_bindings(taskdefs, config) == []
+
+
+def test_validate_task_bindings_rejects_unknown_initial_task():
+    config = _config(
+        {"executor": {"adapter": "claude-code-headless"}, "label_overrides": []},
+        projects={"initial_task": "specc"},  # misspelled
+    )
+    taskdefs = {"spec": {"id": "spec"}}
+
+    errors = validate_task_bindings(taskdefs, config)
+
+    assert any("initial_task" in e and "specc" in e for e in errors)

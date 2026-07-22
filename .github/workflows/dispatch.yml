@@ -32,10 +32,11 @@ jobs:
       - uses: ./.github/actions/setup
       - run: bash scripts/checkout-state.sh
       - name: Dispatch (issue-scoped fast path when a wake-up producer named one)
+        env:
+          ISSUE: ${{ github.event.client_payload.issue }}
         run: |
-          issue="${{ github.event.client_payload.issue }}"
-          if [[ -n "$issue" ]]; then
-            agent-hq dispatch --state ./_state --issue "$issue"
+          if [[ "$ISSUE" =~ ^[0-9]+$ ]]; then
+            agent-hq dispatch --state ./_state --issue "$ISSUE"
           else
             agent-hq dispatch --state ./_state
           fi

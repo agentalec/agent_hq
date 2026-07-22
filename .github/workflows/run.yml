@@ -71,6 +71,7 @@ jobs:
           runCmd: bash scripts/run-phases.sh "${{ inputs.run_id }}" execute
           env: |
             COPILOT_GITHUB_TOKEN=${{ secrets.AGENT_HQ_COPILOT_TOKEN }}
+            AGENT_HQ_ENGINE_REPO=${{ github.repository }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:

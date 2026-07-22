@@ -7,8 +7,7 @@ The runner drives one task run through three separately-invoked phases
 `COPILOT_GITHUB_TOKEN`) and never touches the state store or a push
 credential. State crosses the job boundary as plain files transported by
 `actions/upload-artifact`/`download-artifact` (no custom tar), at
-deterministic per-phase paths (`prepare_dir_for`/`worktree_for`/
-`execute_dir_for`):
+deterministic per-phase paths (`prepare_dir_for`/`execute_dir_for`):
 
   - **prepare** writes only the claim (`store.claim_run`) and binding, then
     `bundle.json` (prompt, tools, deadline, repo, base_commit, output_paths,
@@ -112,14 +111,6 @@ class GithubWorkflowApi:
 
 def _workdir(config: Config) -> str:
     return config.components.get("agent-session", {}).get("settings", {}).get("workdir", ".")
-
-
-def worktree_for(config: Config, run_id: str) -> Path:
-    """Deterministic worktree path, matching the claude-code-headless
-    adapter's `<workdir>/_target/<run_id>` -- execute's own clone (Task 12:
-    prepare no longer clones; collect clones separately into
-    `_target/<run_id>-collect` via the same adapter method)."""
-    return Path(_workdir(config)) / "_target" / run_id
 
 
 def prepare_dir_for(config: Config, run_id: str) -> Path:
@@ -376,9 +367,17 @@ def _prepare(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskd
     # from its configured base; every later task/rework bases on the
     # recorded head of the ticket's stable per-repo branch -- never the base
     # branch again, even after a downstream failure (the branch persists, so
-    # this needs no special-casing beyond reading it here).
+    # this needs no special-casing beyond reading it here). Always an
+    # immutable commit SHA, never the mutable branch name -- execute and
+    # collect run in separate clones, so a base-branch update between phases
+    # must not make collect apply/push against a different tree than the
+    # agent inspected.
     work_repo = next((wr for wr in ticket_doc.get("work_repos", []) if wr["repo"] == repo), None)
-    base_commit = (work_repo or {}).get("recorded_head") or config.repos[repo]["base_branch"]
+    if work_repo:
+        base_commit = work_repo["recorded_head"]
+    else:
+        agent = adapter_fn("agent-session", bindings["agent-session"], repo=repo)
+        base_commit = agent.resolve_ref(repo, config.repos[repo]["base_branch"])
 
     parent = None
     if run.get("parent_run_id"):
@@ -624,6 +623,19 @@ def _collect_success(
     config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskdef, out_dir
 ) -> None:
     run_id = run["run_id"]
+
+    # Narrowed close-fencing contract (Task 13): revalidate the claim, read-
+    # only, before any control-outcome or validation-failure handling below
+    # can mutate ticket state -- a stale/zombie run (e.g. already retried by
+    # the dispatcher's lost-run sweep, or its ticket blocked by a concurrent
+    # path) stops here rather than blocking/failing a ticket it no longer
+    # owns. This is NOT the authoritative fence (a race can still slip
+    # through -- fenced by the recorded-head fast-forward -- and comment/PR
+    # dedupe markers); the FINAL write transaction below re-checks fresh and
+    # is what actually decides whether anything gets recorded.
+    if not check_claim_active(store.read_state(ticket_id), run_id):
+        return
+
     tracker = adapter_fn("tracker", config.components["tracker"]["adapter"], repo=intake_repo(config))
     details = tracker.fetch_ticket(ticket_id)
     repo = run.get("repo") or resolve_target_repo(config, details) or next(iter(config.repos))
@@ -665,18 +677,6 @@ def _collect_success(
         for rel_path in ledger_paths
         if (staging_dir / rel_path).is_file()
     }
-
-    # Narrowed close-fencing contract (Task 13): revalidate the claim, read-
-    # only, immediately before any external side effect -- a stale/zombie run
-    # (e.g. already retried by the dispatcher's lost-run sweep, or its ticket
-    # blocked by a concurrent path) stops here rather than attempting a push/
-    # PR/gate-request it can no longer own. This is NOT the authoritative
-    # fence (a race can still slip a push through -- fenced by the recorded-
-    # head fast-forward -- and comment/PR dedupe markers); the FINAL write
-    # transaction below re-checks fresh and is what actually decides whether
-    # anything gets recorded.
-    if not check_claim_active(store.read_state(ticket_id), run_id):
-        return
 
     # -- Land the work patch on the ticket's stable per-issue branch. This
     # is the ONLY place a work-repo clone/push happens (Task 12: execute

@@ -93,7 +93,8 @@ def resolve_binding(
 
 
 def validate_task_bindings(taskdefs: dict, config: Config) -> list[str]:
-    """Reject a task-declared `components` port with no configured binding.
+    """Reject a task-declared `components` port with no configured binding,
+    and a `projects.initial_task` that doesn't resolve to a loaded task.
 
     A task's `components` map (port -> logical binding name) only makes
     sense for a port components.yml actually configures. A task that
@@ -106,4 +107,9 @@ def validate_task_bindings(taskdefs: dict, config: Config) -> list[str]:
                 errors.append(
                     f"{task_id}: components.{port}: no binding configured in components.yml"
                 )
+    initial_task = config.projects.get("initial_task")
+    if initial_task not in taskdefs:
+        errors.append(
+            f"projects.yml: initial_task: '{initial_task}' is not a loaded task"
+        )
     return errors

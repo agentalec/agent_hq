@@ -9,9 +9,10 @@ directly (either via `FakeAgent.run`, or written into the transported
 `execute_dir_for(...)` the same way tests write `execute-result.json`).
 
 Isolated-job model (hardening plan Task 12): prepare writes `bundle.json` +
-restored inputs to `prepare_dir_for(run_id)` (no clone); execute clones into
-`worktree_for(run_id)` and emits `execute-result.json`/`control.json`/
-`work.patch`/staged outputs to `execute_dir_for(run_id)`; collect fresh-clones,
+restored inputs to `prepare_dir_for(run_id)` (no clone); execute clones via
+the agent-session adapter's own `prepare_worktree` and emits
+`execute-result.json`/`control.json`/`work.patch`/staged outputs to
+`execute_dir_for(run_id)`; collect fresh-clones,
 applies the patch, and lands the ticket's stable `agent-hq/<ticket>` branch.
 Collect-focused tests below skip prepare/execute and write directly into
 `execute_dir_for(...)`, exactly as they skipped straight to `.agent-hq/*` in
@@ -94,6 +95,9 @@ class FakeAgent:
 
     def prepare_worktree(self, run_id, repo, base_commit):
         return self._worktree(run_id)
+
+    def resolve_ref(self, repo, ref):
+        return f"sha-{ref}"
 
     def run(self, bundle, tools, deadline):
         wt = Path(bundle["worktree"])
@@ -398,7 +402,8 @@ def test_prepare_claims_and_writes_bundle(config, taskdefs, store, tmp_path):
     written = json.loads(bundle.read_text())
     assert "control.json" in written["prompt"]
     assert written["repo"] == "example-org/product-be"
-    assert written["base_commit"] == "main"  # no work_repos entry yet -> configured base branch
+    # no work_repos entry yet -> resolved SHA of the configured base branch
+    assert written["base_commit"] == "sha-main"
     assert written["output_paths"] == ["specs/7/spec.md"]
 
     again = run_task("specrun", "prepare", config, taskdefs, store,

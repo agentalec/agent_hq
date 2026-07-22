@@ -334,6 +334,20 @@ def test_issue_gate_request_reuses_existing_marker_comment(monkeypatch):
     assert len(fake.calls) == 1  # only the GET, no duplicate POST
 
 
+def test_issue_gate_request_finds_marker_beyond_first_page(monkeypatch):
+    page1 = [{"id": i, "body": f"noise {i}"} for i in range(100)]
+    page2 = [{"id": 999, "body": "<!--hq:gate:run-abc123-->\nalready asked"}]
+    fake = _install(monkeypatch, [FakeResponse(200, page1), FakeResponse(200, page2)])
+    gate = _issue_gate()
+    result = gate.request(
+        "product-owners", {"ticket_id": "9", "run_id": "run-abc123", "task_id": "spec", "title": "t"}
+    )
+    assert result.request_id == "999"
+    assert len(fake.calls) == 2  # two GET pages, no duplicate POST
+    assert fake.calls[0]["params"]["page"] == 1
+    assert fake.calls[1]["params"]["page"] == 2
+
+
 def test_issue_gate_status_approve_command_from_group_member(monkeypatch):
     _install(
         monkeypatch,
@@ -413,6 +427,22 @@ def test_issue_gate_status_latest_decision_wins(monkeypatch):
     decision = _issue_gate().status(_run())
     assert decision.status == GateStatus.APPROVED
     assert decision.comment_id == 7
+
+
+def test_issue_gate_status_finds_decision_beyond_first_page(monkeypatch):
+    page1 = [
+        {"id": i, "user": {"login": "noise"}, "body": "chatter", "created_at": "2026-07-16T09:00:00Z"}
+        for i in range(100)
+    ]
+    page2 = [
+        {"id": 42, "user": {"login": "example-alice"},
+         "body": "/agent-hq approve run-abc123", "created_at": "2026-07-16T10:00:00Z"},
+    ]
+    fake = _install(monkeypatch, [FakeResponse(200, page1), FakeResponse(200, page2)])
+    decision = _issue_gate().status(_run())
+    assert decision.status == GateStatus.APPROVED
+    assert decision.comment_id == 42
+    assert len(fake.calls) == 2
 
 
 def test_issue_gate_status_pending_when_no_decision_and_not_expired(monkeypatch):

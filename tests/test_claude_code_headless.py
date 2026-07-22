@@ -213,6 +213,26 @@ def test_prepare_worktree_checks_out_base_commit_and_tags_it(monkeypatch, tmp_pa
     assert _git("rev-parse", "agent-hq-base", cwd=worktree).strip() == base_commit
 
 
+def test_resolve_ref_returns_remote_branch_sha(monkeypatch, tmp_path):
+    origin = _make_origin(tmp_path)
+    base_commit = _git("rev-parse", "main", cwd=tmp_path / "_seed").strip()
+    monkeypatch.setattr(cch, "_clone_url", lambda repo: str(origin))
+
+    executor = ClaudeCodeHeadless({"workdir": str(tmp_path / "work")})
+
+    assert executor.resolve_ref("o/r", "main") == base_commit
+
+
+def test_resolve_ref_raises_on_unknown_branch(monkeypatch, tmp_path):
+    origin = _make_origin(tmp_path)
+    monkeypatch.setattr(cch, "_clone_url", lambda repo: str(origin))
+
+    executor = ClaudeCodeHeadless({"workdir": str(tmp_path / "work")})
+
+    with pytest.raises(RuntimeError, match="ref not found"):
+        executor.resolve_ref("o/r", "does-not-exist")
+
+
 # -- materialize_work_patch / apply_patch / land_branch (Task 12, real git) -----
 
 

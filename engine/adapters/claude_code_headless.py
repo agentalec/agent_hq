@@ -137,6 +137,18 @@ class ClaudeCodeHeadless:
         self._git("config", "user.email", _BOT_EMAIL, cwd=worktree)
         return worktree
 
+    def resolve_ref(self, repo: str, ref: str) -> str:
+        """Resolve a branch name to its immutable commit SHA via a
+        lightweight `git ls-remote` -- no clone needed (prepare has no
+        work-repo clone, Task 12). Called once at prepare so execute and
+        collect, which run in separate clones, operate on a pinned SHA
+        rather than a mutable branch name that could move between phases."""
+        out = self._git("ls-remote", _clone_url(repo), f"refs/heads/{ref}")
+        line = out.strip().splitlines()[0] if out.strip() else ""
+        if not line:
+            raise RuntimeError(f"ref not found: {repo}@refs/heads/{ref}")
+        return line.split()[0]
+
     def run(self, bundle: dict, tools: list[str], deadline_iso: str) -> dict:
         prompt = bundle["prompt"]
         worktree = Path(bundle["worktree"])
