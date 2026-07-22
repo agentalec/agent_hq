@@ -8,7 +8,7 @@
       "task_id": "spec",
       "task_version": 1,
       "ticket_id": "7",
-      "state": "RUNNING",
+      "state": "WAITING_GATE",
       "attempt": 0,
       "bindings": {
         "tracker": "github-issues",
@@ -19,14 +19,41 @@
       "cost_usd": 0.0,
       "tokens": null,
       "usage_known": true,
-      "artifacts": [],
+      "artifacts": [
+        "specs/7/spec.md"
+      ],
       "chain_depth": 0,
       "source_event_id": "7:opened:2026-07-22T10:03:01Z",
       "enqueue_index": 0,
       "repo": "agentalec/care_docs",
       "deadline": "2026-07-22T10:34:08Z",
       "attempt_started_at": "2026-07-22T10:04:08Z",
-      "base_commit": "dbd221992b4569412c1969bffff99f2642160205"
+      "base_commit": "dbd221992b4569412c1969bffff99f2642160205",
+      "output_commit": "dbd221992b4569412c1969bffff99f2642160205",
+      "pr_ref": null,
+      "gate_requested_at": "2026-07-22T10:08:23Z",
+      "gate_request_id": "5044547543",
+      "pending_handoffs": [
+        {
+          "key": "implement-glossary",
+          "target_task": "implement",
+          "reason": "Specification approved. Create glossary page with domain term definitions, integrate into sidebar navigation, and ensure availability across documentation versions.",
+          "repo": "agentalec/care_docs",
+          "artifacts": [
+            "specs/7/spec.md"
+          ],
+          "source_run_id": "cb1cd1421abcd8e8"
+        }
+      ]
+    }
+  ],
+  "work_repos": [
+    {
+      "repo": "agentalec/care_docs",
+      "branch": "agent-hq/7",
+      "base_branch": "main",
+      "recorded_head": "dbd221992b4569412c1969bffff99f2642160205",
+      "pr_ref": null
     }
   ]
 }
