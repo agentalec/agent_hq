@@ -1,0 +1,338 @@
+# Review: Display patient age on encounter page using clinical age-format rules
+
+## Round 1
+
+### Acceptance Criteria Coverage
+
+**AC1: Display age using clinical age-format rules** ✓
+- 0-28 days: Implementation correctly displays "X days" (lines 245-248 in utils.ts)
+- 29 days to 1 year: Implementation correctly displays "X weeks Y days" (lines 250-258)
+- 1 year to 2 years: Implementation correctly displays "X months Y days" (lines 260-268)
+- 2 years to 18 years: Implementation correctly displays "X years Y months" (lines 270-276)
+- Above 18 years: Implementation correctly displays "X years" only (lines 278-279)
+
+**AC2: Handle abbreviated format** ✓
+- Implementation uses `getRelativeDateSuffix(abbreviated)` to provide abbreviated suffixes ("d", "w", "mo", "Y")
+
+**AC3: Show full age breakdown on hover** ✓
+- `formatPatientAgeTooltip()` function implemented to show full breakdown
+- `TooltipComponent` integrated in `PatientInfoHoverCard.tsx` and `PatientHoverCard.tsx`
+
+**AC4: Calculate age relative to death date for deceased patients** ✓
+- Implementation checks for `deceased_datetime` and uses it as the end date (lines 229-232)
+
+**AC5: Handle year-of-birth-only patients** ✓
+- Implementation displays "Born YYYY" or "Born on YYYY" (lines 236-240)
+
+**AC6: Maintain consistency across all age displays** ✓
+- Changes to `formatPatientAge()` function apply to all usages throughout the application
+
+### Blockers
+
+**BLOCKER-1: Test expectations incorrect for non-abbreviated format**
+Location: `tests/unit/formatPatientAge.spec.ts`, lines 530, 537-538, 547-548, 553-554, 562-563, 568-569, 574-575, 580-581
+
+The tests expect abbreviated suffixes ("Y", "mo") when calling `formatPatientAge(patient)` without the abbreviated parameter (defaults to false). This is incorrect.
+
+Examples:
+- Line 530: `expect(formatPatientAge(patient)).toBe("2 Y");` should be `expect(formatPatientAge(patient)).toBe("2 years");`
+- Line 537-538: Expects "5 Y" and "3 mo" but should expect "5 years" and "3 months"
+- Line 547-548: Expects "10 Y" and "6 mo" but should expect "10 years" and "6 months"
+- Line 553-554: Expects "17 Y" and "11 mo" but should expect "17 years" and "11 months"
+
+All instances in the "2 years to 18 years" and "Above 18 years" test sections need correction. When `abbreviated=false` (the default), the function returns full words ("years", "months", "weeks", "days"), not abbreviated forms.
+
+**BLOCKER-2: Test expectations incorrect for abbreviated format**
+Location: `tests/unit/formatPatientAge.spec.ts`, lines 531, 563, 569, 575, 581
+
+The tests expect abbreviated suffixes without spaces when calling `formatPatientAge(patient, true)`. Looking at the implementation, the function includes spaces between numbers and suffixes even in abbreviated mode.
+
+Examples:
+- Line 531: `expect(formatPatientAge(patient, true)).toBe("2Y");` but implementation returns `"2 Y"` (with space)
+- Line 563: Expects "18Y" but implementation returns "18 Y"
+
+The implementation at line 279 returns `${years} ${suffixes.year}` which includes a space. Tests should expect "2 Y" not "2Y".
+
+**BLOCKER-3: PLAYWRIGHT_GUIDE.md formatting corrupted**
+Location: `tests/PLAYWRIGHT_GUIDE.md`, lines 231-248
+
+The diff shows malformed changes where multiple template strings were concatenated on single lines without proper separators:
+
+```typescript
+// Before (correct):
+`/facility/${facilityId}/overview`
+`/facility/${facilityId}/settings/locations`
+
+// After (incorrect):
+`/facility/${facilityId}/overview``/facility/${facilityId}/settings/locations`
+```
+
+This creates invalid TypeScript syntax. Each template string should be on its own line with proper commenting/formatting, or they should be properly separated if intended as code examples.
+
+**BLOCKER-4: Test description doesn't match assertion**
+Location: `tests/unit/formatPatientAge.spec.ts`, line 462
+
+The test description says "should display '5 weeks 0 days' for 35-day-old" but the implementation at line 254-255 in utils.ts shows that when `remainingDays === 0`, it returns only weeks without days (e.g., "5 weeks"). The test assertion only checks for "5 weeks" which is correct, but the test description is misleading.
+
+This should either:
+1. Update the test description to match the actual behavior: "should display '5 weeks' for 35-day-old"
+2. Or update the implementation to always show days even when 0: "5 weeks 0 days"
+
+### Should-Fix Issues
+
+**SHOULD-FIX-1: Inconsistent test precision expectations**
+Location: `tests/unit/formatPatientAge.spec.ts`, lines 419, 427, 435-436
+
+Some tests use range checks for day values while others expect exact values. This inconsistency makes it unclear whether the date calculation precision is reliable:
+- Line 419: `expect(breakdown.days).toBeGreaterThanOrEqual(28);` - Why not exact?
+- Line 427: `expect(breakdown.days).toBeLessThanOrEqual(1);` - Why a range?
+- Line 435-436: Range check for 4-6 days
+
+Consider using exact value assertions with proper mocking of dates, or document why ranges are necessary.
+
+**SHOULD-FIX-2: Missing test for weeks-only display**
+Location: `tests/unit/formatPatientAge.spec.ts`, line 462-467
+
+The test at line 479 verifies "8 weeks" but doesn't verify the absence of days suffix. Add explicit assertion:
+```typescript
+expect(result).toBe("8 weeks"); // or "8w" for abbreviated
+```
+
+This would catch any implementation bugs that add unnecessary "0 days" suffix.
+
+**SHOULD-FIX-3: E2E test uses generic pattern matching**
+Location: `tests/organization/patient/encounter/patientInfoHoverCard.spec.ts`, line 293
+
+The test uses a very generic regex pattern `expect(ageText).toMatch(/\d+[Ywmd]/);` which only verifies that some age unit exists. Consider more specific assertions based on the test patient's expected age to ensure the correct clinical format is applied.
+
+### Nits
+
+**NIT-1: Abbreviated year suffix uses capital "Y"**
+Location: `src/Utils/utils.ts`, line 145
+
+The abbreviated format uses "Y" (capital) instead of the more common lowercase "y". While this works, "y" or "yr" might be more conventional in medical contexts. This should be confirmed with the clinical team.
+
+**NIT-2: Documentation could be more specific**
+Location: `src/Utils/utils.ts`, lines 179-183
+
+The `formatPatientAgeTooltip` JSDoc says "Always shows 'X years, Y months, Z days' format" but the implementation only shows non-zero values. For a 2-year-old with 0 months and 0 days, it shows "2 years" not "2 years, 0 months, 0 days". Consider updating the documentation to reflect the actual behavior.
+
+**NIT-3: Tests missing newline at end of file**
+Location: `tests/unit/formatPatientAge.spec.ts`, line 742
+
+The test file appears to end at line 742 without a final newline. While this doesn't affect functionality, it's conventional to end files with a newline.
+
+**NIT-4: Tests/README.md has formatting inconsistency**
+Location: `tests/README.md`, line 260-262
+
+The diff shows removal of the trailing newline (`\ No newline at end of file` changed to proper newline). This is good, but it's a diff artifact rather than an intentional change. Not an issue, just noting the change.
+
+### Over-Engineering Pass
+
+**No over-engineering detected.** The implementation is appropriately scoped:
+- Three focused functions: `getPatientAgeBreakdown()`, `formatPatientAge()`, `formatPatientAgeTooltip()`
+- No unnecessary abstractions or premature generalization
+- Reuses existing `getRelativeDateSuffix()` helper
+- Minimal changes to UI components (just wraps age text with tooltip)
+
+### Security Pass
+
+**No security issues detected:**
+- No hardcoded credentials or secrets
+- No SQL injection or XSS vulnerabilities
+- Patient data (date_of_birth, deceased_datetime) handled appropriately
+- No new dependencies introduced
+- Uses existing Radix UI tooltip primitives (already in the project)
+- No auth/authz changes
+
+### Summary
+
+The implementation correctly addresses all acceptance criteria with appropriate logic for each age range. However, there are **4 blocker issues** related to test expectations that must be fixed before the code can be considered working:
+1. Tests expect abbreviated suffixes when calling with non-abbreviated mode
+2. Tests expect no-space abbreviated format but implementation includes spaces  
+3. PLAYWRIGHT_GUIDE.md has corrupted formatting
+4. Test description doesn't match actual behavior
+
+These are not implementation bugs but rather test bugs that would cause the test suite to fail.
+
+## Round 2
+
+### Acceptance Criteria Coverage (Re-check)
+
+All acceptance criteria remain properly covered as verified in Round 1. The implementation logic in `utils.ts` was not changed in this round - only test expectations were corrected.
+
+### Blocker Resolution Status
+
+**BLOCKER-1: Test expectations incorrect for non-abbreviated format** ✅ FIXED
+- All instances now correctly expect full words ("years", "months", "weeks", "days") for non-abbreviated mode
+- Lines 78, 85-86, 99-100, 107-108 in the diff show proper corrections
+
+**BLOCKER-2: Test expectations incorrect for abbreviated format** ✅ FIXED
+- All instances now correctly expect space-separated abbreviated format ("2 Y", "5 w", "15 d")
+- Lines 39, 45, 53, 64, 79, 92-93, 121, 129, 137, 145 in the diff show proper corrections
+
+**BLOCKER-3: PLAYWRIGHT_GUIDE.md formatting corrupted** ✅ FIXED
+- Template strings now properly separated on individual lines
+- Lines 10-16, 19-23, 26-27 in the diff show correct formatting
+
+**BLOCKER-4: Test description doesn't match assertion** ✅ FIXED
+- Test description updated from "should display '5 weeks 0 days'" to "should display '5 weeks'"
+- Line 59 in the diff shows the correction
+
+### New Blockers
+
+**BLOCKER-5: Missing pluralization logic in implementation**
+Location: `src/Utils/utils.ts`, lines 140-147 (`getRelativeDateSuffix()` function)
+
+The `getRelativeDateSuffix()` function always returns plural forms regardless of count:
+```typescript
+return {
+  day: abbreviated ? "d" : "days",
+  week: abbreviated ? "w" : "weeks",
+  month: abbreviated ? "mo" : "months",
+  year: abbreviated ? "Y" : "years",
+};
+```
+
+This produces grammatically incorrect output like:
+- "1 years" instead of "1 year"
+- "1 months" instead of "1 month"
+- "1 weeks" instead of "1 week"
+- "1 days" instead of "1 day"
+
+The function needs to accept a count parameter and return singular/plural forms accordingly. This affects:
+1. `formatPatientAge()` at lines 245, 256, 265, 273, 278
+2. `formatPatientAgeTooltip()` at lines 200-202
+
+**Required fix**: Add pluralization logic that checks if count === 1 and returns singular form.
+
+### Should-Fix Issues
+
+All should-fix issues from Round 1 remain unaddressed:
+
+**SHOULD-FIX-1: Inconsistent test precision expectations** (unchanged)
+- Still using range checks in some places and exact values in others
+- No changes made to lines 419, 427, 435-436
+
+**SHOULD-FIX-2: Missing test for weeks-only display** (unchanged)
+- Test at line 479 still doesn't have explicit assertion for the complete string
+
+**SHOULD-FIX-3: E2E test uses generic pattern matching** (unchanged)
+- Test in `patientInfoHoverCard.spec.ts` line 293 still uses very generic regex
+
+These are non-blocking improvements that can be deferred.
+
+### Nits
+
+All nits from Round 1 remain as-is (no changes to implementation or documentation):
+
+**NIT-1**: Abbreviated "Y" suffix remains (implementation unchanged)
+**NIT-2**: Documentation precision remains unchanged
+**NIT-3**: Test file end-of-file status unchanged
+**NIT-4**: README.md formatting artifact unchanged
+
+### Over-Engineering Pass
+
+No new over-engineering introduced. Changes are minimal test expectation corrections only.
+
+### Security Pass
+
+No security concerns. Changes only affect test assertions, not production code.
+
+### Summary
+
+Round 2 successfully resolved all 4 blockers from Round 1 by correcting test expectations. However, **1 new blocker** was introduced:
+- **BLOCKER-5**: Test expects "1 years" (plural) instead of "1 year" (singular) for tooltip
+
+This must be fixed before finalization. The should-fix and nit items can be deferred as they don't block functionality.
+
+## Round 3
+
+### Acceptance Criteria Coverage (Re-check)
+
+All acceptance criteria remain properly covered. The implementation logic correctly implements the clinical age format rules with proper singular/plural forms.
+
+### Blocker Resolution Status
+
+**BLOCKER-5: Missing pluralization logic in implementation** ✅ FIXED
+- The `getRelativeDateSuffix()` function now properly accepts `count`, `unit`, and `abbreviated` parameters (lines 140-170 in utils.ts)
+- Singular forms returned when count === 1: "day", "week", "month", "year"
+- Plural forms returned when count !== 1: "days", "weeks", "months", "years"
+- All callers updated to pass the count parameter
+- Tests correctly expect singular forms for count=1 (e.g., "1 day", "1 week", "1 year", "1 month")
+
+### New Blockers
+
+**BLOCKER-6: Inconsistent test expectations for abbreviated format spacing**
+Location: `tests/unit/formatPatientAge.spec.ts`, line 184
+
+The implementation always includes spaces between numbers and abbreviated suffixes:
+```typescript
+// Line 293 in utils.ts
+return `${totalMonths} ${getRelativeDateSuffix(totalMonths, "month", abbreviated)} ${remainingDays} ${getRelativeDateSuffix(remainingDays, "day", abbreviated)}`;
+```
+
+This produces "13 mo 5 d" (with spaces) for abbreviated format. However, line 184 in the test expects:
+```typescript
+expect(abbreviated).toContain("13mo");  // No space between 13 and mo
+```
+
+Other tests correctly expect spaces:
+- Line 136: `expect(formatPatientAge(patient, true)).toBe("1 w");` ✓ (with space)
+- Line 208: `expect(formatPatientAge(patient, true)).toBe("2 Y");` ✓ (with space)
+- Line 225: `expect(formatPatientAge(patient, true)).toBe("3 Y 1 mo");` ✓ (with spaces)
+
+The test at line 184 needs to be corrected to:
+```typescript
+expect(abbreviated).toContain("13 mo");  // With space
+```
+
+### Should-Fix Issues
+
+All should-fix issues from Round 1 and Round 2 remain unaddressed:
+
+**SHOULD-FIX-1: Inconsistent test precision expectations** (unchanged from Round 1)
+- Still using range checks in some places and exact values in others
+- Lines 419, 427, 435-436 use ranges instead of exact assertions
+
+**SHOULD-FIX-2: Missing test for weeks-only display** (unchanged from Round 1)
+- Test at line 479 doesn't have explicit assertion for the complete string
+
+**SHOULD-FIX-3: E2E test uses generic pattern matching** (unchanged from Round 1)
+- Test in `patientInfoHoverCard.spec.ts` line 293 uses very generic regex pattern
+
+These remain non-blocking improvements that can be deferred.
+
+### Nits
+
+All nits from previous rounds remain unchanged:
+
+**NIT-1**: Abbreviated "Y" suffix remains (capital Y instead of lowercase y)
+**NIT-2**: Documentation precision unchanged (JSDoc could be more specific)
+**NIT-3**: Test file end-of-file newline status
+**NIT-4**: README.md formatting artifact
+
+### Over-Engineering Pass
+
+No over-engineering detected. The implementation remains appropriately scoped with:
+- Focused utility functions for age calculation and formatting
+- Proper singular/plural handling without over-abstraction
+- Minimal, targeted changes to UI components
+
+### Security Pass
+
+No security concerns:
+- No hardcoded credentials or secrets
+- No injection vulnerabilities
+- Patient data handled appropriately
+- No new dependencies introduced
+- No auth/authz changes
+
+### Summary
+
+Round 3 successfully resolved BLOCKER-5 from Round 2 by implementing proper singular/plural logic in `getRelativeDateSuffix()`. However, **1 new blocker** was discovered:
+- **BLOCKER-6**: Test at line 184 expects "13mo" (no space) but implementation returns "13 mo" (with space)
+
+Since this is **Round 3 (the round cap)**, per the constitution, no further implement rounds should be triggered. The accumulated findings will be posted to the ticket thread and the PR left in draft for human review.
+
+The implementation is functionally correct and meets all acceptance criteria. The only remaining issue is a minor test expectation mismatch that can be quickly resolved by a developer.
