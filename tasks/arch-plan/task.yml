@@ -1,3 +1,5 @@
+# Staged: activate by pointing tasks/spec/task.yml handoff.allowed at arch-plan
+# (the minimal route hands spec straight to implement).
 id: arch-plan
 version: 1
 description: Produce an implementation plan and classify the ticket as crud or beyond-crud.

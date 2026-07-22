@@ -18,8 +18,10 @@ gates:
       timeout_working_hours: 48
 handoff:
   allowed:
-    - arch-plan
-  max: 1
+    - implement
+  # Fan-out point in the minimal route: one implement handoff per affected
+  # repo (config/repos.yml lists three).
+  max: 3
 budget:
   max_cost_usd: 5
   max_runtime_min: 30

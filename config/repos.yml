@@ -1,12 +1,18 @@
-# Repos config (§6). example-org is a placeholder -- real org/repo names
-# await requirements §12 answers.
-example-org/product-be:
+# Repos config (§6). `product_area` is the intake routing keyword --
+# engine.engine.resolve_target_repo substring-matches it against a ticket's
+# title+body+labels, first match wins in this order (no match = ineligible).
+agentalec/care:
   role: be
   branch_prefix: agent-hq
   product_area: backend
-  base_branch: main
-example-org/product-fe:
+  base_branch: develop
+agentalec/care_fe:
   role: fe
   branch_prefix: agent-hq
   product_area: frontend
+  base_branch: develop
+agentalec/care_docs:
+  role: docs
+  branch_prefix: agent-hq
+  product_area: docs
   base_branch: main

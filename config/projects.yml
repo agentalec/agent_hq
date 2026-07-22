@@ -1,13 +1,14 @@
-# Projects config (§6). Pilot placeholder values only.
+# Projects config (§6).
 repos:
-  - example-org/product-be
-  - example-org/product-fe
+  - agentalec/care
+  - agentalec/care_fe
+  - agentalec/care_docs
 intake_label: hq:intake
-engine_repo: example-org/agent-hq
+engine_repo: agentalec/agent_hq
 initial_task: spec
 intake:
   min_body_words: 30
   excluded_labels:
     - hq:excluded
-public: true
+public: false
 public_safe_label: hq:public-safe
