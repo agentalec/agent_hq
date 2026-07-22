@@ -8,7 +8,7 @@
       "task_id": "spec",
       "task_version": 1,
       "ticket_id": "11",
-      "state": "WAITING_GATE",
+      "state": "SUCCEEDED",
       "attempt": 0,
       "bindings": {
         "tracker": "github-issues",
@@ -33,17 +33,31 @@
       "pr_ref": null,
       "gate_requested_at": "2026-07-22T12:41:58Z",
       "gate_request_id": "5045887822",
-      "pending_handoffs": [
-        {
-          "key": "implement-clinical-age-format",
-          "target_task": "implement",
-          "reason": "Specification complete. Ready to implement clinical age format rules in formatPatientAge() function, add tooltip for full age breakdown, and update tests.",
-          "repo": "agentalec/care_fe",
-          "artifacts": [
-            "specs/11/spec.md"
-          ],
-          "source_run_id": "3060b51f6f0f917b"
-        }
+      "pending_handoffs": []
+    },
+    {
+      "run_id": "5b3f802d4b0502a7",
+      "task_id": "implement",
+      "task_version": 1,
+      "ticket_id": "11",
+      "state": "QUEUED",
+      "attempt": 0,
+      "bindings": {
+        "tracker": "github-issues",
+        "agent-session": "copilot-cli",
+        "messaging": "github-comment",
+        "gate": "github-issue-comment"
+      },
+      "cost_usd": null,
+      "tokens": null,
+      "usage_known": false,
+      "artifacts": [],
+      "chain_depth": 1,
+      "parent_run_id": "3060b51f6f0f917b",
+      "handoff_key": "implement-clinical-age-format",
+      "repo": "agentalec/care_fe",
+      "input_artifacts": [
+        "specs/11/spec.md"
       ]
     }
   ],
