@@ -2,5 +2,22 @@
   "ticket_id": "11",
   "pinned_comment_id": 5045843827,
   "status": "ACTIVE",
-  "runs": []
+  "runs": [
+    {
+      "run_id": "3060b51f6f0f917b",
+      "task_id": "spec",
+      "task_version": 1,
+      "ticket_id": "11",
+      "state": "QUEUED",
+      "attempt": 0,
+      "bindings": {},
+      "cost_usd": null,
+      "tokens": null,
+      "usage_known": false,
+      "artifacts": [],
+      "chain_depth": 0,
+      "source_event_id": "11:labeled:2026-07-22T12:36:51Z",
+      "enqueue_index": 0
+    }
+  ]
 }
