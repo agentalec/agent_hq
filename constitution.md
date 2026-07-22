@@ -48,4 +48,5 @@ Don't write ticket artifacts anywhere else, and don't touch another ticket's
 - Commits are Conventional Commits (`feat:`, `fix:`, `test:`, `chore:`, ...).
 - No secrets in code, config, or commit messages -- credentials come from
   environment variables, never files under version control.
-- Branches are named `agent-hq/<run_id>`.
+- Work branches are named `agent-hq/<issue-number>` -- one stable branch per
+  ticket per repository, reused by every task on that ticket.

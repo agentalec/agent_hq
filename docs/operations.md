@@ -193,10 +193,13 @@ over. To recover:
 
 ## 11. Push/replay as cross-ticket serialization (Task 13)
 
-There is no lock on `agent-hq-state` beyond two things: per-ticket run
-exclusivity (at most one `RUNNING`/`WAITING_GATE` run per ticket, enforced
-in `claim_run`) and every state write being a short transaction -- read,
-mutate in memory, commit, push. A write whose push is rejected (someone
+No lock guards `agent-hq-state` for correctness. The credentialed jobs
+(dispatch, prepare, collect) do still take a short-held `agent-hq-state`
+Actions concurrency group -- but that only reduces how often writers contend;
+what actually serializes them is per-ticket run exclusivity (at most one
+`RUNNING`/`WAITING_GATE` run per ticket, enforced in `claim_run`) plus every
+state write being a short transaction -- read, mutate in memory, commit,
+push. A write whose push is rejected (someone
 else's commit landed first) just replays: fetch, `reset --hard`, re-run the
 same mutation against fresh state (`engine/state.py`'s bounded retry). That
 push/replay loop, not a separate lock, is what serializes concurrent writers

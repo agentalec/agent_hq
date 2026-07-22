@@ -29,9 +29,11 @@ ignored):
   file (inlined verbatim).
 - `skills` -- task-local `prompts/`/`checklists/` files, inlined into the
   prompt; must exist on disk (`engine.taskdefs.load_task` checks this).
-- `components` -- port name -> **logical** binding name resolved through
-  `components.yml` (`engine.config.resolve_binding`), e.g. a task could set
-  `components.gate: spec-approval` to pick a named gate variant. A task
+- `components` -- port name -> **logical** binding name. Validated but
+  currently inert: `engine.config.resolve_binding` honors a task-supplied
+  binding name only for the `gate` port, and the gate binding is actually
+  selected via `gates.post[].adapter`, never via `components` (see
+  `docs/task-definition.md`). A task
   declaring a `components` entry for a port `components.yml` doesn't
   configure is a load-time error (`engine.config.validate_task_bindings`,
   wired into `agent-hq tasks validate`). A task declaring **no**

@@ -2,9 +2,11 @@
 
 Reads/writes JSON documents on a worktree of the orphan `agent-hq-state`
 branch: `tickets/<id>/state.json` (per-ticket doc), `tickets/<id>/events.jsonl`
-(append-only), `health/latest.json`. Writers are serialized externally by an
-Actions concurrency group (D5) -- the fetch/reset/reapply retry here is a
-safety net, not the primary concurrency control. See
+(append-only), `health/latest.json`. The bounded fetch/reset/replay retry on a
+confirmed non-fast-forward push rejection is the concurrency model (the CAS
+that serializes concurrent writers across tickets -- docs/operations.md §11);
+the short-held `agent-hq-state` Actions concurrency group on credentialed jobs
+only reduces contention, it is not required for correctness. See
 docs/ports/state-store.md for the contract. Not a registry port (PD-7) --
 callers construct this directly with a worktree path.
 """
@@ -303,8 +305,10 @@ class GitJsonStateStore:
         return "state: health update"
 
     def write(self, fn: Callable[[Txn], None]) -> None:
-        # ponytail: Actions concurrency group serializes writers (D5); this
-        # replay is a safety net, not the primary concurrency control.
+        # This replay loop is the concurrency model: a rejected push is the
+        # CAS that forces a re-read (docs/operations.md §11). The short-held
+        # Actions concurrency group on credentialed jobs merely reduces how
+        # often it fires.
         for attempt in range(1, _MAX_WRITE_ATTEMPTS + 1):
             txn = Txn(self)
             fn(txn)

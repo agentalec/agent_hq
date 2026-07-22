@@ -65,12 +65,14 @@ CI (`.github/workflows/ci.yml`) runs all five; a change isn't done until all pas
   attempt)` — the target task id is deliberately not part of it, so a
   re-delivered handoff key always resolves to the same run id regardless of
   payload (`engine/models.py:compute_handoff_run_id`).
-- State writes go through `GitJsonStateStore.write(fn)`. Writers are
-  serialized by the `agent-hq-state` Actions concurrency group; the store's
-  bounded (`_MAX_WRITE_ATTEMPTS`) fetch/reset/replay retry fires only on a
-  confirmed non-fast-forward push rejection (parsed from `git push
-  --porcelain`, not stderr) and is a safety net, not the concurrency model —
-  auth/network/server errors fail fast instead.
+- State writes go through `GitJsonStateStore.write(fn)`. The store's bounded
+  (`_MAX_WRITE_ATTEMPTS`) fetch/reset/replay retry is the concurrency model —
+  a rejected push is the CAS that serializes concurrent writers across
+  tickets (`docs/operations.md` §11). It fires only on a confirmed
+  non-fast-forward push rejection (parsed from `git push --porcelain`, not
+  stderr) — auth/network/server errors fail fast instead. The short-held
+  `agent-hq-state` Actions concurrency group on credentialed jobs only
+  reduces contention; it is not required for correctness.
 - The agent child process env is an allowlist built from scratch (PD-5) —
   never pass `AGENT_HQ_TOKEN`/`GITHUB_TOKEN`/`GH_TOKEN` into it, and tokens
   never appear in git argv (env-var credential helper only). The default
