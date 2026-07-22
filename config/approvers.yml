@@ -1,14 +1,14 @@
-# Approvers config (§6). example-* members are placeholders -- real
-# usernames await requirements §12 answers.
+# Approvers config (§6). Pilot: agentalec decides every gate; add real
+# reviewers per group as the deployment grows.
 groups:
   product-owners:
-    members: [example-alice]
+    members: [agentalec]
   architects:
-    members: [example-bob]
+    members: [agentalec]
   clinical-reviewers:
-    members: [example-carol]
+    members: [agentalec]
   escalation:
-    members: [example-dave]
+    members: [agentalec]
 working_hours:
   timezone: Asia/Kolkata
   start: 9

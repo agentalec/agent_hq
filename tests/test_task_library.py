@@ -29,15 +29,15 @@ EXPECTED_TASK_IDS = {
     "finalize", "clinical", "poll", "qa", "docs",
 }
 
-# The wired handoff graph a fresh P0 ticket walks (breakdown's fan-out is
-# capacity, not a fixed edge -- it emits 1..handoff.max `implement` handoffs
-# depending on how many repos a ticket touches).
+# The wired handoff graph a fresh ticket walks (spec's fan-out is capacity,
+# not a fixed edge -- it emits 1..handoff.max `implement` handoffs depending
+# on how many repos a ticket touches).
 EXPECTED_HANDOFF_ALLOWED = {
-    "spec": (["arch-plan"], 1),
+    "spec": (["implement"], 3),
     "arch-plan": (["arch-approval", "breakdown"], 1),
     "arch-approval": (["breakdown"], 1),
     "breakdown": (["implement"], 2),
-    "implement": (["review"], 1),
+    "implement": (["finalize"], 1),
     "review": (["finalize"], 1),
     "finalize": ([], 0),
     "clinical": (["arch-plan"], 1),
@@ -60,9 +60,9 @@ def test_task_library_loads_and_validates_clean():
 
 def test_handoff_targets_resolve_within_the_library():
     """Every handoff.allowed target of every task resolves to a loaded task
-    id (validate_library's own check), and the P0 graph's specific
-    allowed-set/max matches the plan -- most tellingly breakdown's
-    handoff.max: 2, the pilot's two-repo fan-out point."""
+    id (validate_library's own check), and the graph's specific
+    allowed-set/max matches the plan -- most tellingly spec's
+    handoff.max: 3, the minimal route's per-repo fan-out point."""
     taskdefs = load_all(TASKS_DIR, SCHEMAS_DIR)
     for task_id, (allowed, max_handoffs) in EXPECTED_HANDOFF_ALLOWED.items():
         handoff = taskdefs[task_id].get("handoff", {})
@@ -80,7 +80,7 @@ def test_gate_tasks_resolve_to_constructible_adapters():
     for taskdef in gate_tasks:
         for gate in taskdef["gates"]["post"]:
             adapter_name = resolve_binding(config, "gate", gate["adapter"], [])
-            adapter = build_port_adapter(config, "gate", adapter_name, repo="example-org/product-be")
+            adapter = build_port_adapter(config, "gate", adapter_name, repo="agentalec/care")
             assert adapter is not None
 
 

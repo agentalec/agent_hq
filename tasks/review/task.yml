@@ -1,3 +1,5 @@
+# Staged: activate by pointing tasks/implement/task.yml handoff.allowed at
+# review (the minimal route hands implement straight to finalize).
 id: review
 version: 1
 description: Review the implementation against the spec and plan; write findings.

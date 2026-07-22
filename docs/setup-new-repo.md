@@ -209,11 +209,11 @@ comment-triggered fast path yet: decisions are noticed by the next
 `dispatch.yml` sweep, so expect **up to ~15 minutes** (the `*/15` cron)
 before the ticket moves.
 
-From there the pilot route runs: `spec` → `arch-plan` → `arch-approval`
-(architect gate, only when the plan classifies the ticket beyond-crud —
-crud goes straight on) → `breakdown` → `implement` (one run per affected
-repo; the only task that opens a PR, one draft PR per repo per ticket) →
-`review` → `finalize`. When `finalize` completes and the queue is empty,
+From there the pilot route runs: `spec` (fans out one `implement` handoff
+per affected repo) → `implement` (the only task that opens a PR, one draft
+PR per repo per ticket) → `finalize`. The fuller route (`arch-plan` →
+`arch-approval` → `breakdown` → `review`) is staged — each task's header
+names its activation edit. When `finalize` completes and the queue is empty,
 the engine posts the closing summary from `specs/<ticket>/summary.md`,
 marks each recorded PR ready for review, closes the issue, and sets the
 ticket `DONE`. **DONE means engine-complete**: the PRs are ready but not

@@ -311,9 +311,10 @@ def test_intake_no_product_area_blocks(config, taskdefs, store):
 
 
 def test_intake_public_ticket_missing_public_safe_label_blocks(config, taskdefs, store):
-    """config/projects.yml sets public: true -- a ticket missing
-    public_safe_label is rejected before any state/artifact write, alongside
-    the other eligibility reasons."""
+    """On a public deployment (public: true -- forced here; the pilot config
+    is private) a ticket missing public_safe_label is rejected before any
+    state/artifact write, alongside the other eligibility reasons."""
+    config.projects["public"] = True
     tracker = FakeTracker(_details(labels=["hq:intake"]))
     result = intake_ticket("7", "evt-1", config, taskdefs, store, _adapters(tracker=tracker))
     assert result == "blocked"
@@ -332,7 +333,7 @@ def test_intake_eligible_enqueues_spec(config, taskdefs, store):
     assert spec_runs[0]["state"] == "QUEUED"
     # Root run repo resolved from the ticket (title mentions "backend") --
     # never null, so every downstream handoff has a concrete repo to inherit.
-    assert spec_runs[0]["repo"] == "example-org/product-be"
+    assert spec_runs[0]["repo"] == "agentalec/care"
 
 
 def test_intake_injection_flag_blocks_and_skips_enqueue(config, taskdefs, store):
@@ -401,9 +402,9 @@ def test_prepare_claims_and_writes_bundle(config, taskdefs, store, tmp_path):
     assert bundle.exists()
     written = json.loads(bundle.read_text())
     assert "control.json" in written["prompt"]
-    assert written["repo"] == "example-org/product-be"
+    assert written["repo"] == "agentalec/care"
     # no work_repos entry yet -> resolved SHA of the configured base branch
-    assert written["base_commit"] == "sha-main"
+    assert written["base_commit"] == "sha-develop"
     assert written["output_paths"] == ["specs/7/spec.md"]
 
     again = run_task("specrun", "prepare", config, taskdefs, store,
@@ -428,7 +429,7 @@ def test_prepare_base_commit_uses_recorded_head_and_survives_downstream_failure(
     run_task("buildrun", "collect", config, taskdefs, store,
              now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
     recorded_head = next(
-        wr for wr in store.read_state("7")["work_repos"] if wr["repo"] == "example-org/product-be"
+        wr for wr in store.read_state("7")["work_repos"] if wr["repo"] == "agentalec/care"
     )["recorded_head"]
     assert recorded_head == "commit-buildrun"
 
@@ -524,12 +525,12 @@ def test_collect_opens_pr_records_pr_ref(config, taskdefs, store, tmp_path):
 
     runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
     assert runs["buildrun"]["state"] == "SUCCEEDED"
-    assert runs["buildrun"]["pr_ref"] == "example-org/product-be#1"
+    assert runs["buildrun"]["pr_ref"] == "agentalec/care#1"
     assert len(agent.opened_prs) == 1
     repo, branch, base, title, body = agent.opened_prs[0]
-    assert repo == "example-org/product-be"
+    assert repo == "agentalec/care"
     assert branch == "agent-hq/7"  # stable per-issue branch, not per-run
-    assert base == "main"
+    assert base == "develop"
 
 
 def test_collect_reuses_stable_branch_and_pr_across_tasks(config, taskdefs, store, tmp_path):
@@ -555,12 +556,12 @@ def test_collect_reuses_stable_branch_and_pr_across_tasks(config, taskdefs, stor
              now_iso="2026-07-18T10:00:00Z", adapter_fn=adapters)
 
     work_repos = [
-        wr for wr in store.read_state("7")["work_repos"] if wr["repo"] == "example-org/product-be"
+        wr for wr in store.read_state("7")["work_repos"] if wr["repo"] == "agentalec/care"
     ]
     assert len(work_repos) == 1  # one branch/PR record, not two
     assert work_repos[0]["branch"] == "agent-hq/7"
     assert work_repos[0]["recorded_head"] == "commit-buildrun2"
-    assert work_repos[0]["pr_ref"] == "example-org/product-be#1"
+    assert work_repos[0]["pr_ref"] == "agentalec/care#1"
     assert len(agent.opened_prs) == 1  # the second task never opens a second PR
 
 
@@ -653,7 +654,7 @@ def test_collect_finalize_completes_ticket_and_marks_pr_ready(config, taskdefs, 
         lambda txn: (
             txn.set_ticket(
                 "7", status="ACTIVE", pinned_comment_id=None,
-                work_repos=[{"repo": "example-org/product-be", "pr_ref": "example-org/product-be#11"}],
+                work_repos=[{"repo": "agentalec/care", "pr_ref": "agentalec/care#11"}],
             ),
             txn.put_run("7", _run_dict("buildrun", "build", state="SUCCEEDED")),
             txn.put_run(
@@ -670,7 +671,7 @@ def test_collect_finalize_completes_ticket_and_marks_pr_ready(config, taskdefs, 
     run_task("finalrun", "collect", config, taskdefs, store,
              now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
 
-    assert agent.ready_prs == ["example-org/product-be#11"]
+    assert agent.ready_prs == ["agentalec/care#11"]
     assert len(tracker.closing_summaries) == 1
     ticket_id, body, event_id = tracker.closing_summaries[0]
     assert ticket_id == "7"

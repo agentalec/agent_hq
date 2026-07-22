@@ -58,8 +58,8 @@ gates:
       timeout_working_hours: 48
 handoff:
   allowed:
-    - arch-plan               # the only task a spec run may hand off to
-  max: 1                      # at most one handoff per run
+    - implement               # the only task a spec run may hand off to
+  max: 3                      # fan-out cap: handoffs per run (one per repo)
 budget:
   max_cost_usd: 5
   max_runtime_min: 30

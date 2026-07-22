@@ -224,12 +224,12 @@ no terminal action.
 | Task | Status |
 |---|---|
 | intake | **Not a task.** Engine entry logic (`engine.runner.intake_ticket`) reads eligibility from `config.projects["intake"]`/`["public"]`/`["public_safe_label"]` and enqueues `config.projects["initial_task"]` (`spec` in the pilot config) with the root run's resolved repo. There is no `tasks/intake/` directory and no task-name special case for it. |
-| spec | Converted (wired). `handoff.allowed: [arch-plan]`, gated (`spec-approval`). |
-| arch-plan | Converted (wired). `handoff.allowed: [arch-approval, breakdown]`. |
-| arch-approval | Converted (wired). Confirms the plan artifacts, no changes; gated (`default`); `handoff.allowed: [breakdown]`. |
-| breakdown | Converted (wired). The fan-out point: `handoff.max: 2`, one `implement` handoff per affected configured repo. |
-| implement | Converted (wired). `opens_pr: true`; `handoff.allowed: [review]`. |
-| review | Converted (wired). `handoff.allowed: [finalize]`. |
+| spec | Converted (wired). `handoff.allowed: [implement]`, gated (`spec-approval`). The fan-out point in the minimal route: `handoff.max: 3`, one `implement` handoff per affected configured repo. |
+| arch-plan | Converted, defined, **unwired** -- its header names the activation edit (point `spec`'s `handoff.allowed` back at it). `handoff.allowed: [arch-approval, breakdown]`. |
+| arch-approval | Converted, defined, **unwired** (activated with `arch-plan`, its only in-edge). Confirms the plan artifacts, no changes; gated (`default`); `handoff.allowed: [breakdown]`. |
+| breakdown | Converted, defined, **unwired** (activated with the `arch-plan` chain). `handoff.max: 2`, one `implement` handoff per affected repo when wired. |
+| implement | Converted (wired). `opens_pr: true`; `handoff.allowed: [finalize]`. |
+| review | Converted, defined, **unwired** -- its header names the activation edit (point `implement`'s `handoff.allowed` at it). `handoff.allowed: [finalize]`. |
 | finalize | Converted (wired). Terminal task: writes `summary.md`, always `complete`, feeds queue-empty completion (see above). No task-name special case; any task ending this way completes the same way. |
 | clinical | Converted, defined, **unwired** until an accepted handoff selects it -- its own header names the one-line activation edit (point `spec`'s `handoff.allowed` at it). Gated (`clinical-reviewers`, `default` adapter). |
 | poll | Converted, defined, **unwired** -- needs the P1 reaction-based `poll` adapter (`docs/roadmap.md`); no task currently hands off to it. |
