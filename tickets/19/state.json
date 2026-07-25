@@ -8,7 +8,7 @@
       "task_id": "spec",
       "task_version": 1,
       "ticket_id": "19",
-      "state": "RUNNING",
+      "state": "WAITING_GATE",
       "attempt": 0,
       "bindings": {
         "tracker": "github-issues",
@@ -19,14 +19,41 @@
       "cost_usd": 0.0,
       "tokens": null,
       "usage_known": true,
-      "artifacts": [],
+      "artifacts": [
+        "specs/19/spec.md"
+      ],
       "chain_depth": 0,
       "source_event_id": "19:labeled:2026-07-25T18:04:10Z",
       "enqueue_index": 0,
       "repo": "agentalec/care_fe",
       "deadline": "2026-07-25T21:02:57Z",
       "attempt_started_at": "2026-07-25T20:32:57Z",
-      "base_commit": "5466816828ba496f9d4e6099e77360eb516ece31"
+      "base_commit": "5466816828ba496f9d4e6099e77360eb516ece31",
+      "output_commit": "5466816828ba496f9d4e6099e77360eb516ece31",
+      "pr_ref": null,
+      "gate_requested_at": "2026-07-25T20:37:50Z",
+      "gate_request_id": "5080482069",
+      "pending_handoffs": [
+        {
+          "key": "implement-dosage-highlighting",
+          "target_task": "implement",
+          "reason": "Specification complete. Ready to implement dosage highlighting for non-standard dosages (\u22601) across 6+ medication display locations in care_fe frontend. Implementation requires: (1) new utility function shouldHighlightDosage() in src/components/Medicine/utils.ts, (2) visual highlighting with WCAG 2.1 AA compliant styling (bold + border/background, not color alone), (3) updates to GroupedMedicationRow, MedicineAdminSheet, MedicineAdminForm, MedicationsTable, PrescriptionPreview, and PrintMedicationAdministration components, (4) Playwright E2E tests for medication administration with non-standard dosages.",
+          "repo": "agentalec/care_fe",
+          "artifacts": [
+            "specs/19/spec.md"
+          ],
+          "source_run_id": "a9fe4d8438a1ce84"
+        }
+      ]
+    }
+  ],
+  "work_repos": [
+    {
+      "repo": "agentalec/care_fe",
+      "branch": "agent-hq/19",
+      "base_branch": "develop",
+      "recorded_head": "5466816828ba496f9d4e6099e77360eb516ece31",
+      "pr_ref": null
     }
   ]
 }
