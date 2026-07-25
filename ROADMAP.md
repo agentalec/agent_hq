@@ -76,6 +76,7 @@ work repo, and the fixes each round surfaced.
 | #10 | `implement` ↔ `review` loop with round memory, plus a park endpoint | `tasks/implement/`, `tasks/review/` |
 | #12 | Round-4 review-loop + park validation recorded | `docs/live-smoke-test.md` |
 | #13 | `review` reflects its findings onto the work-repo PR — new `post_pr_comment` engine capability, called from the credentialed collect phase (the read-only review agent holds no push credential, PD-5); one comment per review round | `engine/engine.py`, `engine/runner.py` |
+| #15 | `qa` wired into the route (`review` → `qa` → `finalize`): stands the app up with the work repo's own tooling, screenshots each acceptance criterion, and posts `qa.md` to the PR with its images. Collect rewrites repo-relative image links to raw URLs on the landed commit; the work patch now carries binary files (`git diff --binary`), without which no screenshot could land at all | `tasks/qa/`, `tasks/review/`, `engine/runner.py`, `engine/adapters/claude_code_headless.py` |
 
 ## Planned
 
@@ -83,9 +84,10 @@ Near-term, in rough order:
 
 1. Wire the staged tasks that already have definitions — `arch-plan`,
    `arch-approval`, `breakdown` (each `task.yml` header names its activation
-   edit), then `clinical` / `poll` / `qa` / `docs` once their adapters exist.
-2. `github-issue-reactions` (poll) and `docker-compose` (qa-env) adapters —
-   the blockers for `poll` and `qa`.
+   edit), then `clinical` / `poll` / `docs`.
+2. `github-issue-reactions` (poll) adapter — the blocker for `poll`. The
+   `docker-compose` qa-env adapter stays deferred: `qa` ships without it, and
+   only a stack the devcontainer can't stand up would justify restoring it.
 3. Multi-repo `implement` fan-out + input-join (`parallel_ok`).
 4. Ops alerts — run failures and gates past half-timeout, via messaging.
 5. GitHub App auth replacing the pilot PAT — before the first multi-repo

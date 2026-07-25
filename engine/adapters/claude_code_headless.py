@@ -212,7 +212,10 @@ class ClaudeCodeHeadless:
         base = self._git("rev-parse", _BASE_TAG, cwd=worktree).strip()
         tip = self._git("rev-parse", "work", cwd=worktree).strip()
         excludes = [f":!{p}" for p in exclude_paths] + [":!.agent-hq"]
-        return self._git("diff", base, tip, "--", ".", *excludes, cwd=worktree)
+        # --binary: without it git emits "Binary files differ" and `git apply`
+        # on the collect side rejects the patch -- any PNG/font/fixture the
+        # agent adds (QA screenshots, notably) would fail the run.
+        return self._git("diff", "--binary", base, tip, "--", ".", *excludes, cwd=worktree)
 
     def apply_patch(self, worktree: str | Path, patch_text: str) -> None:
         """Apply a transported work patch to a fresh landing clone (collect,

@@ -1,9 +1,13 @@
-# P1: needs the compose-based qa-env adapter (see docs/roadmap.md; not built in P0).
-# Activation: point tasks/review/task.yml handoff.allowed at qa (review still
-# hands off to finalize until then).
+# Wired: `review` hands off here once no blockers remain; `qa` hands off to
+# `finalize`. It stands the app up with the repo's own tooling inside the
+# devcontainer (Node 22 + docker-in-docker) -- the compose-based `qa-env`
+# adapter stays deferred (docs/roadmap.md), so nothing here binds to it.
+# Screenshots are work-repo files, not ledger artifacts: they land in this
+# run's own patch, and the engine rewrites qa.md's relative image links to raw
+# URLs on that commit when it posts qa.md to the PR.
 id: qa
 version: 1
-description: Stand up the target stack and run integration tests against the acceptance criteria.
+description: Verify the change in a running app and reflect screenshots onto the PR.
 trigger: enqueued_by
 context:
   - constitution
@@ -16,7 +20,7 @@ outputs:
     - specs/{ticket}/qa.md
 handoff:
   allowed:
-    - docs
+    - finalize
   max: 1
 budget:
   max_cost_usd: 10

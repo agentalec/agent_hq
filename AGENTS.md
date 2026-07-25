@@ -38,10 +38,10 @@ CI (`.github/workflows/ci.yml`) runs all five; a change isn't done until all pas
   task-name special case. Each `task.yml` declares `handoff.allowed`/`max`;
   what actually happens next is the agent's own `.agent-hq/control.json`
   for that run, validated and applied by the engine
-  (`docs/task-authoring.md`). `spec`/`arch-plan`/`arch-approval`/
-  `breakdown`/`implement`/`review`/`finalize` are wired; `clinical`/`poll`/
-  `qa`/`docs` are defined but unwired — each task.yml header names its
-  activation edit. `intake` is engine entry logic
+  (`docs/task-authoring.md`). `spec`/`implement`/`review`/`qa`/`finalize` are
+  wired (the minimal route, with an `implement`↔`review` loop);
+  `arch-plan`/`arch-approval`/`breakdown`/`clinical`/`poll`/`docs` are
+  defined but unwired — each task.yml header names its activation edit. `intake` is engine entry logic
   (`engine/runner.py:intake_ticket`), not a task file —
   `config.projects["initial_task"]` names what a newly accepted ticket
   enqueues.

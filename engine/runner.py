@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -150,6 +151,24 @@ def _latest_review_round(review_md: str) -> str:
     left no round headers."""
     idx = review_md.rfind("\n## Round ")
     return review_md[idx + 1:] if idx != -1 else review_md
+
+
+_IMG_LINK = re.compile(r"(!\[[^\]]*\]\()(?!https?://)/?([^)\s]+)(\))")
+
+
+def _raw_image_urls(md: str, repo: str, commit: str) -> str:
+    """Rewrite repo-relative markdown image paths to raw.githubusercontent
+    URLs on the commit this run just landed -- what makes QA's screenshots
+    actually render when `qa.md` is posted as a PR comment (a repo-relative
+    path renders as a broken image there). Pinned to the commit, not the
+    branch, so the comment keeps showing what that QA pass saw. Absolute URLs
+    are left alone.
+    ponytail: assumes a public work repo -- raw URLs on a private one need a
+    token GitHub's image proxy doesn't have; host the PNGs elsewhere if a
+    private work repo joins the pilot."""
+    return _IMG_LINK.sub(
+        lambda m: f"{m[1]}https://raw.githubusercontent.com/{repo}/{commit}/{m[2]}{m[3]}", md
+    )
 
 
 def _write_parent_diff(worktree: Path, base: str | None, tip: str) -> bool:
@@ -884,6 +903,18 @@ def _collect_success(
             config, adapter_fn, pr_ref,
             "### agent-hq review\n\n" + _latest_review_round(artifact_contents.get(review_path, "")),
             f"{run_id}:pr-review",
+        )
+
+    # Same convention for qa.md, whole file rather than a single round -- its
+    # screenshots landed in this run's own patch, so their repo-relative links
+    # are rewritten to raw URLs on the commit that just landed them.
+    qa_path = subst("specs/{ticket}/qa.md", ticket_id)
+    if pr_ref and qa_path in declared:
+        eng.post_pr_comment(
+            config, adapter_fn, pr_ref,
+            "### agent-hq QA\n\n"
+            + _raw_image_urls(artifact_contents.get(qa_path, ""), repo, land["head"]),
+            f"{run_id}:pr-qa",
         )
 
     _complete_if_queue_empty(

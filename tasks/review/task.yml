@@ -18,7 +18,7 @@ outputs:
 handoff:
   allowed:
     - implement
-    - finalize
+    - qa
   max: 1
 budget:
   max_cost_usd: 5
