@@ -33,7 +33,7 @@
       "task_id": "spec",
       "task_version": 1,
       "ticket_id": "21",
-      "state": "RUNNING",
+      "state": "WAITING_GATE",
       "attempt": 1,
       "bindings": {
         "tracker": "github-issues",
@@ -44,13 +44,40 @@
       "cost_usd": 0.0,
       "tokens": null,
       "usage_known": true,
-      "artifacts": [],
+      "artifacts": [
+        "specs/21/spec.md"
+      ],
       "chain_depth": 0,
       "source_event_id": "21:labeled:2026-07-25T18:02:14Z",
       "enqueue_index": 0,
       "deadline": "2026-07-25T20:06:18Z",
       "attempt_started_at": "2026-07-25T19:36:18Z",
-      "base_commit": "5466816828ba496f9d4e6099e77360eb516ece31"
+      "base_commit": "5466816828ba496f9d4e6099e77360eb516ece31",
+      "output_commit": "5466816828ba496f9d4e6099e77360eb516ece31",
+      "pr_ref": null,
+      "gate_requested_at": "2026-07-25T19:41:09Z",
+      "gate_request_id": "5080295088",
+      "pending_handoffs": [
+        {
+          "key": "implement-dispense-pagination",
+          "target_task": "implement",
+          "reason": "Specification complete. Ready to implement infinite pagination in DispenseOrderListSelector following established patterns from EncounterHistorySelector.",
+          "repo": "agentalec/care_fe",
+          "artifacts": [
+            "specs/21/spec.md"
+          ],
+          "source_run_id": "7a8ddc1d379eb51f"
+        }
+      ]
+    }
+  ],
+  "work_repos": [
+    {
+      "repo": "agentalec/care_fe",
+      "branch": "agent-hq/21",
+      "base_branch": "develop",
+      "recorded_head": "5466816828ba496f9d4e6099e77360eb516ece31",
+      "pr_ref": null
     }
   ]
 }
