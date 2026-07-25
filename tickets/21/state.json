@@ -10,7 +10,12 @@
       "ticket_id": "21",
       "state": "RUNNING",
       "attempt": 0,
-      "bindings": {},
+      "bindings": {
+        "tracker": "github-issues",
+        "agent-session": "copilot-cli",
+        "messaging": "github-comment",
+        "gate": "github-issue-comment"
+      },
       "cost_usd": null,
       "tokens": null,
       "usage_known": false,
@@ -20,7 +25,8 @@
       "enqueue_index": 0,
       "repo": "agentalec/care_fe",
       "deadline": "2026-07-25T18:33:21Z",
-      "attempt_started_at": "2026-07-25T18:03:21Z"
+      "attempt_started_at": "2026-07-25T18:03:21Z",
+      "base_commit": "5466816828ba496f9d4e6099e77360eb516ece31"
     }
   ]
 }
