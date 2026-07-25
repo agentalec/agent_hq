@@ -33,7 +33,7 @@
       "task_id": "spec",
       "task_version": 1,
       "ticket_id": "21",
-      "state": "QUEUED",
+      "state": "RUNNING",
       "attempt": 1,
       "bindings": {
         "tracker": "github-issues",
@@ -47,7 +47,9 @@
       "artifacts": [],
       "chain_depth": 0,
       "source_event_id": "21:labeled:2026-07-25T18:02:14Z",
-      "enqueue_index": 0
+      "enqueue_index": 0,
+      "deadline": "2026-07-25T20:06:18Z",
+      "attempt_started_at": "2026-07-25T19:36:18Z"
     }
   ]
 }
