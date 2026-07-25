@@ -26,7 +26,9 @@ round's section intact; only append.
 ## Decide the handoff (see Control output below)
 
 - **No blockers remain** (only should-fix / nits, or clean): hand off to
-  `finalize`, forwarding `specs/{ticket}/spec.md` and `specs/{ticket}/review.md`.
+  `qa`, forwarding `specs/{ticket}/spec.md` and `specs/{ticket}/review.md`.
+  QA exercises the change in a running app and screenshots it onto the PR
+  before `finalize` — you do not hand off to `finalize` yourself.
 - **Blockers remain and N < 3**: hand off to `implement`, forwarding
   `specs/{ticket}/spec.md` and `specs/{ticket}/review.md`; the handoff
   `reason` must name the blockers to fix.

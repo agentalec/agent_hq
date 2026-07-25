@@ -29,6 +29,7 @@ from engine.engine import _complete_if_queue_empty, dispatch, post_pr_comment, s
 from engine.models import GateDecision, GateRequest, GateStatus, TicketDetails
 from engine.runner import (
     _latest_review_round,
+    _raw_image_urls,
     execute_dir_for,
     intake_ticket,
     prepare_dir_for,
@@ -751,6 +752,25 @@ def test_latest_review_round_returns_only_the_last_section():
     md = "# Review\n\n## Round 1\n- old\n\n## Round 2\n- new\n"
     assert _latest_review_round(md) == "## Round 2\n- new\n"
     assert _latest_review_round("no round headers") == "no round headers"
+
+
+def test_raw_image_urls_rewrites_only_relative_images():
+    """QA writes repo-relative screenshot links; the PR comment needs raw URLs
+    pinned to the commit that landed them, or GitHub renders a broken image.
+    Absolute images and ordinary links are left alone."""
+    md = (
+        "![desktop](qa-screenshots/42/a.png)\n"
+        "![leading slash](/qa-screenshots/42/b.png)\n"
+        "![remote](https://example.com/c.png)\n"
+        "[not an image](qa-screenshots/42/d.png)\n"
+    )
+    out = _raw_image_urls(md, "agentalec/care_fe", "abc123")
+
+    prefix = "https://raw.githubusercontent.com/agentalec/care_fe/abc123"
+    assert f"![desktop]({prefix}/qa-screenshots/42/a.png)" in out
+    assert f"![leading slash]({prefix}/qa-screenshots/42/b.png)" in out
+    assert "![remote](https://example.com/c.png)" in out
+    assert "[not an image](qa-screenshots/42/d.png)" in out
 
 
 def test_collect_failure_records_spend_then_retries(config, taskdefs, store, tmp_path):

@@ -38,11 +38,11 @@ EXPECTED_HANDOFF_ALLOWED = {
     "arch-approval": (["breakdown"], 1),
     "breakdown": (["implement"], 2),
     "implement": (["review"], 1),
-    "review": (["implement", "finalize"], 1),
+    "review": (["implement", "qa"], 1),
     "finalize": ([], 0),
     "clinical": (["arch-plan"], 1),
     "poll": ([], 0),
-    "qa": (["docs"], 1),
+    "qa": (["finalize"], 1),
     "docs": (["finalize"], 1),
 }
 

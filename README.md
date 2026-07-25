@@ -26,7 +26,10 @@ GitHub issue (hq:intake label, in config.projects["engine_repo"])
   -> breakdown          writes specs/<ticket>/tasks.md; hands off one
                         `implement` per configured repo the ticket touches
   -> implement          code + tests, opens a draft PR
-  -> review             writes specs/<ticket>/review.md
+  -> review             writes specs/<ticket>/review.md; loops back to
+                        `implement` while blockers remain
+  -> qa                 runs the app, screenshots each acceptance criterion
+                        onto the PR; writes specs/<ticket>/qa.md
   -> finalize           posts closing summary, undrafts PR, requests reviewers
   -> human merge                                                [gate: always human]
 ```

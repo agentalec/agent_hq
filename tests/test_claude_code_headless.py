@@ -373,6 +373,32 @@ def test_land_branch_adopts_identical_retry_and_blocks_a_real_conflict(monkeypat
     assert blocked["remote_head"] == zombie_head
 
 
+# -- work patch (real git) ------------------------------------------------------
+
+
+def test_work_patch_round_trips_a_binary_file(monkeypatch, tmp_path):
+    """A PNG the agent adds (QA screenshots) survives the execute->collect
+    patch transport. Without `--binary` git emits "Binary files differ" and
+    `git apply` rejects it, so the screenshot would never reach the PR."""
+    origin = _make_origin(tmp_path)
+    base_commit = _git("rev-parse", "main", cwd=tmp_path / "_seed").strip()
+    monkeypatch.setattr(cch, "_clone_url", lambda repo: str(origin))
+    executor = ClaudeCodeHeadless({"workdir": str(tmp_path / "work")})
+
+    png = b"\x89PNG\r\n\x1a\n\x00\x01\x02\xff\xfe"
+    worktree = executor.prepare_worktree("run-b", "o/r", base_commit)
+    shot = worktree / "qa-screenshots" / "42" / "desktop.png"
+    shot.parent.mkdir(parents=True)
+    shot.write_bytes(png)
+
+    patch = executor.materialize_work_patch(worktree, [])
+    assert "Binary files" not in patch
+
+    landing = executor.prepare_worktree("run-b-collect", "o/r", base_commit)
+    executor.apply_patch(landing, patch)
+    assert (landing / "qa-screenshots" / "42" / "desktop.png").read_bytes() == png
+
+
 # -- healthcheck ----------------------------------------------------------------
 
 
