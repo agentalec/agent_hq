@@ -1,2 +1,4 @@
 {"event_id": "e79ef6e1fc08b264:queued", "kind": "run.queued", "ticket_id": "17", "run_id": "e79ef6e1fc08b264", "task_id": "spec", "task_version": 1, "state": "QUEUED", "bindings": {}}
 {"event_id": "e79ef6e1fc08b264:collected", "kind": "run.collected", "ticket_id": "17", "run_id": "e79ef6e1fc08b264", "cost_usd": 0.0}
+{"event_id": "e79ef6e1fc08b264:waiting_gate", "kind": "run.waiting_gate", "ticket_id": "17", "run_id": "e79ef6e1fc08b264", "state": "WAITING_GATE", "artifacts": ["specs/17/spec.md"]}
+{"event_id": "e79ef6e1fc08b264:implement-recall-tab:proposed", "kind": "handoff.proposed", "ticket_id": "17", "run_id": "e79ef6e1fc08b264", "detail": "Frontend implementation required: Add Recall tab to mobile queue board UI. Spec defines testable acceptance criteria for mobile tab addition, recalled token display, desktop behavior preservation, and badge count integration. All necessary components and patterns exist in the codebase."}
