@@ -128,19 +128,35 @@ gh variable set AGENT_HQ_KILL_SWITCH --repo agentalec/agent_hq --body "0"   # re
 - Ops lesson: when a fix must merge before a queued run may retry, set the
   kill switch **immediately** on diagnosing — the cron dispatcher races you.
 
+**2026-07-22 — round 4 (ticket #11, patient-age format on care_fe): review loop + park validated**
+- First live exercise of the `implement ↔ review` loop on a real frontend
+  feature (`care_fe`). Spec was strongly grounded — located the actual
+  `formatPatientAge()` in `src/Utils/utils.ts` and the real patient-card
+  components. Gate approved, implement opened `care_fe#1` and handed to
+  review (not finalize). ✅
+- Loop ran the full 3 rounds, each doing real work: R1 found 4 test-
+  expectation blockers → implement; R2 cleared them, found a pluralization
+  blocker → implement; R3 cleared that, found one more test-string blocker,
+  recognized "Round 3 (the round cap)" and emitted `complete`. `review.md`
+  accumulated `## Round 1/2/3` via input-artifact forwarding — round memory
+  works. ✅
+- Park endpoint ✅: engine posted the accumulated findings to the thread
+  (`…:done:review-findings`), pinned awaiting-human (`…:done:awaiting`), and
+  left `care_fe#1` in **draft**. Ticket stays ACTIVE (not DONE), issue open.
+- Note: the loop never took the clean `review → finalize` exit here — the
+  reviewer found a fresh (minor, test-only) blocker every round. The feature
+  itself is functionally complete per the reviewer; a human finishes the one
+  test-string fix and merges. Clean-exit path still unproven (below).
+
 ## Not yet validated
 
 - [ ] `request-changes` / `reject` / gate timeout paths
 - [ ] Multi-repo fan-out (ticket spanning two routing keywords)
 - [ ] Unknown-spend blocked ticket recovery (`/hq-recover`; tickets #3, #5
       still parked from rounds 1–2)
-- [ ] `implement` → `review` → `finalize` clean path (review finds no
-      blockers first pass)
-- [ ] `review` → `implement` loop (review finds a blocker, implement fixes
-      it, review clears it) — check `review.md` accumulates `## Round N`
-- [ ] Round cap: 3 implement rounds with a persistent blocker → engine posts
-      the accumulated findings comment and parks awaiting-human, PR left
-      draft (needs a ticket the agent can't fully satisfy)
+- [ ] `implement` → `review` → `finalize` **clean** path (review finds no
+      blockers and exits to finalize → ticket DONE, PR marked ready) — round 4
+      exercised the loop + park but never the clean exit
 
 ## Known limits until pending phases land
 

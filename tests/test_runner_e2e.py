@@ -25,9 +25,15 @@ from pathlib import Path
 import pytest
 
 from engine.config import load_config
-from engine.engine import _complete_if_queue_empty, dispatch, sweep
+from engine.engine import _complete_if_queue_empty, dispatch, post_pr_comment, sweep
 from engine.models import GateDecision, GateRequest, GateStatus, TicketDetails
-from engine.runner import execute_dir_for, intake_ticket, prepare_dir_for, run_task
+from engine.runner import (
+    _latest_review_round,
+    execute_dir_for,
+    intake_ticket,
+    prepare_dir_for,
+    run_task,
+)
 from engine.state import GitJsonStateStore
 from engine.taskdefs import load_all
 from test_state import _clone_worktree, _make_origin
@@ -719,6 +725,32 @@ def test_review_park_posts_findings_comment_then_awaits_human(config, taskdefs, 
     assert "auth check still missing" in findings[0][1]
     assert any("awaiting human input" in body for _, body, _ in tracker.pinned)
     assert store.read_state("7")["status"] == "ACTIVE"  # parked, not DONE; PR left in draft
+
+
+def test_post_pr_comment_targets_the_work_repo_pr(config):
+    """A review run's findings are reflected onto the work-repo PR: the
+    messaging adapter is built for the PR's repo (not the engine repo) and
+    notified with the PR number and a stable event id."""
+    seen = {}
+
+    class _M:
+        def notify(self, audience, message, links, event_id):
+            seen["notify"] = (audience, message, event_id)
+
+    def adapter_fn(port, name, repo=None):
+        assert port == "messaging"
+        seen["repo"] = repo
+        return _M()
+
+    post_pr_comment(config, adapter_fn, "agentalec/care_fe#1", "findings", "run9:pr-review")
+    assert seen["repo"] == "agentalec/care_fe"
+    assert seen["notify"] == ({"ticket_id": "1"}, "findings", "run9:pr-review")
+
+
+def test_latest_review_round_returns_only_the_last_section():
+    md = "# Review\n\n## Round 1\n- old\n\n## Round 2\n- new\n"
+    assert _latest_review_round(md) == "## Round 2\n- new\n"
+    assert _latest_review_round("no round headers") == "no round headers"
 
 
 def test_collect_failure_records_spend_then_retries(config, taskdefs, store, tmp_path):
