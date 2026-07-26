@@ -501,8 +501,14 @@ def test_collect_gated_task_waits_gate(config, taskdefs, store, tmp_path):
              now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
     run = store.read_state("7")["runs"][0]
     assert run["state"] == "WAITING_GATE"
-    # The approver gets the artifact itself, not just a run id.
-    assert gate.subjects[0]["artifacts"] == {"specs/7/spec.md": "the spec"}
+    # The approver gets the artifact itself, not just a run id -- plus the
+    # ledger path, so the adapter can link the copy this gate was asked about.
+    assert gate.subjects[0]["artifacts"] == {
+        "specs/7/spec.md": {
+            "content": "the spec",
+            "ledger_path": "tickets/7/artifacts/specrun/specs/7/spec.md",
+        }
+    }
     # ...and the issue is labelled so waiting tickets are findable, without
     # stripping the hq: labels the issue already carried.
     assert tracker.label_sets == [

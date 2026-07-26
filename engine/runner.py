@@ -72,7 +72,7 @@ from engine.engine import (
 )
 from engine.handoff import _check_containment, validate_handoffs
 from engine.models import Event, RunState, TaskRun
-from engine.state import _now_iso
+from engine.state import _now_iso, artifact_ledger_path
 
 _INJECTION_PATTERNS = ("ignore previous instructions", "disregard your")
 _EXECUTE_RESULT_SCHEMA_PATH = (
@@ -792,8 +792,15 @@ def _collect_success(
                     "title": details.title,
                     "body": details.body,
                     # What the approver is actually approving -- the gate
-                    # adapter inlines these into the comment.
-                    "artifacts": {p: artifact_contents.get(p, "") for p in declared},
+                    # adapter inlines the content and links the ledger copy
+                    # (the escape hatch when the content is too big to inline).
+                    "artifacts": {
+                        p: {
+                            "content": artifact_contents.get(p, ""),
+                            "ledger_path": artifact_ledger_path(ticket_id, run_id, p),
+                        }
+                        for p in declared
+                    },
                 },
             )
             txn.update_run(

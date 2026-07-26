@@ -34,6 +34,17 @@ _MAX_WRITE_ATTEMPTS = 5
 # excluded from the cap count -- see `claim_run`.
 _EXCLUSIVE_STATES = {"RUNNING", "WAITING_GATE"}
 
+# The ledger layout, in one place: `artifacts_dir` resolves it against the
+# worktree, `artifact_ledger_path` hands the same path to anything that
+# addresses the state branch remotely (a gate comment's artifact link).
+_ARTIFACTS_DIR = "tickets/{ticket_id}/artifacts/{run_id}"
+
+
+def artifact_ledger_path(ticket_id: str, run_id: str, rel_path: str) -> str:
+    """Where `rel_path` lives on the state branch, branch-relative -- the
+    stable reference for a reader outside the engine."""
+    return f"{_ARTIFACTS_DIR.format(ticket_id=ticket_id, run_id=run_id)}/{rel_path}"
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -236,7 +247,7 @@ class GitJsonStateStore:
         return self.worktree_path / "health" / "latest.json"
 
     def artifacts_dir(self, ticket_id: str, run_id: str) -> Path:
-        return self.worktree_path / "tickets" / ticket_id / "artifacts" / run_id
+        return self.worktree_path / _ARTIFACTS_DIR.format(ticket_id=ticket_id, run_id=run_id)
 
     def read_artifact(self, ticket_id: str, run_id: str, rel_path: str) -> str | None:
         path = self.artifacts_dir(ticket_id, run_id) / rel_path

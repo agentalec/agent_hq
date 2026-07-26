@@ -330,7 +330,12 @@ def test_issue_gate_request_inlines_the_artifacts_being_approved(monkeypatch):
         "product-owners",
         {
             "ticket_id": "9", "run_id": "run-abc123", "task_id": "spec", "title": "t",
-            "artifacts": {"specs/9/spec.md": "# Spec\n\n## AC1\nGiven a user..."},
+            "artifacts": {
+                "specs/9/spec.md": {
+                    "content": "# Spec\n\n## AC1\nGiven a user...",
+                    "ledger_path": "tickets/9/artifacts/run-abc123/specs/9/spec.md",
+                }
+            },
         },
     )
     body = fake.calls[1]["json"]["body"]
@@ -338,23 +343,37 @@ def test_issue_gate_request_inlines_the_artifacts_being_approved(monkeypatch):
     assert "## AC1\nGiven a user..." in body
     # blank line after the tag, else GitHub renders the markdown as raw text
     assert "</summary>\n\n# Spec" in body
+    # link to the ledger copy, OUTSIDE the collapsed block so it is readable
+    # without expanding it
+    assert (
+        "</details>\n[`specs/9/spec.md` on the `agent-hq-state` branch]"
+        "(https://github.com/engine-org/engine-repo/blob/agent-hq-state"
+        "/tickets/9/artifacts/run-abc123/specs/9/spec.md)"
+    ) in body
 
 
 def test_issue_gate_request_truncates_a_runaway_artifact(monkeypatch):
     """GitHub rejects comments over 65536 chars -- a huge artifact is cut,
-    never dropped and never allowed to fail the gate request."""
+    never dropped and never allowed to fail the gate request. The cut is only
+    reviewable because the ledger link survives it."""
     fake = _install(monkeypatch, [FakeResponse(200, []), FakeResponse(200, {"id": 42})])
     gate = _issue_gate()
     gate.request(
         "product-owners",
         {
             "ticket_id": "9", "run_id": "run-abc123", "task_id": "spec", "title": "t",
-            "artifacts": {"specs/9/spec.md": "x" * 30000},
+            "artifacts": {
+                "specs/9/spec.md": {
+                    "content": "x" * 30000,
+                    "ledger_path": "tickets/9/artifacts/run-abc123/specs/9/spec.md",
+                }
+            },
         },
     )
     body = fake.calls[1]["json"]["body"]
     assert len(body) < 25000
     assert "truncated at 20000 characters" in body
+    assert "/tickets/9/artifacts/run-abc123/specs/9/spec.md)" in body  # the way to read the rest
     assert "/agent-hq approve run-abc123" in body  # grammar survives the cut
 
 

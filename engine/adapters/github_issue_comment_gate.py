@@ -26,6 +26,9 @@ _MARKER = "<!--hq:gate:{run_id}-->"
 # A spec is a few KB; the cap is a guard against a runaway artifact blowing
 # GitHub's 65536-char comment limit, not an expected path.
 _MAX_EMBED_CHARS = 20000
+# Where the ledger copy of an artifact is readable from. The state branch is
+# a fixed name across the engine (scripts/checkout-state.sh creates it).
+_STATE_BRANCH = "agent-hq-state"
 _DECISION_RE = re.compile(r"^/agent-hq (approve|request-changes|reject)\s+(\S+)(?:\s+(.*))?$")
 _STATUS_BY_COMMAND = {
     "approve": GateStatus.APPROVED,
@@ -48,19 +51,22 @@ def _parse_decision(body: str) -> tuple[str, str, str] | None:
     return None
 
 
-def _artifact_sections(artifacts: dict) -> list[str]:
+def _artifact_sections(artifacts: dict, issue_repo: str) -> list[str]:
     """Inline every artifact the gated run produced, each in a collapsed
-    block. An approver has to be able to read what they are approving from
-    the issue thread itself -- a run id and a ticket title are not a
-    reviewable subject, and the artifact otherwise lives only on the state
-    branch."""
+    block over a link to its ledger copy. An approver has to be able to read
+    what they are approving from the issue thread itself -- a run id and a
+    ticket title are not a reviewable subject. The link sits OUTSIDE the
+    collapsed block, and is always present rather than only on truncation:
+    it is the only way to read the rest of an artifact too big to inline,
+    and a permanent reference to the exact copy this gate was asked about."""
     lines: list[str] = []
-    for path, content in sorted(artifacts.items()):
+    for path, entry in sorted(artifacts.items()):
+        content = entry.get("content") or ""
         if len(content) > _MAX_EMBED_CHARS:
             content = (
                 content[:_MAX_EMBED_CHARS]
-                + f"\n\n_[truncated at {_MAX_EMBED_CHARS} characters — "
-                "full artifact is on the `agent-hq-state` branch]_"
+                + f"\n\n_[truncated at {_MAX_EMBED_CHARS} characters — read the rest "
+                "via the link below]_"
             )
         lines += [
             "",
@@ -70,6 +76,12 @@ def _artifact_sections(artifacts: dict) -> list[str]:
             "",
             "</details>",
         ]
+        ledger_path = entry.get("ledger_path")
+        if ledger_path:
+            lines.append(
+                f"[`{path}` on the `{_STATE_BRANCH}` branch]"
+                f"(https://github.com/{issue_repo}/blob/{_STATE_BRANCH}/{ledger_path})"
+            )
     return lines
 
 
@@ -125,7 +137,7 @@ class GithubIssueCommentGate:
                 "",
                 subject.get("title", ""),
             ]
-            + _artifact_sections(subject.get("artifacts") or {})
+            + _artifact_sections(subject.get("artifacts") or {}, repo)
             + [
                 "",
                 mentions,
