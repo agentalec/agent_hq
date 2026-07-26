@@ -1,3 +1,4 @@
 {"event_id": "25cd7fd388070549:queued", "kind": "run.queued", "ticket_id": "16", "run_id": "25cd7fd388070549", "task_id": "spec", "task_version": 1, "state": "QUEUED", "bindings": {}}
 {"event_id": "25cd7fd388070549:collected", "kind": "run.collected", "ticket_id": "16", "run_id": "25cd7fd388070549", "cost_usd": 0.0}
 {"event_id": "25cd7fd388070549:failed", "kind": "run.failed", "ticket_id": "16", "run_id": "25cd7fd388070549", "state": "FAILED"}
+{"event_id": "25cd7fd388070549:handoff_rejected", "kind": "handoff.rejected", "ticket_id": "16", "run_id": "25cd7fd388070549", "detail": "handoff target 'arch-plan' is not in this task's handoff.allowed"}
