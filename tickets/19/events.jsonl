@@ -8,3 +8,4 @@
 {"event_id": "a9fe4d8438a1ce84:auto_approval", "kind": "gate.decided", "ticket_id": "19", "run_id": "a9fe4d8438a1ce84", "detail": "auto-approved by task config (would have asked product-owners)"}
 {"event_id": "5639002120ba2aac:runner_lost", "kind": "run.runner_lost", "ticket_id": "19", "run_id": "5639002120ba2aac", "state": "FAILED"}
 {"event_id": "affdcc187749a5c0:queued", "kind": "run.queued", "ticket_id": "19", "run_id": "affdcc187749a5c0", "task_id": "implement", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
+{"event_id": "affdcc187749a5c0:collected", "kind": "run.collected", "ticket_id": "19", "run_id": "affdcc187749a5c0", "cost_usd": 0.0}
