@@ -153,7 +153,7 @@
       "task_id": "finalize",
       "task_version": 1,
       "ticket_id": "16",
-      "state": "QUEUED",
+      "state": "RUNNING",
       "attempt": 0,
       "bindings": {
         "tracker": "github-issues",
@@ -172,7 +172,9 @@
         "specs/16/spec.md",
         "specs/16/review.md",
         "specs/16/qa.md"
-      ]
+      ],
+      "deadline": "2026-07-26T20:50:15Z",
+      "attempt_started_at": "2026-07-26T20:35:15Z"
     }
   ],
   "work_repos": [
