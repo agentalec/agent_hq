@@ -778,8 +778,15 @@ def _collect_success(
         for rel_path, content in artifact_contents.items():
             txn.write_artifact(ticket_id, run_id, rel_path, content)
 
-        if outcome == "handoff" and taskdef.get("gates", {}).get("post"):
-            gate_entry = taskdef["gates"]["post"][0]
+        # A gate the task declares `auto_approve` never opens: no request, no
+        # WAITING_GATE, no in-flight slot held, handoffs apply straight away.
+        # The decision is still evented below, so the ledger shows a gate
+        # existed and how it was decided -- an auto-approved gate is a
+        # recorded decision, not an absent one.
+        gate_entry = (taskdef.get("gates", {}).get("post") or [{}])[0]
+        auto_approved = outcome == "handoff" and bool(gate_entry.get("auto_approve"))
+
+        if outcome == "handoff" and gate_entry and not auto_approved:
             gate = adapter_fn("gate", run.get("bindings", {}).get("gate", "pr-review"), repo=repo)
             req = gate.request(
                 gate_entry["approvers"],
@@ -834,6 +841,19 @@ def _collect_success(
                 )
             result["gated"] = True
             return
+
+        if auto_approved:
+            txn.append_event(
+                ticket_id,
+                Event(
+                    event_id=f"{run_id}:auto_approval", kind="gate.decided",
+                    ticket_id=ticket_id, run_id=run_id,
+                    detail=(
+                        f"auto-approved by task config (would have asked "
+                        f"{gate_entry.get('approvers')})"
+                    ),
+                ).to_dict(),
+            )
 
         for h in accepted:
             txn.append_event(

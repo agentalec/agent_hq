@@ -745,6 +745,40 @@ def test_review_park_posts_findings_comment_then_awaits_human(config, taskdefs, 
     assert store.read_state("7")["status"] == "ACTIVE"  # parked, not DONE; PR left in draft
 
 
+def test_collect_auto_approved_gate_never_waits(config, taskdefs, store, tmp_path):
+    """A gate the task declares `auto_approve` never opens: no gate request,
+    the run goes straight to SUCCEEDED, its handoff applies, and no in-flight
+    slot is held. The decision is still evented -- an auto-approved gate is a
+    recorded decision, not an absent one."""
+    taskdefs["spec"]["gates"]["post"][0]["auto_approve"] = True
+    _seed(store, _run_dict("specrun", "spec", state="RUNNING",
+                           bindings={"agent-session": "claude-code-headless", "gate": "pr-review"}))
+    _stage(config, "specrun", "specs/7/spec.md", "the spec")
+    _write_execute_result(config, "specrun", cost_usd=2.0, tokens=50)
+    _write_control(config, "specrun", {
+        "outcome": "handoff",
+        "handoffs": [
+            {"key": "build-1", "task": "build", "reason": "ready for build",
+             "artifacts": ["specs/7/spec.md"]},
+        ],
+    })
+    tracker, gate = FakeTracker(_details()), FakeGate(request_id="42")
+    adapters = _adapters(tracker=tracker, agent=FakeAgent(tmp_path / "work"), gate=gate)
+    run_task("specrun", "collect", config, taskdefs, store,
+             now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
+
+    runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
+    assert runs["specrun"]["state"] == "SUCCEEDED"
+    assert not runs["specrun"].get("pending_handoffs")
+    assert gate.subjects == []  # no approval was ever requested
+    assert tracker.label_sets == []  # and no waiting-gate label
+    assert [r["task_id"] for r in runs.values() if r["task_id"] == "build"] == ["build"]
+    decided = [e for e in store.read_events("7") if e["kind"] == "gate.decided"]
+    assert len(decided) == 1
+    assert "auto-approved by task config" in decided[0]["detail"]
+    assert "product-owners" in decided[0]["detail"]
+
+
 def test_post_pr_comment_targets_the_work_repo_pr(config):
     """A review run's findings are reflected onto the work-repo PR: the
     messaging adapter is built for the PR's repo (not the engine repo) and

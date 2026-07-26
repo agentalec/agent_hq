@@ -56,6 +56,7 @@ gates:
     - approvers: product-owners   # group in config/approvers.yml
       adapter: spec-approval      # LOGICAL name, resolved via components.yml
       timeout_working_hours: 48
+      # auto_approve: true        # decide it without a human (default false)
 handoff:
   allowed:
     - implement               # the only task a spec run may hand off to

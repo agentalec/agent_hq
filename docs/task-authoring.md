@@ -112,7 +112,8 @@ schema-invalid means the run *fails* per its own retry budget, never
   `QUEUED` runs immediately and this run finishes `SUCCEEDED`. With a
   `gates.post` entry, the proposals are stored as `run.pending_handoffs` and
   the run stops at `WAITING_GATE`; a gate `APPROVED` decision applies them
-  and completes the run.
+  and completes the run — unless that gate sets `auto_approve`, in which case
+  they apply immediately as if there were no gate (see "Gates" below).
 - `{"outcome": "complete"}` -- `handoffs` forbidden; the run finishes
   `SUCCEEDED` with no children. This is what feeds queue-empty completion
   (see "Terminal-summary convention" below) -- a task with no
@@ -164,7 +165,7 @@ segments, and symlink escapes are all rejected;
 ## Gates
 
 `gates.post` is a list (P0 uses one entry) of `{approvers, adapter,
-timeout_working_hours}`. `approvers` names a group in `config/approvers.yml`;
+timeout_working_hours, auto_approve}`. `approvers` names a group in `config/approvers.yml`;
 `adapter` is a **logical** gate name resolved through `components.yml`'s
 `gate.named` map (or the plain `gate.adapter` default) -- never a concrete
 adapter id. The pilot's `default`/`spec-approval` logical names both resolve
@@ -173,6 +174,23 @@ parent engine issue); `pr-review` remains registered for a task that wants a
 work-repo-PR-based approval instead. See `docs/ports/gate.md` for the full
 adapter contract. A gate past `timeout_working_hours` with no decision
 resolves to `EXPIRED` at the next sweep, blocking the ticket and escalating.
+
+`auto_approve: true` decides the gate without a human: no approval is
+requested, the run never enters `WAITING_GATE`, and its handoffs apply
+immediately — but a `gate.decided` event still records that a gate existed
+and how it was decided, so an auto-approved gate reads as a decision in the
+ledger rather than as an absent one. It defaults to false: a declared gate is
+a human decision unless the task says otherwise.
+
+Use it for a checkpoint you want in the graph but not in the critical path
+today — a task whose gate you intend to staff later, or one you are still
+tuning. Note what it costs: `WAITING_GATE` is also what holds a ticket's
+in-flight slot for review, so auto-approving trades a human checkpoint for
+throughput. Weigh that per task, not as a default. Because it lives in the
+task definition, it applies to **every** deployment of the library; a gate
+that should be automatic in one environment and staffed in another wants a
+config-level switch instead, which does not exist yet
+(`docs/roadmap.md`).
 
 ## Budgets
 
