@@ -112,7 +112,8 @@ schema-invalid means the run *fails* per its own retry budget, never
   `QUEUED` runs immediately and this run finishes `SUCCEEDED`. With a
   `gates.post` entry, the proposals are stored as `run.pending_handoffs` and
   the run stops at `WAITING_GATE`; a gate `APPROVED` decision applies them
-  and completes the run.
+  and completes the run — unless that gate sets `auto_approve`, in which case
+  they apply immediately as if there were no gate (see "Gates" below).
 - `{"outcome": "complete"}` -- `handoffs` forbidden; the run finishes
   `SUCCEEDED` with no children. This is what feeds queue-empty completion
   (see "Terminal-summary convention" below) -- a task with no
@@ -164,7 +165,7 @@ segments, and symlink escapes are all rejected;
 ## Gates
 
 `gates.post` is a list (P0 uses one entry) of `{approvers, adapter,
-timeout_working_hours}`. `approvers` names a group in `config/approvers.yml`;
+timeout_working_hours, auto_approve}`. `approvers` names a group in `config/approvers.yml`;
 `adapter` is a **logical** gate name resolved through `components.yml`'s
 `gate.named` map (or the plain `gate.adapter` default) -- never a concrete
 adapter id. The pilot's `default`/`spec-approval` logical names both resolve
@@ -173,6 +174,36 @@ parent engine issue); `pr-review` remains registered for a task that wants a
 work-repo-PR-based approval instead. See `docs/ports/gate.md` for the full
 adapter contract. A gate past `timeout_working_hours` with no decision
 resolves to `EXPIRED` at the next sweep, blocking the ticket and escalating.
+
+`auto_approve: true` decides the gate without a human: the run never enters
+`WAITING_GATE` and its handoffs apply immediately. It defaults to false — a
+declared gate is a human decision unless the task says otherwise.
+
+What it does **not** skip is the record. The gate still posts its comment,
+carrying the run's declared artifacts exactly as a real request would — that
+comment is where a spec becomes readable to a human, and an auto-approved
+task that posted nothing would be invisible in the thread. It is rendered as
+a record rather than a request: heading "Gate auto-approved", no decision
+grammar, and no `@`-mention of a group with nothing to decide. A
+`gate.decided` event records it in the ledger too.
+
+Turning it on is **retroactive**. The sweep honors it for runs already parked
+at `WAITING_GATE`, so flipping the flag drains the gates currently waiting on
+the next pass rather than stranding them behind a flag that says they need no
+human. Those runs already posted a request comment asking for a decision that
+will now never come, so the sweep posts a short follow-up saying the gate was
+auto-approved after the fact. Turning the flag back off is not retroactive in
+the same way — a run that already sailed through is finished.
+
+Use it for a checkpoint you want in the graph but not in the critical path
+today — a task whose gate you intend to staff later, or one you are still
+tuning. Note what it costs: `WAITING_GATE` is also what holds a ticket's
+in-flight slot for review, so auto-approving trades a human checkpoint for
+throughput. Weigh that per task, not as a default. Because it lives in the
+task definition, it applies to **every** deployment of the library; a gate
+that should be automatic in one environment and staffed in another wants a
+config-level switch instead, which does not exist yet
+(`docs/roadmap.md`).
 
 ## Budgets
 
@@ -224,7 +255,7 @@ no terminal action.
 | Task | Status |
 |---|---|
 | intake | **Not a task.** Engine entry logic (`engine.runner.intake_ticket`) reads eligibility from `config.projects["intake"]`/`["public"]`/`["public_safe_label"]` and enqueues `config.projects["initial_task"]` (`spec` in the pilot config) with the root run's resolved repo. There is no `tasks/intake/` directory and no task-name special case for it. |
-| spec | Converted (wired). `handoff.allowed: [implement]`, gated (`spec-approval`). The fan-out point in the minimal route: `handoff.max: 3`, one `implement` handoff per affected configured repo. |
+| spec | Converted (wired). `handoff.allowed: [implement]`, gated (`spec-approval`) but currently `auto_approve: true` -- the checkpoint is declared and evented, decided by the engine rather than a product owner; staffing it is deleting that one line. The fan-out point in the minimal route: `handoff.max: 3`, one `implement` handoff per affected configured repo. |
 | arch-plan | Converted, defined, **unwired** -- its header names the activation edit (point `spec`'s `handoff.allowed` back at it). `handoff.allowed: [arch-approval, breakdown]`. |
 | arch-approval | Converted, defined, **unwired** (activated with `arch-plan`, its only in-edge). Confirms the plan artifacts, no changes; gated (`default`); `handoff.allowed: [breakdown]`. |
 | breakdown | Converted, defined, **unwired** (activated with the `arch-plan` chain). `handoff.max: 2`, one `implement` handoff per affected repo when wired. |

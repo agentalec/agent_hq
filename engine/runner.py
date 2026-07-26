@@ -72,7 +72,7 @@ from engine.engine import (
 )
 from engine.handoff import _check_containment, validate_handoffs
 from engine.models import Event, RunState, TaskRun
-from engine.state import _now_iso
+from engine.state import _now_iso, artifact_ledger_path
 
 _INJECTION_PATTERNS = ("ignore previous instructions", "disregard your")
 _EXECUTE_RESULT_SCHEMA_PATH = (
@@ -778,8 +778,16 @@ def _collect_success(
         for rel_path, content in artifact_contents.items():
             txn.write_artifact(ticket_id, run_id, rel_path, content)
 
-        if outcome == "handoff" and taskdef.get("gates", {}).get("post"):
-            gate_entry = taskdef["gates"]["post"][0]
+        # A declared gate always posts its request comment, auto-approved or
+        # not -- that comment is where the run's artifacts become readable to
+        # a human, and losing it would make an auto-approved task invisible in
+        # the thread. What `auto_approve` skips is the WAITING: no
+        # WAITING_GATE, no in-flight slot held, handoffs apply straight away,
+        # and the comment says so instead of asking for a decision.
+        gate_entry = (taskdef.get("gates", {}).get("post") or [{}])[0]
+        auto_approved = outcome == "handoff" and bool(gate_entry.get("auto_approve"))
+
+        if outcome == "handoff" and gate_entry:
             gate = adapter_fn("gate", run.get("bindings", {}).get("gate", "pr-review"), repo=repo)
             req = gate.request(
                 gate_entry["approvers"],
@@ -791,8 +799,24 @@ def _collect_success(
                     "branch": branch,
                     "title": details.title,
                     "body": details.body,
+                    # What the approver is actually approving -- the gate
+                    # adapter inlines the content and links the ledger copy
+                    # (the escape hatch when the content is too big to inline).
+                    "artifacts": {
+                        p: {
+                            "content": artifact_contents.get(p, ""),
+                            "ledger_path": artifact_ledger_path(ticket_id, run_id, p),
+                        }
+                        for p in declared
+                    },
+                    # Renders the comment as a record rather than a request:
+                    # no approval grammar, no @-mention of people who have
+                    # nothing to decide.
+                    "auto_approved": auto_approved,
                 },
             )
+
+        if outcome == "handoff" and gate_entry and not auto_approved:
             txn.update_run(
                 ticket_id, run_id,
                 artifacts=declared,
@@ -824,6 +848,19 @@ def _collect_success(
                 )
             result["gated"] = True
             return
+
+        if auto_approved:
+            txn.append_event(
+                ticket_id,
+                Event(
+                    event_id=f"{run_id}:auto_approval", kind="gate.decided",
+                    ticket_id=ticket_id, run_id=run_id,
+                    detail=(
+                        f"auto-approved by task config (would have asked "
+                        f"{gate_entry.get('approvers')})"
+                    ),
+                ).to_dict(),
+            )
 
         for h in accepted:
             txn.append_event(
@@ -860,7 +897,13 @@ def _collect_success(
 
     store.write(finalize)
 
-    if result.get("zombie") or result.get("gated"):
+    if result.get("gated"):
+        # Post-write side effect, like the PR comment below: the label is a
+        # view of state, never the source of it.
+        eng.set_gate_label(config, adapter_fn, ticket_id, waiting=True)
+        return
+
+    if result.get("zombie"):
         return
 
     if result.get("blocked"):

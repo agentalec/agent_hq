@@ -316,9 +316,94 @@ def test_issue_gate_request_creates_comment_with_marker_and_grammar(monkeypatch)
     body = create_call["json"]["body"]
     assert "<!--hq:gate:run-abc123-->" in body
     assert "@example-alice" in body
+    # The bare form is what's advertised; the id is offered as the explicit
+    # alternative, and stays present so the thread records which run this is.
+    assert "- `/agent-hq approve`\n" in body
+    assert "- `/agent-hq request-changes <reason>`\n" in body
+    assert "- `/agent-hq reject <reason>`\n" in body
     assert "/agent-hq approve run-abc123" in body
-    assert "/agent-hq request-changes run-abc123 <reason>" in body
-    assert "/agent-hq reject run-abc123 <reason>" in body
+
+
+def test_issue_gate_request_inlines_the_artifacts_being_approved(monkeypatch):
+    """An approver reads the spec in the comment -- a run id and a ticket
+    title are not a reviewable subject."""
+    fake = _install(monkeypatch, [FakeResponse(200, []), FakeResponse(200, {"id": 42})])
+    gate = _issue_gate()
+    gate.request(
+        "product-owners",
+        {
+            "ticket_id": "9", "run_id": "run-abc123", "task_id": "spec", "title": "t",
+            "artifacts": {
+                "specs/9/spec.md": {
+                    "content": "# Spec\n\n## AC1\nGiven a user...",
+                    "ledger_path": "tickets/9/artifacts/run-abc123/specs/9/spec.md",
+                }
+            },
+        },
+    )
+    body = fake.calls[1]["json"]["body"]
+    assert "<details><summary><b>specs/9/spec.md</b></summary>" in body
+    assert "## AC1\nGiven a user..." in body
+    # blank line after the tag, else GitHub renders the markdown as raw text
+    assert "</summary>\n\n# Spec" in body
+    # link to the ledger copy, OUTSIDE the collapsed block so it is readable
+    # without expanding it
+    assert (
+        "</details>\n[`specs/9/spec.md` on the `agent-hq-state` branch]"
+        "(https://github.com/engine-org/engine-repo/blob/agent-hq-state"
+        "/tickets/9/artifacts/run-abc123/specs/9/spec.md)"
+    ) in body
+
+
+def test_issue_gate_request_auto_approved_reads_as_a_record(monkeypatch):
+    """An auto-approved gate still posts its comment -- the artifact has to
+    stay readable in the thread -- but must not ask for a decision nobody
+    should make, nor ping a group with nothing to decide."""
+    fake = _install(monkeypatch, [FakeResponse(200, []), FakeResponse(200, {"id": 42})])
+    gate = _issue_gate()
+    gate.request(
+        "product-owners",
+        {
+            "ticket_id": "9", "run_id": "run-abc123", "task_id": "spec", "title": "t",
+            "auto_approved": True,
+            "artifacts": {
+                "specs/9/spec.md": {
+                    "content": "# Spec", "ledger_path": "tickets/9/artifacts/run-abc123/x.md",
+                }
+            },
+        },
+    )
+    body = fake.calls[1]["json"]["body"]
+    assert "### Gate auto-approved: `spec` (run-abc123)" in body
+    assert "# Spec" in body  # the artifact is still there
+    assert "auto_approve" in body and "No action needed." in body
+    assert "/agent-hq approve" not in body  # no grammar for a decision already made
+    assert "@example-alice" not in body  # nobody is being asked
+
+
+def test_issue_gate_request_truncates_a_runaway_artifact(monkeypatch):
+    """GitHub rejects comments over 65536 chars -- a huge artifact is cut,
+    never dropped and never allowed to fail the gate request. The cut is only
+    reviewable because the ledger link survives it."""
+    fake = _install(monkeypatch, [FakeResponse(200, []), FakeResponse(200, {"id": 42})])
+    gate = _issue_gate()
+    gate.request(
+        "product-owners",
+        {
+            "ticket_id": "9", "run_id": "run-abc123", "task_id": "spec", "title": "t",
+            "artifacts": {
+                "specs/9/spec.md": {
+                    "content": "x" * 30000,
+                    "ledger_path": "tickets/9/artifacts/run-abc123/specs/9/spec.md",
+                }
+            },
+        },
+    )
+    body = fake.calls[1]["json"]["body"]
+    assert len(body) < 25000
+    assert "truncated at 20000 characters" in body
+    assert "/tickets/9/artifacts/run-abc123/specs/9/spec.md)" in body  # the way to read the rest
+    assert "/agent-hq approve run-abc123" in body  # grammar survives the cut
 
 
 def test_issue_gate_request_reuses_existing_marker_comment(monkeypatch):
@@ -403,14 +488,60 @@ def test_issue_gate_status_ignores_non_member_commenter(monkeypatch):
 
 
 def test_issue_gate_status_ignores_comment_for_a_different_run(monkeypatch):
+    """An explicit id for another gate is skipped, not read as a bare command
+    whose reason happens to start with an id (real ids are sha1[:16])."""
     _install(
         monkeypatch,
         [FakeResponse(200, [
             {"id": 5, "user": {"login": "example-alice"},
-             "body": "/agent-hq approve some-other-run", "created_at": "2026-07-16T10:00:00Z"},
+             "body": "/agent-hq approve 0123456789abcdef", "created_at": "2026-07-16T10:00:00Z"},
         ])],
     )
     decision = _issue_gate().status(_run())
+    assert decision.status == GateStatus.PENDING
+
+
+def test_issue_gate_status_accepts_a_bare_command(monkeypatch):
+    """`/agent-hq approve` with no run id decides whatever gate is open --
+    per-ticket exclusivity means there is at most one."""
+    _install(
+        monkeypatch,
+        [FakeResponse(200, [
+            {"id": 5, "user": {"login": "example-alice"},
+             "body": "/agent-hq approve", "created_at": "2026-07-16T10:00:00Z"},
+        ])],
+    )
+    decision = _issue_gate().status(_run())
+    assert decision.status == GateStatus.APPROVED
+    assert decision.actor == "example-alice"
+
+
+def test_issue_gate_status_bare_command_keeps_the_whole_reason(monkeypatch):
+    _install(
+        monkeypatch,
+        [FakeResponse(200, [
+            {"id": 5, "user": {"login": "example-alice"},
+             "body": "/agent-hq request-changes the dropdown is on the wrong side",
+             "created_at": "2026-07-16T10:00:00Z"},
+        ])],
+    )
+    decision = _issue_gate().status(_run())
+    assert decision.status == GateStatus.CHANGES_REQUESTED
+    assert decision.comments == "the dropdown is on the wrong side"
+
+
+def test_issue_gate_status_ignores_a_decision_older_than_the_request(monkeypatch):
+    """The property that makes a bare command safe: an approval left in the
+    thread before this gate opened (an earlier gate on the same ticket) must
+    never satisfy it -- every sweep re-reads the whole thread."""
+    _install(
+        monkeypatch,
+        [FakeResponse(200, [
+            {"id": 5, "user": {"login": "example-alice"},
+             "body": "/agent-hq approve", "created_at": "2026-07-16T08:59:59Z"},
+        ])],
+    )
+    decision = _issue_gate().status(_run(gate_requested_at="2026-07-16T09:00:00Z"))
     assert decision.status == GateStatus.PENDING
 
 

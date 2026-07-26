@@ -16,6 +16,12 @@ gates:
     - approvers: product-owners
       adapter: spec-approval
       timeout_working_hours: 48
+      # The gate is declared but decided by the engine: specs flow straight to
+      # `implement` without waiting for a product owner. The comment is still
+      # posted with the spec inlined (as a record, not a request), so the spec
+      # stays readable on the issue and staffing this gate later is deleting
+      # this one line. Merge remains human either way.
+      auto_approve: true
 handoff:
   allowed:
     - implement

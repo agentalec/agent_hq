@@ -89,6 +89,10 @@
               "timeout_working_hours": {
                 "type": "number",
                 "exclusiveMinimum": 0
+              },
+              "auto_approve": {
+                "type": "boolean",
+                "description": "Decide this gate without a human: the run never enters WAITING_GATE and its handoffs apply immediately. A gate.decided event still records that a gate existed and how it was decided. Default false -- a gate is a human decision unless the task says otherwise."
               }
             }
           }

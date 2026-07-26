@@ -57,6 +57,20 @@ def test_schema_violation_rejected_with_clear_error(tmp_path):
     assert any("max" in e for e in excinfo.value.errors)
 
 
+def test_gate_auto_approve_loads_and_is_typed(tmp_path):
+    """`auto_approve` is a real schema field, not something the engine reads
+    out of an unvalidated dict -- and a non-boolean is rejected at load."""
+    gate = {"approvers": "product-owners", "adapter": "default", "auto_approve": True}
+    _write_task(tmp_path / "auto", _minimal_taskdef("auto", gates={"post": [gate]}))
+    loaded = load_task(tmp_path / "auto", SCHEMAS_DIR)
+    assert loaded["gates"]["post"][0]["auto_approve"] is True
+
+    _write_task(tmp_path / "bad", _minimal_taskdef("bad", gates={"post": [{**gate, "auto_approve": "yes"}]}))
+    with pytest.raises(TaskDefError) as excinfo:
+        load_task(tmp_path / "bad", SCHEMAS_DIR)
+    assert any("auto_approve" in e for e in excinfo.value.errors)
+
+
 def test_missing_skills_path_rejected(tmp_path):
     taskdef = _minimal_taskdef(skills=["prompts/missing.md"])
     _write_task(tmp_path / "bad", taskdef)

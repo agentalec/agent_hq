@@ -59,6 +59,7 @@ class FakeTracker:
         self.pinned: list[tuple] = []
         self.closing_summaries: list[tuple] = []
         self.closed: list[str] = []
+        self.label_sets: list[tuple] = []
 
     def fetch_ticket(self, ref):
         return self.details
@@ -71,7 +72,7 @@ class FakeTracker:
         self.closing_summaries.append((ticket_id, body, event_id))
 
     def set_status_labels(self, ticket_id, status, labels):
-        pass
+        self.label_sets.append((ticket_id, status, sorted(labels)))
 
     def close_issue(self, ticket_id):
         self.closed.append(ticket_id)
@@ -153,7 +154,10 @@ class FakeGate:
         self.request_id = request_id
         self.decision = decision or GateDecision(GateStatus.PENDING, "")
 
+        self.subjects: list[dict] = []
+
     def request(self, group, subject):
+        self.subjects.append(subject)
         return GateRequest(self.request_id)
 
     def status(self, run):
@@ -491,12 +495,25 @@ def test_collect_gated_task_waits_gate(config, taskdefs, store, tmp_path):
              "artifacts": ["specs/7/spec.md"]},
         ],
     })
-    adapters = _adapters(tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"),
-                         gate=FakeGate(request_id="42"))
+    tracker, gate = FakeTracker(_details()), FakeGate(request_id="42")
+    adapters = _adapters(tracker=tracker, agent=FakeAgent(tmp_path / "work"), gate=gate)
     run_task("specrun", "collect", config, taskdefs, store,
              now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
     run = store.read_state("7")["runs"][0]
     assert run["state"] == "WAITING_GATE"
+    # The approver gets the artifact itself, not just a run id -- plus the
+    # ledger path, so the adapter can link the copy this gate was asked about.
+    assert gate.subjects[0]["artifacts"] == {
+        "specs/7/spec.md": {
+            "content": "the spec",
+            "ledger_path": "tickets/7/artifacts/specrun/specs/7/spec.md",
+        }
+    }
+    # ...and the issue is labelled so waiting tickets are findable, without
+    # stripping the hq: labels the issue already carried.
+    assert tracker.label_sets == [
+        ("7", "WAITING_GATE", ["hq:intake", "hq:public-safe", "hq:waiting-gate"])
+    ]
     assert run["gate_request_id"] == "42"
     assert run["gate_requested_at"] == "2026-07-18T09:00:00Z"
     assert run["cost_usd"] == 2.0
@@ -728,6 +745,46 @@ def test_review_park_posts_findings_comment_then_awaits_human(config, taskdefs, 
     assert store.read_state("7")["status"] == "ACTIVE"  # parked, not DONE; PR left in draft
 
 
+def test_collect_auto_approved_gate_never_waits(config, taskdefs, store, tmp_path):
+    """A gate the task declares `auto_approve` still posts its comment -- that
+    is where the run's artifacts become readable -- but flagged as a record,
+    not a request. What it skips is the waiting: straight to SUCCEEDED, handoff
+    applied, no in-flight slot held, no waiting-gate label. The decision is
+    evented too: an auto-approved gate is a recorded decision, not an absent
+    one."""
+    taskdefs["spec"]["gates"]["post"][0]["auto_approve"] = True
+    _seed(store, _run_dict("specrun", "spec", state="RUNNING",
+                           bindings={"agent-session": "claude-code-headless", "gate": "pr-review"}))
+    _stage(config, "specrun", "specs/7/spec.md", "the spec")
+    _write_execute_result(config, "specrun", cost_usd=2.0, tokens=50)
+    _write_control(config, "specrun", {
+        "outcome": "handoff",
+        "handoffs": [
+            {"key": "build-1", "task": "build", "reason": "ready for build",
+             "artifacts": ["specs/7/spec.md"]},
+        ],
+    })
+    tracker, gate = FakeTracker(_details()), FakeGate(request_id="42")
+    adapters = _adapters(tracker=tracker, agent=FakeAgent(tmp_path / "work"), gate=gate)
+    run_task("specrun", "collect", config, taskdefs, store,
+             now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
+
+    runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
+    assert runs["specrun"]["state"] == "SUCCEEDED"
+    assert not runs["specrun"].get("pending_handoffs")
+    # The comment is posted, carrying the artifact, but marked auto-approved
+    # so it reads as a record instead of asking for a decision.
+    assert len(gate.subjects) == 1
+    assert gate.subjects[0]["auto_approved"] is True
+    assert gate.subjects[0]["artifacts"]["specs/7/spec.md"]["content"] == "the spec"
+    assert tracker.label_sets == []  # never waited, so no waiting-gate label
+    assert [r["task_id"] for r in runs.values() if r["task_id"] == "build"] == ["build"]
+    decided = [e for e in store.read_events("7") if e["kind"] == "gate.decided"]
+    assert len(decided) == 1
+    assert "auto-approved by task config" in decided[0]["detail"]
+    assert "product-owners" in decided[0]["detail"]
+
+
 def test_post_pr_comment_targets_the_work_repo_pr(config):
     """A review run's findings are reflected onto the work-repo PR: the
     messaging adapter is built for the PR's repo (not the engine repo) and
@@ -899,10 +956,13 @@ def test_sweep_gate_approved_applies_pending_handoff_and_completes(config, taskd
         GateStatus.APPROVED, "", comment_id=555, actor="example-alice",
         decided_at="2026-07-18T08:30:00Z",
     )
-    adapters = _adapters(tracker=FakeTracker(_details()), gate=FakeGate(decision=decision))
+    tracker = FakeTracker(_details())
+    adapters = _adapters(tracker=tracker, gate=FakeGate(decision=decision))
     _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
     runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
     assert runs["specrun"]["state"] == "SUCCEEDED"
+    # The gate is resolved, so the waiting-gate label comes back off.
+    assert tracker.label_sets[-1] == ("7", "ACTIVE", ["hq:intake", "hq:public-safe"])
     assert runs["specrun"]["pending_handoffs"] == []
     downstream = [r for r in runs.values() if r["task_id"] == "build"]
     assert len(downstream) == 1
@@ -915,13 +975,47 @@ def test_sweep_gate_approved_applies_pending_handoff_and_completes(config, taskd
     assert decided[0]["event_id"] == "555:approval"
 
 
+def test_sweep_auto_approved_gate_resolves_a_run_already_waiting(config, taskdefs, store):
+    """Turning auto_approve on drains the gates already parked, rather than
+    stranding them behind a flag that says they need no human. Nothing is
+    asked: `gate=None` here would raise if any gate adapter were built."""
+    taskdefs["spec"]["gates"]["post"][0]["auto_approve"] = True
+    _seed(store, _run_dict(
+        "specrun", "spec", state="WAITING_GATE", chain_depth=0,
+        gate_request_id="42", gate_requested_at="2026-07-18T08:00:00Z",
+        pending_handoffs=[{"key": "build-1", "target_task": "build", "reason": "ready"}],
+    ))
+    tracker, messaging = FakeTracker(_details()), FakeMessaging()
+    _sweep(config, taskdefs, store, FakeWorkflowApi(),
+           _adapters(tracker=tracker, gate=None, messaging=messaging))
+
+    # Its request comment is already in the thread asking for a decision that
+    # will now never come, so the thread gets told why.
+    assert len(messaging.calls) == 1
+    _, message, event_id = messaging.calls[0]
+    assert "auto-approved by task config after the request above was posted" in message
+    assert event_id == "specrun:auto_approval"
+
+    runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
+    assert runs["specrun"]["state"] == "SUCCEEDED"
+    assert runs["specrun"]["pending_handoffs"] == []
+    assert [r for r in runs.values() if r["task_id"] == "build"]  # handoff applied
+    decided = [e for e in store.read_events("7") if e["kind"] == "gate.decided"]
+    assert len(decided) == 1
+    assert decided[0]["event_id"] == "specrun:auto_approval"
+    assert "auto-approved by task config" in decided[0]["detail"]
+    # and the waiting-gate label comes off, same as any other decision
+    assert tracker.label_sets[-1] == ("7", "ACTIVE", ["hq:intake", "hq:public-safe"])
+
+
 def test_sweep_gate_changes_requested_reworks_and_clears_pending_handoffs(config, taskdefs, store):
     _seed(store, _run_dict(
         "specrun", "spec", state="WAITING_GATE", attempt=0, source_event_id="evt", enqueue_index=0,
         gate_request_id="42", gate_requested_at="2026-07-18T08:00:00Z",
         pending_handoffs=[{"key": "build-1", "target_task": "build", "reason": "ready"}],
     ))
-    adapters = _adapters(tracker=FakeTracker(_details()),
+    tracker = FakeTracker(_details())
+    adapters = _adapters(tracker=tracker,
                          gate=FakeGate(decision=GateDecision(GateStatus.CHANGES_REQUESTED, "fix X")))
     _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
     runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
@@ -929,6 +1023,8 @@ def test_sweep_gate_changes_requested_reworks_and_clears_pending_handoffs(config
     assert runs["specrun"]["pending_handoffs"] == []
     rework = [r for r in runs.values() if r["task_id"] == "spec" and r["attempt"] == 1]
     assert len(rework) == 1
+    # Not just the approve path: any decision takes the label back off.
+    assert tracker.label_sets[-1] == ("7", "ACTIVE", ["hq:intake", "hq:public-safe"])
     new_id = rework[0]["run_id"]
     rework_event = [e for e in store.read_events("7")
                     if e["kind"] == "run.rework" and e["run_id"] == new_id]

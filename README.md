@@ -20,7 +20,8 @@ happens to wire up a linear graph:
 GitHub issue (hq:intake label, in config.projects["engine_repo"])
   -> intake            engine entry logic (no task file); enqueues
                         config.projects["initial_task"] (`spec`)
-  -> spec               writes specs/<ticket>/spec.md          [gate: product-owners]
+  -> spec               writes specs/<ticket>/spec.md          [gate: product-owners,
+                        currently auto_approve: true -- declared, engine-decided]
   -> arch-plan          writes specs/<ticket>/plan.md
   -> arch-approval      confirms the plan artifacts             [gate: architects, beyond-crud only]
   -> breakdown          writes specs/<ticket>/tasks.md; hands off one

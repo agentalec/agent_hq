@@ -11,7 +11,16 @@ import os
 from collections.abc import Callable
 
 from engine.config import Config
-from engine.models import Event, Handoff, RunState, TaskRun, compute_handoff_run_id, compute_run_id
+from engine.models import (
+    Event,
+    GateDecision,
+    GateStatus,
+    Handoff,
+    RunState,
+    TaskRun,
+    compute_handoff_run_id,
+    compute_run_id,
+)
 from engine.registry import build_adapter
 from engine.state import GitJsonStateStore, Txn, _add_minutes, _now_iso
 
@@ -29,6 +38,8 @@ BINDABLE_PORTS = ("tracker", "agent-session", "messaging")
 # would let a batch of already-queued tickets starve every future dispatch
 # once the cap is reached (mirrors `state._EXCLUSIVE_STATES` in `claim_run`).
 EXCLUSIVE_STATES = {"RUNNING", "WAITING_GATE"}
+# The one engine-owned issue label that tracks run state (see set_gate_label).
+GATE_LABEL = "hq:waiting-gate"
 
 
 def _put_queued_run(txn: Txn, run_id: str, *, ticket_id: str, task_id: str, task_version: int,
@@ -277,6 +288,24 @@ def subst(template: str, ticket_id: str) -> str:
     return template.replace("{ticket}", ticket_id)
 
 
+def set_gate_label(config, adapter_fn, ticket_id: str, waiting: bool) -> None:
+    """Flag/unflag the ticket issue as blocked on a human gate, so the tickets
+    a human is holding up are findable by label instead of by reading the
+    state branch. Idempotent -- the tracker no-ops when the label set already
+    matches.
+
+    Reads the issue's current labels and re-sends them: `set_status_labels`
+    replaces the WHOLE `hq:`-prefixed set, so anything else the issue carries
+    (`hq:intake`) has to be passed back through or it gets stripped."""
+    tracker = adapter_fn("tracker", config.components["tracker"]["adapter"], repo=intake_repo(config))
+    keep = [name for name in tracker.fetch_ticket(ticket_id).labels if name != GATE_LABEL]
+    tracker.set_status_labels(
+        ticket_id,
+        "WAITING_GATE" if waiting else "ACTIVE",
+        keep + ([GATE_LABEL] if waiting else []),
+    )
+
+
 def notify_ticket(config, adapter_fn, ticket_id, message: str, event_id: str, mentions=None) -> None:
     """Post one plain comment to the ticket thread, idempotent by `event_id`
     (the messaging adapter dedupes on its `<!--hq:evt:...-->` marker). The
@@ -522,13 +551,46 @@ def sweep(
     def handle_gate(taskdef, ticket_id, run) -> None:
         run_id = run["run_id"]
         gate_entry = (taskdef.get("gates", {}).get("post") or [{}])[0]
-        timeout = gate_entry.get("timeout_working_hours")
-        repo = run.get("repo") or _target_repo(config, adapter_fn, ticket_id) or next(iter(config.repos))
-        gate = adapter_fn("gate", run.get("bindings", {}).get("gate", "pr-review"), repo=repo)
-        decision = gate.status(
-            {**run, "timeout_working_hours": timeout, "approver_group": gate_entry.get("approvers")}
-        )
+        if gate_entry.get("auto_approve"):
+            # Same decision as the collect-time path, for a run that was
+            # already parked when the flag went on: turning auto_approve on
+            # drains the gates already waiting, rather than stranding them
+            # behind a flag that says they need no human. No gate adapter and
+            # no repo lookup -- there is nothing to ask.
+            decision = GateDecision(
+                GateStatus.APPROVED,
+                f"auto-approved by task config (would have asked {gate_entry.get('approvers')})",
+            )
+            # This run's request comment is already in the thread asking for a
+            # decision that will now never come, so say so under it. (A run
+            # auto-approved at collect time needs no such notice -- its comment
+            # never asked.) Idempotent by event id.
+            notify_ticket(
+                config, adapter_fn, ticket_id,
+                f"Gate `{taskdef['id']}` was auto-approved by task config after the request "
+                f"above was posted — `auto_approve` was turned on while this run was waiting. "
+                f"No decision is needed.",
+                f"{run_id}:auto_approval",
+            )
+        else:
+            timeout = gate_entry.get("timeout_working_hours")
+            repo = (
+                run.get("repo") or _target_repo(config, adapter_fn, ticket_id)
+                or next(iter(config.repos))
+            )
+            gate = adapter_fn("gate", run.get("bindings", {}).get("gate", "pr-review"), repo=repo)
+            decision = gate.status(
+                {**run, "timeout_working_hours": timeout,
+                 "approver_group": gate_entry.get("approvers")}
+            )
         status = decision.status.value if hasattr(decision.status, "value") else decision.status
+
+        if status != "PENDING":
+            # Cleared on "a decision exists", before the branches below --
+            # several of them return early, and the label means "a human is
+            # holding this up", which stopped being true the moment the
+            # decision landed.
+            set_gate_label(config, adapter_fn, ticket_id, waiting=False)
 
         if status == "APPROVED":
             pending = [Handoff.from_dict(h) for h in (run.get("pending_handoffs") or [])]
@@ -557,6 +619,14 @@ def sweep(
                             event_id=f"{decision.comment_id}:approval", kind="gate.decided",
                             ticket_id=ticket_id, run_id=run_id,
                             detail=f"approved by {decision.actor} at {decision.decided_at}",
+                        ).to_dict(),
+                    )
+                elif gate_entry.get("auto_approve"):
+                    txn.append_event(
+                        ticket_id,
+                        Event(
+                            event_id=f"{run_id}:auto_approval", kind="gate.decided",
+                            ticket_id=ticket_id, run_id=run_id, detail=decision.comments,
                         ).to_dict(),
                     )
 
