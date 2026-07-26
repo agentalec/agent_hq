@@ -25,3 +25,4 @@
 {"event_id": "d9389dd6c0cd5d74:finalize-ticket-16:accepted", "kind": "handoff.accepted", "ticket_id": "16", "run_id": "d9389dd6c0cd5d74", "detail": "QA completed with code review. Unable to exercise queue board functionality without backend API. All acceptance criteria show correct implementation based on code analysis. Forwarding spec, review, and QA artifacts for finalization."}
 {"event_id": "d9389dd6c0cd5d74:succeeded", "kind": "run.succeeded", "ticket_id": "16", "run_id": "d9389dd6c0cd5d74", "state": "SUCCEEDED", "artifacts": ["specs/16/qa.md"]}
 {"event_id": "a89b653078ace07d:collected", "kind": "run.collected", "ticket_id": "16", "run_id": "a89b653078ace07d", "cost_usd": 0.0}
+{"event_id": "a89b653078ace07d:succeeded", "kind": "run.succeeded", "ticket_id": "16", "run_id": "a89b653078ace07d", "state": "SUCCEEDED", "artifacts": ["specs/16/summary.md"]}

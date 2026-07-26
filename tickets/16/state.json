@@ -153,7 +153,7 @@
       "task_id": "finalize",
       "task_version": 1,
       "ticket_id": "16",
-      "state": "RUNNING",
+      "state": "SUCCEEDED",
       "attempt": 0,
       "bindings": {
         "tracker": "github-issues",
@@ -163,7 +163,9 @@
       "cost_usd": 0.0,
       "tokens": null,
       "usage_known": true,
-      "artifacts": [],
+      "artifacts": [
+        "specs/16/summary.md"
+      ],
       "chain_depth": 4,
       "parent_run_id": "d9389dd6c0cd5d74",
       "handoff_key": "finalize-ticket-16",
@@ -175,7 +177,9 @@
       ],
       "deadline": "2026-07-26T20:50:15Z",
       "attempt_started_at": "2026-07-26T20:35:15Z",
-      "base_commit": "63805e00b6a7f55d674072f8bb80d43896c97659"
+      "base_commit": "63805e00b6a7f55d674072f8bb80d43896c97659",
+      "output_commit": "63805e00b6a7f55d674072f8bb80d43896c97659",
+      "pr_ref": "agentalec/care_fe#5"
     }
   ],
   "work_repos": [
