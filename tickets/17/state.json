@@ -120,7 +120,8 @@
         "specs/17/review.md"
       ],
       "deadline": "2026-07-26T20:28:21Z",
-      "attempt_started_at": "2026-07-26T18:58:21Z"
+      "attempt_started_at": "2026-07-26T18:58:21Z",
+      "base_commit": "789e817cb8a39a3004d58eadf13ae2e1328c9493"
     }
   ],
   "work_repos": [
