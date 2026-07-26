@@ -3,3 +3,4 @@
 {"event_id": "25cd7fd388070549:failed", "kind": "run.failed", "ticket_id": "16", "run_id": "25cd7fd388070549", "state": "FAILED"}
 {"event_id": "25cd7fd388070549:handoff_rejected", "kind": "handoff.rejected", "ticket_id": "16", "run_id": "25cd7fd388070549", "detail": "handoff target 'arch-plan' is not in this task's handoff.allowed"}
 {"event_id": "44c69fc35181a442:queued", "kind": "run.queued", "ticket_id": "16", "run_id": "44c69fc35181a442", "task_id": "spec", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment", "gate": "github-issue-comment"}}
+{"event_id": "44c69fc35181a442:collected", "kind": "run.collected", "ticket_id": "16", "run_id": "44c69fc35181a442", "cost_usd": 0.0}
