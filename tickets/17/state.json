@@ -8,7 +8,7 @@
       "task_id": "spec",
       "task_version": 1,
       "ticket_id": "17",
-      "state": "WAITING_GATE",
+      "state": "SUCCEEDED",
       "attempt": 0,
       "bindings": {
         "tracker": "github-issues",
@@ -33,17 +33,31 @@
       "pr_ref": null,
       "gate_requested_at": "2026-07-25T21:41:35Z",
       "gate_request_id": "5080693325",
-      "pending_handoffs": [
-        {
-          "key": "implement-recall-tab",
-          "target_task": "implement",
-          "reason": "Frontend implementation required: Add Recall tab to mobile queue board UI. Spec defines testable acceptance criteria for mobile tab addition, recalled token display, desktop behavior preservation, and badge count integration. All necessary components and patterns exist in the codebase.",
-          "repo": "agentalec/care_fe",
-          "artifacts": [
-            "specs/17/spec.md"
-          ],
-          "source_run_id": "e79ef6e1fc08b264"
-        }
+      "pending_handoffs": []
+    },
+    {
+      "run_id": "b02263341be30406",
+      "task_id": "implement",
+      "task_version": 1,
+      "ticket_id": "17",
+      "state": "QUEUED",
+      "attempt": 0,
+      "bindings": {
+        "tracker": "github-issues",
+        "agent-session": "copilot-cli",
+        "messaging": "github-comment",
+        "gate": "github-issue-comment"
+      },
+      "cost_usd": null,
+      "tokens": null,
+      "usage_known": false,
+      "artifacts": [],
+      "chain_depth": 1,
+      "parent_run_id": "e79ef6e1fc08b264",
+      "handoff_key": "implement-recall-tab",
+      "repo": "agentalec/care_fe",
+      "input_artifacts": [
+        "specs/17/spec.md"
       ]
     }
   ],
