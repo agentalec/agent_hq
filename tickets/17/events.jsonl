@@ -11,3 +11,4 @@
 {"event_id": "2ad1b167a161bbeb:queued", "kind": "run.queued", "ticket_id": "17", "run_id": "2ad1b167a161bbeb", "task_id": "review", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "b02263341be30406:review:accepted", "kind": "handoff.accepted", "ticket_id": "17", "run_id": "b02263341be30406", "detail": "Implementation complete for ticket 17. Added Recall tab to mobile queue board UI with badge counts, UNFULFILLED token display, and maintained desktop behavior. Ready for review."}
 {"event_id": "b02263341be30406:succeeded", "kind": "run.succeeded", "ticket_id": "17", "run_id": "b02263341be30406", "state": "SUCCEEDED", "artifacts": []}
+{"event_id": "2ad1b167a161bbeb:collected", "kind": "run.collected", "ticket_id": "17", "run_id": "2ad1b167a161bbeb", "cost_usd": 0.0}
