@@ -109,7 +109,8 @@
         "specs/16/spec.md"
       ],
       "deadline": "2026-07-26T20:49:08Z",
-      "attempt_started_at": "2026-07-26T20:19:08Z"
+      "attempt_started_at": "2026-07-26T20:19:08Z",
+      "base_commit": "5768e7a5683d8c674da1c2af3d5ba23aeccc3ae0"
     }
   ],
   "work_repos": [
