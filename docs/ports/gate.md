@@ -30,20 +30,26 @@ dict>}`. `issue_repo` is injected by `engine.engine.build_port_adapter` from
 key `pr-review` uses.
 
 - `request` posts a comment on the ticket's engine issue naming the run/task,
+  inlining every artifact the run declared (collapsed `<details>`, truncated
+  past 20000 characters, each over a link to its copy on the state branch),
   `@`-mentioning the approver group, and stating the decision-command
   grammar; dedupe marker `<!--hq:gate:<run-id>-->` makes a second call a
   no-op that returns the existing comment id.
 - `status` parses the authorized decision grammar
   (`docs/architecture.md` "Approval and reopen commands"):
-  - `/agent-hq approve <run-id>` -> `APPROVED`
-  - `/agent-hq request-changes <run-id> <reason>` -> `CHANGES_REQUESTED`
-  - `/agent-hq reject <run-id> <reason>` -> `REJECTED`
+  - `/agent-hq approve [<run-id>]` -> `APPROVED`
+  - `/agent-hq request-changes [<run-id>] <reason>` -> `CHANGES_REQUESTED`
+  - `/agent-hq reject [<run-id>] <reason>` -> `REJECTED`
 
-  Only a comment whose `<run-id>` matches this run AND whose commenter is a
-  member of the run's `approver_group` counts; everything else is ignored.
-  The latest (by `created_at`) qualifying comment wins. With no qualifying
-  comment, `status` falls back to the same `timeout_working_hours` ->
-  `EXPIRED` check as `pr-review`, else `PENDING`.
+  A comment counts only if its commenter is a member of the run's
+  `approver_group` AND it was created at or after the run's
+  `gate_requested_at` — that cutoff is what lets the run id be optional, since
+  every sweep re-reads the whole thread and a stale bare approval would
+  otherwise decide a gate nobody looked at. An explicit id that isn't this
+  run's is skipped as a decision about a different gate. The latest (by
+  `created_at`) qualifying comment wins. With no qualifying comment, `status`
+  falls back to the same `timeout_working_hours` -> `EXPIRED` check as
+  `pr-review`, else `PENDING`.
 - Guarded `reopen` (Task 16) reuses this same authorized-comment machinery
   for `/agent-hq reopen <reason>`, subject to its own allowed-block-source
   and PR-guard checks -- not a gate decision, so it is routed separately by

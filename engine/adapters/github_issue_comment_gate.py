@@ -29,7 +29,10 @@ _MAX_EMBED_CHARS = 20000
 # Where the ledger copy of an artifact is readable from. The state branch is
 # a fixed name across the engine (scripts/checkout-state.sh creates it).
 _STATE_BRANCH = "agent-hq-state"
-_DECISION_RE = re.compile(r"^/agent-hq (approve|request-changes|reject)\s+(\S+)(?:\s+(.*))?$")
+_DECISION_RE = re.compile(r"^/agent-hq (approve|request-changes|reject)(?:\s+(.*))?$")
+# `compute_run_id` is sha1[:16] -- what tells an explicit target apart from
+# the first word of a reason.
+_RUN_ID_RE = re.compile(r"^[0-9a-f]{16}$")
 _STATUS_BY_COMMAND = {
     "approve": GateStatus.APPROVED,
     "request-changes": GateStatus.CHANGES_REQUESTED,
@@ -41,13 +44,30 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _parse_decision(body: str) -> tuple[str, str, str] | None:
-    """First `/agent-hq <command> <run-id> [reason]` line in `body`, or None."""
+def _parse_decision(body: str, run_id: str) -> tuple[str, str] | None:
+    """First `/agent-hq <command> [<run-id>] [reason]` line in `body`, as
+    `(command, reason)`, or None if no line decides THIS run.
+
+    The run id is optional: a bare `/agent-hq approve` targets whatever gate
+    is currently open, since per-ticket exclusivity means at most one run is
+    WAITING_GATE at a time. What makes that safe is the caller's
+    `gate_requested_at` cutoff -- without it, a bare approval left in the
+    thread would silently satisfy every future gate on the ticket.
+
+    An explicit id that isn't this run's is a decision about a different
+    gate, so that line is skipped rather than read as a bare command whose
+    reason happens to start with an id."""
     for line in body.splitlines():
         match = _DECISION_RE.match(line.strip())
-        if match:
-            command, run_id, reason = match.group(1), match.group(2), match.group(3) or ""
-            return command, run_id, reason.strip()
+        if not match:
+            continue
+        command, rest = match.group(1), (match.group(2) or "").strip()
+        head, _, tail = rest.partition(" ")
+        if head == run_id:
+            return command, tail.strip()
+        if _RUN_ID_RE.match(head):
+            continue
+        return command, rest
     return None
 
 
@@ -143,9 +163,12 @@ class GithubIssueCommentGate:
                 mentions,
                 "",
                 "Reply on this issue:",
-                f"- `/agent-hq approve {run_id}`",
-                f"- `/agent-hq request-changes {run_id} <reason>`",
-                f"- `/agent-hq reject {run_id} <reason>`",
+                "- `/agent-hq approve`",
+                "- `/agent-hq request-changes <reason>`",
+                "- `/agent-hq reject <reason>`",
+                "",
+                f"<sub>Decides the gate open on this ticket. Add the run id "
+                f"(`/agent-hq approve {run_id}`) to be explicit.</sub>",
             ]
         )
         result = self._client.post(f"/repos/{repo}/issues/{ticket_id}/comments", json={"body": body})
@@ -158,18 +181,26 @@ class GithubIssueCommentGate:
         approver_group = run.get("approver_group")
         members = set(self.approvers.get("groups", {}).get(approver_group, {}).get("members", []))
 
+        # Only comments from this gate's request onward can decide it. This is
+        # what lets the run id be optional: every sweep re-reads the whole
+        # thread, so without the cutoff a decision left behind by an earlier
+        # gate on this ticket (a reworked spec, an earlier task's approval)
+        # would silently satisfy this one -- approving something no human read.
+        requested_at = run.get("gate_requested_at")
+
         comments = self._list_comments(repo, ticket_id)
         decisions = []
         for comment in comments:
-            parsed = _parse_decision(comment.get("body") or "")
+            created_at = comment.get("created_at") or ""
+            if requested_at and created_at < requested_at:
+                continue
+            parsed = _parse_decision(comment.get("body") or "", run_id)
             if not parsed:
                 continue
-            command, target_run, reason = parsed
-            if target_run != run_id:
-                continue
+            command, reason = parsed
             if comment["user"]["login"] not in members:
                 continue
-            decisions.append((comment.get("created_at") or "", command, reason, comment))
+            decisions.append((created_at, command, reason, comment))
 
         if decisions:
             decisions.sort(key=lambda d: d[0])

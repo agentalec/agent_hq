@@ -213,12 +213,22 @@ the Task 9 cutover); `reopen` is **planned** (Task 14/16) -- it needs the
 `issue_comment`/`issues` event routing Task 14 adds and the guarded-reopen
 transition Task 16 builds:
 
-- `/agent-hq approve <run-id>` -> gate `APPROVED`.
-- `/agent-hq request-changes <run-id> <reason>` -> gate `CHANGES_REQUESTED`
+- `/agent-hq approve [<run-id>]` -> gate `APPROVED`.
+- `/agent-hq request-changes [<run-id>] <reason>` -> gate `CHANGES_REQUESTED`
   (rework: the source task re-runs; its `pending_handoffs` are cleared, not
   applied).
-- `/agent-hq reject <run-id> <reason>` -> gate `REJECTED` (terminal for that
+- `/agent-hq reject [<run-id>] <reason>` -> gate `REJECTED` (terminal for that
   proposal; `pending_handoffs` are cleared).
+
+The run id is **optional**: a bare `/agent-hq approve` decides whatever gate
+is currently open, since per-ticket exclusivity means at most one run is
+`WAITING_GATE` at a time. What makes that safe is the cutoff — only comments
+created at or after the run's `gate_requested_at` can decide it. Without it a
+bare approval left in the thread would satisfy every later gate on the
+ticket, since every sweep re-reads the whole thread. An explicit id is still
+honored, and is the way to be unambiguous in a thread a human is also using;
+an id that isn't the open run's is treated as a decision about another gate
+and skipped, not as the first word of a reason (real ids are `sha1[:16]`).
 - **[planned]** `/agent-hq reopen <reason>` -> resumes a `BLOCKED` or `DONE`
   ticket per the edges above (PLAN.md decision 14); native
   `issues: reopened` is the equivalent signal, still subject to the same

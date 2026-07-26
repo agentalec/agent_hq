@@ -316,9 +316,12 @@ def test_issue_gate_request_creates_comment_with_marker_and_grammar(monkeypatch)
     body = create_call["json"]["body"]
     assert "<!--hq:gate:run-abc123-->" in body
     assert "@example-alice" in body
+    # The bare form is what's advertised; the id is offered as the explicit
+    # alternative, and stays present so the thread records which run this is.
+    assert "- `/agent-hq approve`\n" in body
+    assert "- `/agent-hq request-changes <reason>`\n" in body
+    assert "- `/agent-hq reject <reason>`\n" in body
     assert "/agent-hq approve run-abc123" in body
-    assert "/agent-hq request-changes run-abc123 <reason>" in body
-    assert "/agent-hq reject run-abc123 <reason>" in body
 
 
 def test_issue_gate_request_inlines_the_artifacts_being_approved(monkeypatch):
@@ -459,14 +462,60 @@ def test_issue_gate_status_ignores_non_member_commenter(monkeypatch):
 
 
 def test_issue_gate_status_ignores_comment_for_a_different_run(monkeypatch):
+    """An explicit id for another gate is skipped, not read as a bare command
+    whose reason happens to start with an id (real ids are sha1[:16])."""
     _install(
         monkeypatch,
         [FakeResponse(200, [
             {"id": 5, "user": {"login": "example-alice"},
-             "body": "/agent-hq approve some-other-run", "created_at": "2026-07-16T10:00:00Z"},
+             "body": "/agent-hq approve 0123456789abcdef", "created_at": "2026-07-16T10:00:00Z"},
         ])],
     )
     decision = _issue_gate().status(_run())
+    assert decision.status == GateStatus.PENDING
+
+
+def test_issue_gate_status_accepts_a_bare_command(monkeypatch):
+    """`/agent-hq approve` with no run id decides whatever gate is open --
+    per-ticket exclusivity means there is at most one."""
+    _install(
+        monkeypatch,
+        [FakeResponse(200, [
+            {"id": 5, "user": {"login": "example-alice"},
+             "body": "/agent-hq approve", "created_at": "2026-07-16T10:00:00Z"},
+        ])],
+    )
+    decision = _issue_gate().status(_run())
+    assert decision.status == GateStatus.APPROVED
+    assert decision.actor == "example-alice"
+
+
+def test_issue_gate_status_bare_command_keeps_the_whole_reason(monkeypatch):
+    _install(
+        monkeypatch,
+        [FakeResponse(200, [
+            {"id": 5, "user": {"login": "example-alice"},
+             "body": "/agent-hq request-changes the dropdown is on the wrong side",
+             "created_at": "2026-07-16T10:00:00Z"},
+        ])],
+    )
+    decision = _issue_gate().status(_run())
+    assert decision.status == GateStatus.CHANGES_REQUESTED
+    assert decision.comments == "the dropdown is on the wrong side"
+
+
+def test_issue_gate_status_ignores_a_decision_older_than_the_request(monkeypatch):
+    """The property that makes a bare command safe: an approval left in the
+    thread before this gate opened (an earlier gate on the same ticket) must
+    never satisfy it -- every sweep re-reads the whole thread."""
+    _install(
+        monkeypatch,
+        [FakeResponse(200, [
+            {"id": 5, "user": {"login": "example-alice"},
+             "body": "/agent-hq approve", "created_at": "2026-07-16T08:59:59Z"},
+        ])],
+    )
+    decision = _issue_gate().status(_run(gate_requested_at="2026-07-16T09:00:00Z"))
     assert decision.status == GateStatus.PENDING
 
 
