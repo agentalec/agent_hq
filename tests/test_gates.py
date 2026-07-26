@@ -321,6 +321,43 @@ def test_issue_gate_request_creates_comment_with_marker_and_grammar(monkeypatch)
     assert "/agent-hq reject run-abc123 <reason>" in body
 
 
+def test_issue_gate_request_inlines_the_artifacts_being_approved(monkeypatch):
+    """An approver reads the spec in the comment -- a run id and a ticket
+    title are not a reviewable subject."""
+    fake = _install(monkeypatch, [FakeResponse(200, []), FakeResponse(200, {"id": 42})])
+    gate = _issue_gate()
+    gate.request(
+        "product-owners",
+        {
+            "ticket_id": "9", "run_id": "run-abc123", "task_id": "spec", "title": "t",
+            "artifacts": {"specs/9/spec.md": "# Spec\n\n## AC1\nGiven a user..."},
+        },
+    )
+    body = fake.calls[1]["json"]["body"]
+    assert "<details><summary><b>specs/9/spec.md</b></summary>" in body
+    assert "## AC1\nGiven a user..." in body
+    # blank line after the tag, else GitHub renders the markdown as raw text
+    assert "</summary>\n\n# Spec" in body
+
+
+def test_issue_gate_request_truncates_a_runaway_artifact(monkeypatch):
+    """GitHub rejects comments over 65536 chars -- a huge artifact is cut,
+    never dropped and never allowed to fail the gate request."""
+    fake = _install(monkeypatch, [FakeResponse(200, []), FakeResponse(200, {"id": 42})])
+    gate = _issue_gate()
+    gate.request(
+        "product-owners",
+        {
+            "ticket_id": "9", "run_id": "run-abc123", "task_id": "spec", "title": "t",
+            "artifacts": {"specs/9/spec.md": "x" * 30000},
+        },
+    )
+    body = fake.calls[1]["json"]["body"]
+    assert len(body) < 25000
+    assert "truncated at 20000 characters" in body
+    assert "/agent-hq approve run-abc123" in body  # grammar survives the cut
+
+
 def test_issue_gate_request_reuses_existing_marker_comment(monkeypatch):
     fake = _install(
         monkeypatch,

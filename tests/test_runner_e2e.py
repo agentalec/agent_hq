@@ -59,6 +59,7 @@ class FakeTracker:
         self.pinned: list[tuple] = []
         self.closing_summaries: list[tuple] = []
         self.closed: list[str] = []
+        self.label_sets: list[tuple] = []
 
     def fetch_ticket(self, ref):
         return self.details
@@ -71,7 +72,7 @@ class FakeTracker:
         self.closing_summaries.append((ticket_id, body, event_id))
 
     def set_status_labels(self, ticket_id, status, labels):
-        pass
+        self.label_sets.append((ticket_id, status, sorted(labels)))
 
     def close_issue(self, ticket_id):
         self.closed.append(ticket_id)
@@ -153,7 +154,10 @@ class FakeGate:
         self.request_id = request_id
         self.decision = decision or GateDecision(GateStatus.PENDING, "")
 
+        self.subjects: list[dict] = []
+
     def request(self, group, subject):
+        self.subjects.append(subject)
         return GateRequest(self.request_id)
 
     def status(self, run):
@@ -491,12 +495,19 @@ def test_collect_gated_task_waits_gate(config, taskdefs, store, tmp_path):
              "artifacts": ["specs/7/spec.md"]},
         ],
     })
-    adapters = _adapters(tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"),
-                         gate=FakeGate(request_id="42"))
+    tracker, gate = FakeTracker(_details()), FakeGate(request_id="42")
+    adapters = _adapters(tracker=tracker, agent=FakeAgent(tmp_path / "work"), gate=gate)
     run_task("specrun", "collect", config, taskdefs, store,
              now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
     run = store.read_state("7")["runs"][0]
     assert run["state"] == "WAITING_GATE"
+    # The approver gets the artifact itself, not just a run id.
+    assert gate.subjects[0]["artifacts"] == {"specs/7/spec.md": "the spec"}
+    # ...and the issue is labelled so waiting tickets are findable, without
+    # stripping the hq: labels the issue already carried.
+    assert tracker.label_sets == [
+        ("7", "WAITING_GATE", ["hq:intake", "hq:public-safe", "hq:waiting-gate"])
+    ]
     assert run["gate_request_id"] == "42"
     assert run["gate_requested_at"] == "2026-07-18T09:00:00Z"
     assert run["cost_usd"] == 2.0
@@ -899,10 +910,13 @@ def test_sweep_gate_approved_applies_pending_handoff_and_completes(config, taskd
         GateStatus.APPROVED, "", comment_id=555, actor="example-alice",
         decided_at="2026-07-18T08:30:00Z",
     )
-    adapters = _adapters(tracker=FakeTracker(_details()), gate=FakeGate(decision=decision))
+    tracker = FakeTracker(_details())
+    adapters = _adapters(tracker=tracker, gate=FakeGate(decision=decision))
     _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
     runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
     assert runs["specrun"]["state"] == "SUCCEEDED"
+    # The gate is resolved, so the waiting-gate label comes back off.
+    assert tracker.label_sets[-1] == ("7", "ACTIVE", ["hq:intake", "hq:public-safe"])
     assert runs["specrun"]["pending_handoffs"] == []
     downstream = [r for r in runs.values() if r["task_id"] == "build"]
     assert len(downstream) == 1
@@ -921,7 +935,8 @@ def test_sweep_gate_changes_requested_reworks_and_clears_pending_handoffs(config
         gate_request_id="42", gate_requested_at="2026-07-18T08:00:00Z",
         pending_handoffs=[{"key": "build-1", "target_task": "build", "reason": "ready"}],
     ))
-    adapters = _adapters(tracker=FakeTracker(_details()),
+    tracker = FakeTracker(_details())
+    adapters = _adapters(tracker=tracker,
                          gate=FakeGate(decision=GateDecision(GateStatus.CHANGES_REQUESTED, "fix X")))
     _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
     runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
@@ -929,6 +944,8 @@ def test_sweep_gate_changes_requested_reworks_and_clears_pending_handoffs(config
     assert runs["specrun"]["pending_handoffs"] == []
     rework = [r for r in runs.values() if r["task_id"] == "spec" and r["attempt"] == 1]
     assert len(rework) == 1
+    # Not just the approve path: any decision takes the label back off.
+    assert tracker.label_sets[-1] == ("7", "ACTIVE", ["hq:intake", "hq:public-safe"])
     new_id = rework[0]["run_id"]
     rework_event = [e for e in store.read_events("7")
                     if e["kind"] == "run.rework" and e["run_id"] == new_id]

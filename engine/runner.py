@@ -791,6 +791,9 @@ def _collect_success(
                     "branch": branch,
                     "title": details.title,
                     "body": details.body,
+                    # What the approver is actually approving -- the gate
+                    # adapter inlines these into the comment.
+                    "artifacts": {p: artifact_contents.get(p, "") for p in declared},
                 },
             )
             txn.update_run(
@@ -860,7 +863,13 @@ def _collect_success(
 
     store.write(finalize)
 
-    if result.get("zombie") or result.get("gated"):
+    if result.get("gated"):
+        # Post-write side effect, like the PR comment below: the label is a
+        # view of state, never the source of it.
+        eng.set_gate_label(config, adapter_fn, ticket_id, waiting=True)
+        return
+
+    if result.get("zombie"):
         return
 
     if result.get("blocked"):

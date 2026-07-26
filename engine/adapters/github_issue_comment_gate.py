@@ -23,6 +23,9 @@ from engine.adapters.pr_review import add_working_hours
 from engine.models import GateDecision, GateRequest, GateStatus
 
 _MARKER = "<!--hq:gate:{run_id}-->"
+# A spec is a few KB; the cap is a guard against a runaway artifact blowing
+# GitHub's 65536-char comment limit, not an expected path.
+_MAX_EMBED_CHARS = 20000
 _DECISION_RE = re.compile(r"^/agent-hq (approve|request-changes|reject)\s+(\S+)(?:\s+(.*))?$")
 _STATUS_BY_COMMAND = {
     "approve": GateStatus.APPROVED,
@@ -43,6 +46,31 @@ def _parse_decision(body: str) -> tuple[str, str, str] | None:
             command, run_id, reason = match.group(1), match.group(2), match.group(3) or ""
             return command, run_id, reason.strip()
     return None
+
+
+def _artifact_sections(artifacts: dict) -> list[str]:
+    """Inline every artifact the gated run produced, each in a collapsed
+    block. An approver has to be able to read what they are approving from
+    the issue thread itself -- a run id and a ticket title are not a
+    reviewable subject, and the artifact otherwise lives only on the state
+    branch."""
+    lines: list[str] = []
+    for path, content in sorted(artifacts.items()):
+        if len(content) > _MAX_EMBED_CHARS:
+            content = (
+                content[:_MAX_EMBED_CHARS]
+                + f"\n\n_[truncated at {_MAX_EMBED_CHARS} characters — "
+                "full artifact is on the `agent-hq-state` branch]_"
+            )
+        lines += [
+            "",
+            f"<details><summary><b>{path}</b></summary>",
+            "",  # blank line required, else GitHub renders the body as raw text
+            content,
+            "",
+            "</details>",
+        ]
+    return lines
 
 
 class GithubIssueCommentGate:
@@ -96,6 +124,9 @@ class GithubIssueCommentGate:
                 f"### Approval requested: `{subject.get('task_id', '')}` ({run_id})",
                 "",
                 subject.get("title", ""),
+            ]
+            + _artifact_sections(subject.get("artifacts") or {})
+            + [
                 "",
                 mentions,
                 "",

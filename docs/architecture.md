@@ -224,6 +224,16 @@ transition Task 16 builds:
   `issues: reopened` is the equivalent signal, still subject to the same
   guards.
 
+The request comment inlines every artifact the gated run declared, each in a
+collapsed `<details>` block (truncated past 20000 characters, well beyond any
+real spec) — an approver decides from the issue thread without opening the
+state branch. While a run is `WAITING_GATE` the issue also carries
+`hq:waiting-gate` (`engine.engine.set_gate_label`), removed as soon as a
+decision is observed; it is a *view* of run state, never the source of it,
+and it makes the tickets a human is holding up findable by label. Note that
+`WAITING_GATE` counts against `in_flight_cap`, so un-actioned gates hold
+slots that queued tickets need.
+
 ## Ports and adapters
 
 Every side effect crosses a port; task definitions and engine code bind to
