@@ -182,6 +182,12 @@ and how it was decided, so an auto-approved gate reads as a decision in the
 ledger rather than as an absent one. It defaults to false: a declared gate is
 a human decision unless the task says otherwise.
 
+Turning it on is **retroactive**. The sweep honors it for runs already parked
+at `WAITING_GATE`, so flipping the flag drains the gates currently waiting on
+the next pass rather than stranding them behind a flag that says they need no
+human. Turning it back off is not retroactive in the same way — a run that
+already sailed through is finished.
+
 Use it for a checkpoint you want in the graph but not in the critical path
 today — a task whose gate you intend to staff later, or one you are still
 tuning. Note what it costs: `WAITING_GATE` is also what holds a ticket's
@@ -242,7 +248,7 @@ no terminal action.
 | Task | Status |
 |---|---|
 | intake | **Not a task.** Engine entry logic (`engine.runner.intake_ticket`) reads eligibility from `config.projects["intake"]`/`["public"]`/`["public_safe_label"]` and enqueues `config.projects["initial_task"]` (`spec` in the pilot config) with the root run's resolved repo. There is no `tasks/intake/` directory and no task-name special case for it. |
-| spec | Converted (wired). `handoff.allowed: [implement]`, gated (`spec-approval`). The fan-out point in the minimal route: `handoff.max: 3`, one `implement` handoff per affected configured repo. |
+| spec | Converted (wired). `handoff.allowed: [implement]`, gated (`spec-approval`) but currently `auto_approve: true` -- the checkpoint is declared and evented, decided by the engine rather than a product owner; staffing it is deleting that one line. The fan-out point in the minimal route: `handoff.max: 3`, one `implement` handoff per affected configured repo. |
 | arch-plan | Converted, defined, **unwired** -- its header names the activation edit (point `spec`'s `handoff.allowed` back at it). `handoff.allowed: [arch-approval, breakdown]`. |
 | arch-approval | Converted, defined, **unwired** (activated with `arch-plan`, its only in-edge). Confirms the plan artifacts, no changes; gated (`default`); `handoff.allowed: [breakdown]`. |
 | breakdown | Converted, defined, **unwired** (activated with the `arch-plan` chain). `handoff.max: 2`, one `implement` handoff per affected repo when wired. |

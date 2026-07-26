@@ -16,6 +16,11 @@ gates:
     - approvers: product-owners
       adapter: spec-approval
       timeout_working_hours: 48
+      # The gate is declared but decided by the engine: specs flow straight to
+      # `implement` without waiting for a product owner. The approval comment
+      # and its `gate.decided` event still record that the checkpoint exists,
+      # so staffing it later is this one line. Merge remains human either way.
+      auto_approve: true
 handoff:
   allowed:
     - implement

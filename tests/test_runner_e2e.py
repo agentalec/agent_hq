@@ -969,6 +969,31 @@ def test_sweep_gate_approved_applies_pending_handoff_and_completes(config, taskd
     assert decided[0]["event_id"] == "555:approval"
 
 
+def test_sweep_auto_approved_gate_resolves_a_run_already_waiting(config, taskdefs, store):
+    """Turning auto_approve on drains the gates already parked, rather than
+    stranding them behind a flag that says they need no human. Nothing is
+    asked: `gate=None` here would raise if any gate adapter were built."""
+    taskdefs["spec"]["gates"]["post"][0]["auto_approve"] = True
+    _seed(store, _run_dict(
+        "specrun", "spec", state="WAITING_GATE", chain_depth=0,
+        gate_request_id="42", gate_requested_at="2026-07-18T08:00:00Z",
+        pending_handoffs=[{"key": "build-1", "target_task": "build", "reason": "ready"}],
+    ))
+    tracker = FakeTracker(_details())
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), _adapters(tracker=tracker, gate=None))
+
+    runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
+    assert runs["specrun"]["state"] == "SUCCEEDED"
+    assert runs["specrun"]["pending_handoffs"] == []
+    assert [r for r in runs.values() if r["task_id"] == "build"]  # handoff applied
+    decided = [e for e in store.read_events("7") if e["kind"] == "gate.decided"]
+    assert len(decided) == 1
+    assert decided[0]["event_id"] == "specrun:auto_approval"
+    assert "auto-approved by task config" in decided[0]["detail"]
+    # and the waiting-gate label comes off, same as any other decision
+    assert tracker.label_sets[-1] == ("7", "ACTIVE", ["hq:intake", "hq:public-safe"])
+
+
 def test_sweep_gate_changes_requested_reworks_and_clears_pending_handoffs(config, taskdefs, store):
     _seed(store, _run_dict(
         "specrun", "spec", state="WAITING_GATE", attempt=0, source_event_id="evt", enqueue_index=0,

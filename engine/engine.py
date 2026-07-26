@@ -11,7 +11,16 @@ import os
 from collections.abc import Callable
 
 from engine.config import Config
-from engine.models import Event, Handoff, RunState, TaskRun, compute_handoff_run_id, compute_run_id
+from engine.models import (
+    Event,
+    GateDecision,
+    GateStatus,
+    Handoff,
+    RunState,
+    TaskRun,
+    compute_handoff_run_id,
+    compute_run_id,
+)
 from engine.registry import build_adapter
 from engine.state import GitJsonStateStore, Txn, _add_minutes, _now_iso
 
@@ -542,12 +551,27 @@ def sweep(
     def handle_gate(taskdef, ticket_id, run) -> None:
         run_id = run["run_id"]
         gate_entry = (taskdef.get("gates", {}).get("post") or [{}])[0]
-        timeout = gate_entry.get("timeout_working_hours")
-        repo = run.get("repo") or _target_repo(config, adapter_fn, ticket_id) or next(iter(config.repos))
-        gate = adapter_fn("gate", run.get("bindings", {}).get("gate", "pr-review"), repo=repo)
-        decision = gate.status(
-            {**run, "timeout_working_hours": timeout, "approver_group": gate_entry.get("approvers")}
-        )
+        if gate_entry.get("auto_approve"):
+            # Same decision as the collect-time path, for a run that was
+            # already parked when the flag went on: turning auto_approve on
+            # drains the gates already waiting, rather than stranding them
+            # behind a flag that says they need no human. No gate adapter and
+            # no repo lookup -- there is nothing to ask.
+            decision = GateDecision(
+                GateStatus.APPROVED,
+                f"auto-approved by task config (would have asked {gate_entry.get('approvers')})",
+            )
+        else:
+            timeout = gate_entry.get("timeout_working_hours")
+            repo = (
+                run.get("repo") or _target_repo(config, adapter_fn, ticket_id)
+                or next(iter(config.repos))
+            )
+            gate = adapter_fn("gate", run.get("bindings", {}).get("gate", "pr-review"), repo=repo)
+            decision = gate.status(
+                {**run, "timeout_working_hours": timeout,
+                 "approver_group": gate_entry.get("approvers")}
+            )
         status = decision.status.value if hasattr(decision.status, "value") else decision.status
 
         if status != "PENDING":
@@ -584,6 +608,14 @@ def sweep(
                             event_id=f"{decision.comment_id}:approval", kind="gate.decided",
                             ticket_id=ticket_id, run_id=run_id,
                             detail=f"approved by {decision.actor} at {decision.decided_at}",
+                        ).to_dict(),
+                    )
+                elif gate_entry.get("auto_approve"):
+                    txn.append_event(
+                        ticket_id,
+                        Event(
+                            event_id=f"{run_id}:auto_approval", kind="gate.decided",
+                            ticket_id=ticket_id, run_id=run_id, detail=decision.comments,
                         ).to_dict(),
                     )
 
