@@ -561,6 +561,17 @@ def sweep(
                 GateStatus.APPROVED,
                 f"auto-approved by task config (would have asked {gate_entry.get('approvers')})",
             )
+            # This run's request comment is already in the thread asking for a
+            # decision that will now never come, so say so under it. (A run
+            # auto-approved at collect time needs no such notice -- its comment
+            # never asked.) Idempotent by event id.
+            notify_ticket(
+                config, adapter_fn, ticket_id,
+                f"Gate `{taskdef['id']}` was auto-approved by task config after the request "
+                f"above was posted — `auto_approve` was turned on while this run was waiting. "
+                f"No decision is needed.",
+                f"{run_id}:auto_approval",
+            )
         else:
             timeout = gate_entry.get("timeout_working_hours")
             repo = (

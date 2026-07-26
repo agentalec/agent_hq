@@ -175,18 +175,25 @@ work-repo-PR-based approval instead. See `docs/ports/gate.md` for the full
 adapter contract. A gate past `timeout_working_hours` with no decision
 resolves to `EXPIRED` at the next sweep, blocking the ticket and escalating.
 
-`auto_approve: true` decides the gate without a human: no approval is
-requested, the run never enters `WAITING_GATE`, and its handoffs apply
-immediately — but a `gate.decided` event still records that a gate existed
-and how it was decided, so an auto-approved gate reads as a decision in the
-ledger rather than as an absent one. It defaults to false: a declared gate is
-a human decision unless the task says otherwise.
+`auto_approve: true` decides the gate without a human: the run never enters
+`WAITING_GATE` and its handoffs apply immediately. It defaults to false — a
+declared gate is a human decision unless the task says otherwise.
+
+What it does **not** skip is the record. The gate still posts its comment,
+carrying the run's declared artifacts exactly as a real request would — that
+comment is where a spec becomes readable to a human, and an auto-approved
+task that posted nothing would be invisible in the thread. It is rendered as
+a record rather than a request: heading "Gate auto-approved", no decision
+grammar, and no `@`-mention of a group with nothing to decide. A
+`gate.decided` event records it in the ledger too.
 
 Turning it on is **retroactive**. The sweep honors it for runs already parked
 at `WAITING_GATE`, so flipping the flag drains the gates currently waiting on
 the next pass rather than stranding them behind a flag that says they need no
-human. Turning it back off is not retroactive in the same way — a run that
-already sailed through is finished.
+human. Those runs already posted a request comment asking for a decision that
+will now never come, so the sweep posts a short follow-up saying the gate was
+auto-approved after the fact. Turning the flag back off is not retroactive in
+the same way — a run that already sailed through is finished.
 
 Use it for a checkpoint you want in the graph but not in the critical path
 today — a task whose gate you intend to staff later, or one you are still

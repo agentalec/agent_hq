@@ -150,15 +150,21 @@ class GithubIssueCommentGate:
 
         members = self.approvers.get("groups", {}).get(group, {}).get("members", [])
         mentions = " ".join(f"@{m}" for m in members)
-        body = "\n".join(
-            [
-                marker,
-                f"### Approval requested: `{subject.get('task_id', '')}` ({run_id})",
+        auto = bool(subject.get("auto_approved"))
+
+        # An auto-approved gate posts the same comment -- it is where the run's
+        # artifacts become readable -- but as a record, not a request: no
+        # decision grammar, and no @-mention of a group with nothing to decide.
+        if auto:
+            heading = f"### Gate auto-approved: `{subject.get('task_id', '')}` ({run_id})"
+            footer = [
                 "",
-                subject.get("title", ""),
+                f"_Decided by task config (`auto_approve`), not by a human. Would "
+                f"otherwise have asked `{group}`. No action needed._",
             ]
-            + _artifact_sections(subject.get("artifacts") or {}, repo)
-            + [
+        else:
+            heading = f"### Approval requested: `{subject.get('task_id', '')}` ({run_id})"
+            footer = [
                 "",
                 mentions,
                 "",
@@ -170,6 +176,11 @@ class GithubIssueCommentGate:
                 f"<sub>Decides the gate open on this ticket. Add the run id "
                 f"(`/agent-hq approve {run_id}`) to be explicit.</sub>",
             ]
+
+        body = "\n".join(
+            [marker, heading, "", subject.get("title", "")]
+            + _artifact_sections(subject.get("artifacts") or {}, repo)
+            + footer
         )
         result = self._client.post(f"/repos/{repo}/issues/{ticket_id}/comments", json={"body": body})
         return GateRequest(request_id=str(result["id"]))

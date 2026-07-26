@@ -746,10 +746,12 @@ def test_review_park_posts_findings_comment_then_awaits_human(config, taskdefs, 
 
 
 def test_collect_auto_approved_gate_never_waits(config, taskdefs, store, tmp_path):
-    """A gate the task declares `auto_approve` never opens: no gate request,
-    the run goes straight to SUCCEEDED, its handoff applies, and no in-flight
-    slot is held. The decision is still evented -- an auto-approved gate is a
-    recorded decision, not an absent one."""
+    """A gate the task declares `auto_approve` still posts its comment -- that
+    is where the run's artifacts become readable -- but flagged as a record,
+    not a request. What it skips is the waiting: straight to SUCCEEDED, handoff
+    applied, no in-flight slot held, no waiting-gate label. The decision is
+    evented too: an auto-approved gate is a recorded decision, not an absent
+    one."""
     taskdefs["spec"]["gates"]["post"][0]["auto_approve"] = True
     _seed(store, _run_dict("specrun", "spec", state="RUNNING",
                            bindings={"agent-session": "claude-code-headless", "gate": "pr-review"}))
@@ -770,8 +772,12 @@ def test_collect_auto_approved_gate_never_waits(config, taskdefs, store, tmp_pat
     runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
     assert runs["specrun"]["state"] == "SUCCEEDED"
     assert not runs["specrun"].get("pending_handoffs")
-    assert gate.subjects == []  # no approval was ever requested
-    assert tracker.label_sets == []  # and no waiting-gate label
+    # The comment is posted, carrying the artifact, but marked auto-approved
+    # so it reads as a record instead of asking for a decision.
+    assert len(gate.subjects) == 1
+    assert gate.subjects[0]["auto_approved"] is True
+    assert gate.subjects[0]["artifacts"]["specs/7/spec.md"]["content"] == "the spec"
+    assert tracker.label_sets == []  # never waited, so no waiting-gate label
     assert [r["task_id"] for r in runs.values() if r["task_id"] == "build"] == ["build"]
     decided = [e for e in store.read_events("7") if e["kind"] == "gate.decided"]
     assert len(decided) == 1
@@ -979,8 +985,16 @@ def test_sweep_auto_approved_gate_resolves_a_run_already_waiting(config, taskdef
         gate_request_id="42", gate_requested_at="2026-07-18T08:00:00Z",
         pending_handoffs=[{"key": "build-1", "target_task": "build", "reason": "ready"}],
     ))
-    tracker = FakeTracker(_details())
-    _sweep(config, taskdefs, store, FakeWorkflowApi(), _adapters(tracker=tracker, gate=None))
+    tracker, messaging = FakeTracker(_details()), FakeMessaging()
+    _sweep(config, taskdefs, store, FakeWorkflowApi(),
+           _adapters(tracker=tracker, gate=None, messaging=messaging))
+
+    # Its request comment is already in the thread asking for a decision that
+    # will now never come, so the thread gets told why.
+    assert len(messaging.calls) == 1
+    _, message, event_id = messaging.calls[0]
+    assert "auto-approved by task config after the request above was posted" in message
+    assert event_id == "specrun:auto_approval"
 
     runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
     assert runs["specrun"]["state"] == "SUCCEEDED"

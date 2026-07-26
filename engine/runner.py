@@ -778,15 +778,16 @@ def _collect_success(
         for rel_path, content in artifact_contents.items():
             txn.write_artifact(ticket_id, run_id, rel_path, content)
 
-        # A gate the task declares `auto_approve` never opens: no request, no
-        # WAITING_GATE, no in-flight slot held, handoffs apply straight away.
-        # The decision is still evented below, so the ledger shows a gate
-        # existed and how it was decided -- an auto-approved gate is a
-        # recorded decision, not an absent one.
+        # A declared gate always posts its request comment, auto-approved or
+        # not -- that comment is where the run's artifacts become readable to
+        # a human, and losing it would make an auto-approved task invisible in
+        # the thread. What `auto_approve` skips is the WAITING: no
+        # WAITING_GATE, no in-flight slot held, handoffs apply straight away,
+        # and the comment says so instead of asking for a decision.
         gate_entry = (taskdef.get("gates", {}).get("post") or [{}])[0]
         auto_approved = outcome == "handoff" and bool(gate_entry.get("auto_approve"))
 
-        if outcome == "handoff" and gate_entry and not auto_approved:
+        if outcome == "handoff" and gate_entry:
             gate = adapter_fn("gate", run.get("bindings", {}).get("gate", "pr-review"), repo=repo)
             req = gate.request(
                 gate_entry["approvers"],
@@ -808,8 +809,14 @@ def _collect_success(
                         }
                         for p in declared
                     },
+                    # Renders the comment as a record rather than a request:
+                    # no approval grammar, no @-mention of people who have
+                    # nothing to decide.
+                    "auto_approved": auto_approved,
                 },
             )
+
+        if outcome == "handoff" and gate_entry and not auto_approved:
             txn.update_run(
                 ticket_id, run_id,
                 artifacts=declared,

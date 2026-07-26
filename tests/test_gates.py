@@ -355,6 +355,32 @@ def test_issue_gate_request_inlines_the_artifacts_being_approved(monkeypatch):
     ) in body
 
 
+def test_issue_gate_request_auto_approved_reads_as_a_record(monkeypatch):
+    """An auto-approved gate still posts its comment -- the artifact has to
+    stay readable in the thread -- but must not ask for a decision nobody
+    should make, nor ping a group with nothing to decide."""
+    fake = _install(monkeypatch, [FakeResponse(200, []), FakeResponse(200, {"id": 42})])
+    gate = _issue_gate()
+    gate.request(
+        "product-owners",
+        {
+            "ticket_id": "9", "run_id": "run-abc123", "task_id": "spec", "title": "t",
+            "auto_approved": True,
+            "artifacts": {
+                "specs/9/spec.md": {
+                    "content": "# Spec", "ledger_path": "tickets/9/artifacts/run-abc123/x.md",
+                }
+            },
+        },
+    )
+    body = fake.calls[1]["json"]["body"]
+    assert "### Gate auto-approved: `spec` (run-abc123)" in body
+    assert "# Spec" in body  # the artifact is still there
+    assert "auto_approve" in body and "No action needed." in body
+    assert "/agent-hq approve" not in body  # no grammar for a decision already made
+    assert "@example-alice" not in body  # nobody is being asked
+
+
 def test_issue_gate_request_truncates_a_runaway_artifact(monkeypatch):
     """GitHub rejects comments over 65536 chars -- a huge artifact is cut,
     never dropped and never allowed to fail the gate request. The cut is only
