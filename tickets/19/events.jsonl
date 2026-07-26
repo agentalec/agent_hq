@@ -13,3 +13,4 @@
 {"event_id": "cfdb4e2389ee471b:queued", "kind": "run.queued", "ticket_id": "19", "run_id": "cfdb4e2389ee471b", "task_id": "review", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "affdcc187749a5c0:review:accepted", "kind": "handoff.accepted", "ticket_id": "19", "run_id": "affdcc187749a5c0", "detail": "Implementation complete for ticket 19: Highlight medicine dosages which aren't 1. All acceptance criteria (AC1-AC8) have been implemented and tested. Ready for code review."}
 {"event_id": "affdcc187749a5c0:succeeded", "kind": "run.succeeded", "ticket_id": "19", "run_id": "affdcc187749a5c0", "state": "SUCCEEDED", "artifacts": []}
+{"event_id": "cfdb4e2389ee471b:collected", "kind": "run.collected", "ticket_id": "19", "run_id": "cfdb4e2389ee471b", "cost_usd": 0.0}
