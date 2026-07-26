@@ -215,7 +215,8 @@
         "specs/17/qa.md"
       ],
       "deadline": "2026-07-26T19:37:44Z",
-      "attempt_started_at": "2026-07-26T19:22:44Z"
+      "attempt_started_at": "2026-07-26T19:22:44Z",
+      "base_commit": "8a0a119d2b2bb0003b6fbb18c706077d733189e6"
     }
   ],
   "work_repos": [
