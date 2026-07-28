@@ -102,8 +102,17 @@ Near-term, in rough order:
    `docker-compose` qa-env adapter stays deferred: `qa` ships without it, and
    only a stack the devcontainer can't stand up would justify restoring it.
 3. Multi-repo `implement` fan-out + input-join (`parallel_ok`).
-4. Ops alerts — run failures and gates past half-timeout, via messaging.
-5. GitHub App auth replacing the pilot PAT — before the first multi-repo
+4. Label the ticket issue with its status — `hq:active` / `hq:blocked` /
+   `hq:done` (`TicketStatus`), updated wherever the status is written, so a
+   ticket's state is visible on the issue list without reading the state
+   branch. The plumbing already exists and is used for exactly one label:
+   `set_status_labels` replaces the whole `hq:`-prefixed set
+   (`engine/adapters/github_issues.py`), and `set_gate_label`
+   (`engine/engine.py`) drives `hq:waiting-gate` through it. What's missing is
+   a caller on the status writes themselves, and honoring the `status`
+   argument the tracker port already takes and currently ignores.
+5. Ops alerts — run failures and gates past half-timeout, via messaging.
+6. GitHub App auth replacing the pilot PAT — before the first multi-repo
    production pilot.
 
 Everything else — the full deferred backlog with its restore trigger per
