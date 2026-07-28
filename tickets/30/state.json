@@ -277,7 +277,7 @@
       "task_id": "qa",
       "task_version": 1,
       "ticket_id": "30",
-      "state": "RUNNING",
+      "state": "SUCCEEDED",
       "attempt": 2,
       "bindings": {
         "tracker": "github-issues",
@@ -287,7 +287,21 @@
       "cost_usd": 0.0,
       "tokens": null,
       "usage_known": true,
-      "artifacts": [],
+      "artifacts": [
+        "specs/30/qa.md",
+        "specs/30/screenshots/0-28-days-tooltip.png",
+        "specs/30/screenshots/0-28-days.png",
+        "specs/30/screenshots/1-2-years-tooltip.png",
+        "specs/30/screenshots/1-2-years.png",
+        "specs/30/screenshots/18-plus-tooltip.png",
+        "specs/30/screenshots/18-plus.png",
+        "specs/30/screenshots/2-18-years-tooltip.png",
+        "specs/30/screenshots/2-18-years.png",
+        "specs/30/screenshots/29-days-1-year-tooltip.png",
+        "specs/30/screenshots/29-days-1-year.png",
+        "specs/30/screenshots/deceased-tooltip.png",
+        "specs/30/screenshots/deceased.png"
+      ],
       "chain_depth": 7,
       "parent_run_id": "8c13c392def32f14",
       "handoff_key": "qa-1",
@@ -298,7 +312,35 @@
       ],
       "deadline": "2026-07-28T16:09:44Z",
       "attempt_started_at": "2026-07-28T15:09:44Z",
-      "base_commit": "05920756b792e9cf744b4f4da81def3c578ef898"
+      "base_commit": "05920756b792e9cf744b4f4da81def3c578ef898",
+      "output_commit": "de3607fef2ac4b7428a329140824ba17721959d2",
+      "pr_ref": "agentalec/care_fe#6"
+    },
+    {
+      "run_id": "38e4967e962b1fd1",
+      "task_id": "finalize",
+      "task_version": 1,
+      "ticket_id": "30",
+      "state": "QUEUED",
+      "attempt": 0,
+      "bindings": {
+        "tracker": "github-issues",
+        "agent-session": "copilot-cli",
+        "messaging": "github-comment"
+      },
+      "cost_usd": null,
+      "tokens": null,
+      "usage_known": false,
+      "artifacts": [],
+      "chain_depth": 8,
+      "parent_run_id": "6ca2c033308915e4",
+      "handoff_key": "finalize-30",
+      "repo": "agentalec/care_fe",
+      "input_artifacts": [
+        "specs/30/spec.md",
+        "specs/30/review.md",
+        "specs/30/qa.md"
+      ]
     }
   ],
   "work_repos": [
@@ -306,7 +348,7 @@
       "repo": "agentalec/care_fe",
       "branch": "agent-hq/30",
       "base_branch": "develop",
-      "recorded_head": "05920756b792e9cf744b4f4da81def3c578ef898",
+      "recorded_head": "de3607fef2ac4b7428a329140824ba17721959d2",
       "pr_ref": "agentalec/care_fe#6"
     }
   ]
