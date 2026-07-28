@@ -1,12 +1,12 @@
 import json
 import subprocess
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from engine.adapters import copilot_cli as cc
 from engine.adapters.claude_code_headless import ClaudeCodeHeadless
 from engine.adapters.copilot_cli import CopilotCli
 
-FUTURE_DEADLINE = (datetime.now(timezone.utc) + timedelta(hours=1)).strftime(
+FUTURE_DEADLINE = (datetime.now(UTC) + timedelta(hours=1)).strftime(
     "%Y-%m-%dT%H:%M:%SZ"
 )
 

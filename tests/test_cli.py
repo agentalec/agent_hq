@@ -18,7 +18,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _args(**over):
-    base = dict(state="/tmp/whatever", phase="prepare", run_id="r1", execute_outcome=None)
+    base = {"state": "/tmp/whatever", "phase": "prepare", "run_id": "r1", "execute_outcome": None}
     base.update(over)
     return Namespace(**base)
 

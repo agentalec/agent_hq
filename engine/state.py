@@ -20,7 +20,7 @@ import random
 import subprocess
 import time
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 # Bounded replay: fetch -> reset --hard -> re-run fn, only on a *confirmed*
@@ -57,11 +57,11 @@ def artifact_ledger_path(ticket_id: str, run_id: str, rel_path: str) -> str:
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _add_minutes(iso: str, minutes: float) -> str:
-    dt = datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    dt = datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
     return (dt + timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
@@ -92,7 +92,7 @@ class Txn:
     touches (and commits) files that actually moved.
     """
 
-    def __init__(self, store: "GitJsonStateStore"):
+    def __init__(self, store: GitJsonStateStore):
         self._store = store
         self._tickets: dict[str, dict] = {}
         self._new_events: dict[str, list[dict]] = {}
@@ -225,8 +225,8 @@ class GitJsonStateStore:
         result = subprocess.run(
             ["git", "-C", str(self.worktree_path), *self._cred_args(), *args],
             capture_output=True,
-            text=True,
-        )
+            text=True, check=False
+)
         if result.returncode != 0:
             raise RuntimeError(f"git {' '.join(args)} failed: {result.stderr}")
         return result.stdout
@@ -235,14 +235,16 @@ class GitJsonStateStore:
         if os.environ.get("AGENT_HQ_TOKEN"):
             return [
                 "-c",
-                "credential.helper=!f(){ echo username=x-access-token; "
-                'echo "password=$AGENT_HQ_TOKEN"; };f',
+                (
+                    "credential.helper=!f(){ echo username=x-access-token; "
+                    'echo "password=$AGENT_HQ_TOKEN"; };f'
+                ),
             ]
         return []
 
     def _push(self) -> subprocess.CompletedProcess:
         cmd = ["git", "-C", str(self.worktree_path), *self._cred_args(), "push", "--porcelain"]
-        return subprocess.run(cmd, capture_output=True, text=True)
+        return subprocess.run(cmd, capture_output=True, text=True, check=False)
 
     def _current_branch(self) -> str:
         return self._git("rev-parse", "--abbrev-ref", "HEAD").strip()

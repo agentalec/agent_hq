@@ -21,10 +21,15 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
-from engine.adapters._github import GitHubClient, git_credential_args, open_draft_pr, request_reviewers
+from engine.adapters._github import (
+    GitHubClient,
+    git_credential_args,
+    open_draft_pr,
+    request_reviewers,
+)
 from engine.models import TaskRun
 
 _BOT_NAME = "agent-hq[bot]"
@@ -60,8 +65,8 @@ def _child_env() -> dict:
 
 
 def _seconds_until(deadline_iso: str) -> float:
-    deadline = datetime.strptime(deadline_iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-    return (deadline - datetime.now(timezone.utc)).total_seconds()
+    deadline = datetime.strptime(deadline_iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    return (deadline - datetime.now(UTC)).total_seconds()
 
 
 def _result_is_error(stdout: str) -> bool:
@@ -110,15 +115,15 @@ class ClaudeCodeHeadless:
 
     def _git(self, *args: str, cwd: str | Path | None = None) -> str:
         result = subprocess.run(
-            ["git", *git_credential_args(), *args], cwd=cwd, capture_output=True, text=True
-        )
+            ["git", *git_credential_args(), *args], cwd=cwd, capture_output=True, text=True, check=False
+)
         if result.returncode != 0:
             raise RuntimeError(f"git {' '.join(args)} failed: {result.stderr}")
         return result.stdout
 
     def _commit_if_dirty(self, cwd: str | Path, message: str) -> None:
         self._git("add", "-A", cwd=cwd)
-        diff = subprocess.run(["git", "-C", str(cwd), "diff", "--cached", "--quiet"])
+        diff = subprocess.run(["git", "-C", str(cwd), "diff", "--cached", "--quiet"], check=False)
         if diff.returncode == 0:
             return
         self._git("commit", "-m", message, cwd=cwd)
@@ -258,8 +263,8 @@ class ClaudeCodeHeadless:
         push = subprocess.run(
             ["git", "-C", str(worktree), *git_credential_args(), "push", "origin",
              f"HEAD:refs/heads/{branch}"],
-            capture_output=True, text=True,
-        )
+            capture_output=True, text=True, check=False
+)
         if push.returncode == 0:
             return {"landed": True, "head": head}
 
@@ -317,8 +322,8 @@ class ClaudeCodeHeadless:
     def healthcheck(self) -> bool:
         try:
             result = subprocess.run(
-                [self.claude_bin, "--version"], capture_output=True, text=True, timeout=10
-            )
+                [self.claude_bin, "--version"], capture_output=True, text=True, timeout=10, check=False
+)
             return result.returncode == 0
         except (OSError, subprocess.TimeoutExpired):
             return False

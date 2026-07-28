@@ -132,8 +132,8 @@ class CopilotCli(ClaudeCodeHeadless):
     def healthcheck(self) -> bool:
         try:
             result = subprocess.run(
-                [self.copilot_bin, "version"], capture_output=True, text=True, timeout=10
-            )
+                [self.copilot_bin, "version"], capture_output=True, text=True, timeout=10, check=False
+)
             return result.returncode == 0
         except (OSError, subprocess.TimeoutExpired):
             return False

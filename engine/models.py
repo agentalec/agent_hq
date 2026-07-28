@@ -103,7 +103,7 @@ class Ticket:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Ticket":
+    def from_dict(cls, data: dict) -> Ticket:
         return cls(
             ticket_id=data["ticket_id"],
             pinned_comment_id=data.get("pinned_comment_id"),
@@ -142,7 +142,7 @@ class Handoff:
         return _to_dict_omit_none_optionals(self)
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Handoff":
+    def from_dict(cls, data: dict) -> Handoff:
         return cls(**data)
 
 

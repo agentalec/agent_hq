@@ -11,7 +11,7 @@ expiry deadline.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from engine.adapters._github import GitHubClient, open_draft_pr, request_reviewers
@@ -21,7 +21,7 @@ _DAY_ABBR = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _next_working_moment(
@@ -58,7 +58,7 @@ def add_working_hours(start_iso: str, hours: float, schedule: dict) -> str:
             f"start={start_hour}, end={end_hour}): no working time can ever elapse"
         )
 
-    start_dt = datetime.strptime(start_iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    start_dt = datetime.strptime(start_iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
     cur = _next_working_moment(start_dt.astimezone(tz), start_hour, end_hour, days)
 
     remaining = hours
@@ -75,7 +75,7 @@ def add_working_hours(start_iso: str, hours: float, schedule: dict) -> str:
             )
             cur = _next_working_moment(nxt, start_hour, end_hour, days)
 
-    return cur.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return cur.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 class PrReviewGate:
@@ -148,5 +148,5 @@ class PrReviewGate:
         try:
             self._client.get("/rate_limit")
             return True
-        except Exception:
+        except Exception:  # noqa: BLE001 -- any failure means unhealthy, by design
             return False

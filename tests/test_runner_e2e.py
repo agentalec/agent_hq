@@ -23,6 +23,7 @@ import json
 from pathlib import Path
 
 import pytest
+from test_state import _clone_worktree, _make_origin
 
 from engine.config import load_config
 from engine.engine import (
@@ -34,8 +35,8 @@ from engine.engine import (
 )
 from engine.models import GateDecision, GateRequest, GateStatus, TicketDetails
 from engine.runner import (
-    _latest_review_round,
     _expand_declared,
+    _latest_review_round,
     _ledger_image_urls,
     _run_setup,
     execute_dir_for,
@@ -45,7 +46,6 @@ from engine.runner import (
 )
 from engine.state import GitJsonStateStore
 from engine.taskdefs import load_all
-from test_state import _clone_worktree, _make_origin
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -567,7 +567,7 @@ def test_collect_opens_pr_records_pr_ref(config, taskdefs, store, tmp_path):
     assert runs["buildrun"]["state"] == "SUCCEEDED"
     assert runs["buildrun"]["pr_ref"] == "agentalec/care#1"
     assert len(agent.opened_prs) == 1
-    repo, branch, base, title, body = agent.opened_prs[0]
+    repo, branch, base, _title, body = agent.opened_prs[0]
     assert repo == "agentalec/care"
     assert branch == "agent-hq/7"  # stable per-issue branch, not per-run
     assert base == "develop"

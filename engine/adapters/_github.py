@@ -106,7 +106,9 @@ def git_credential_args() -> list[str]:
     if os.environ.get("AGENT_HQ_TOKEN"):
         return [
             "-c",
-            "credential.helper=!f(){ echo username=x-access-token; "
-            'echo "password=$AGENT_HQ_TOKEN"; };f',
+            (
+                "credential.helper=!f(){ echo username=x-access-token; "
+                'echo "password=$AGENT_HQ_TOKEN"; };f'
+            ),
         ]
     return []
