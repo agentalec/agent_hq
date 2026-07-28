@@ -17,6 +17,10 @@
     },
     "reason": {
       "type": "string"
+    },
+    "summary": {
+      "type": "string",
+      "description": "Conventional-Commits summary of what this run changed in the work repo. First line becomes the landed commit's subject, the rest its body. Omitted by a run that changed no files."
     }
   },
   "allOf": [
