@@ -21,14 +21,47 @@ An honest "the queue board needs a backend this repo has no setup command
 for" is worth more than a green tick that means nothing, and it tells the
 operator exactly which command to add.
 
-## Screenshot every user-facing change
+## Where your files go
 
-For each user-facing acceptance criterion in `spec.md`, navigate to the state
-it describes and capture a screenshot. Save each PNG to
-`specs/{ticket}/screenshots/<short-slug>.png`. That directory is a declared
-output, so the engine collects whatever you leave there — you do not need to
-commit them, and they deliberately stay out of the work repo, which is for
-product code only.
+**Everything you create except the screenshots goes under `.agent-hq/`** —
+driver scripts, throwaway fixtures, temp pages, downloaded data, all of it.
+That directory never reaches the work repo. Anything you leave anywhere else
+lands in the pull request: a previous run left eight scratch files and ~970
+lines of QA tooling in a product PR that way.
+
+Screenshots are the one exception: they go to
+`specs/{ticket}/screenshots/<short-slug>.png`, a declared output the engine
+collects for you. Do not commit anything.
+
+## Screenshot the real application
+
+For each user-facing acceptance criterion in `spec.md`, drive the **running
+application** to the state that criterion describes and screenshot it.
+
+This means the real app, at its real route, in a browser signed in with the
+session the setup step left you. **Full page** (`fullPage: true`), so the
+screenshot shows where in the product this is — navigation, header, the
+surrounding page. A reviewer has to be able to recognise the application in
+your screenshot; if it could be any web page, it is not evidence.
+
+Do **not**, under any circumstances:
+
+- build a standalone HTML page, harness, story, or demo that renders the
+  component or reimplements the logic, and screenshot that
+- screenshot a page you generated to illustrate the behaviour
+- reimplement the spec's rules in your own script and verify your
+  reimplementation agrees with itself
+
+Those prove only that you can restate the spec. A run did exactly this: it
+wrote its own HTML page with its own copy of the date maths, screenshotted it
+with a self-authored green tick, and reported every criterion as `pass`. The
+product was never opened. That is worse than no QA, because it looks like
+evidence.
+
+If you cannot reach the real page — the route needs data you cannot create,
+a flow you cannot complete, a role you do not have — that criterion is
+`not-exercised`, and you say exactly what stopped you. That is a perfectly
+good outcome. A substitute render is not.
 
 If the ticket touches responsive behavior, capture both viewports: desktop
 1440x900 and mobile 390x844, suffixed `-desktop` / `-mobile`.

@@ -112,6 +112,10 @@
         }
       }
     },
+    "writes_code": {
+      "type": "boolean",
+      "description": "Whether this task's worktree changes are product code. Default true. Set false for a task that only produces ledger artifacts (qa): the engine then discards its work patch entirely, so scratch files it leaves behind cannot reach the work repo no matter what its prompt said."
+    },
     "opens_pr": {
       "type": "boolean",
       "description": "Open (or reuse) a draft PR for agent-hq/<run_id> on success, independent of any approval gate."

@@ -879,6 +879,27 @@ def test_latest_review_round_returns_only_the_last_section():
     assert _latest_review_round("no round headers") == "no round headers"
 
 
+def test_execute_discards_the_patch_of_a_task_that_writes_no_code(
+    config, taskdefs, store, tmp_path
+):
+    """`writes_code: false` means scratch cannot reach the work repo even if
+    the agent ignores every instruction about where to put it -- qa left eight
+    driver scripts in a product PR when this was advisory only."""
+    taskdefs["spec"]["writes_code"] = False
+    _seed(store, _run_dict("specrun", "spec", state="RUNNING"))
+    prepare_dir_for(config, "specrun").mkdir(parents=True, exist_ok=True)
+    (prepare_dir_for(config, "specrun") / "bundle.json").write_text(json.dumps({
+        "prompt": "p", "tools": [], "deadline": None, "repo": "agentalec/care_fe",
+        "base_commit": "abc", "output_paths": [],
+    }))
+    agent = FakeAgent(tmp_path / "work")  # its materialize_work_patch returns "fake-patch"
+
+    run_task("specrun", "execute", config, taskdefs, store,
+             adapter_fn=_adapters(tracker=FakeTracker(_details()), agent=agent))
+
+    assert (execute_dir_for(config, "specrun") / "work.patch").read_text() == ""
+
+
 def test_run_setup_prepares_the_worktree_and_hides_credentials(tmp_path, monkeypatch):
     """The configured command runs in the worktree, before the agent, with the
     engine's credentials stripped -- it is operator config, not agent output,
