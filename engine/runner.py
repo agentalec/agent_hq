@@ -171,6 +171,28 @@ def _raw_image_urls(md: str, repo: str, commit: str) -> str:
     )
 
 
+def _commit_message(config, task_id: str, ticket_id: str, title: str, run_id: str) -> str:
+    """The message for the single commit a run lands on the work branch.
+
+    The agent's own per-criterion commits never reach the work repo: execute
+    transports a squashed diff against the run's base tag
+    (`materialize_work_patch`), so collect re-commits the lot as one commit.
+    That commit read `agent-hq: <run_id>` -- sixteen hex characters naming a
+    run in a repo the reader can't see. Subject says what changed; the run id
+    moves to a trailer, where provenance belongs.
+
+    ponytail: the subject is the ticket title, not the agent's own commit
+    subjects -- preserving those means transporting `git log` across the
+    execute/collect job boundary. Do that if a run's commits ever need to
+    land as more than one."""
+    engine_repo = intake_repo(config)
+    subject = f"{task_id}: {title.strip()}" if title.strip() else f"{task_id}: ticket {ticket_id}"
+    if len(subject) > 72:
+        subject = subject[:69].rstrip() + "..."
+    ticket_ref = f"{engine_repo}#{ticket_id}" if engine_repo else ticket_id
+    return f"{subject}\n\nagent-hq-ticket: {ticket_ref}\nagent-hq-run: {run_id}\n"
+
+
 def _write_parent_diff(worktree: Path, base: str | None, tip: str) -> bool:
     """Deterministically materialize the immediate parent's diff for
     read-only child tasks (review has no git tool): `.agent-hq/diff.patch` =
@@ -727,7 +749,10 @@ def _collect_success(
                 f"work patch failed to apply: {exc}",
             )
             return
-    land = agent.land_branch(run_id, collect_clone, branch, base_branch)
+    land = agent.land_branch(
+        run_id, collect_clone, branch, base_branch,
+        _commit_message(config, taskdef["id"], ticket_id, details.title, run_id),
+    )
 
     # PR is create-or-get: reuse a repo's already-recorded pr_ref (opened by
     # an earlier task on this same ticket/repo) rather than opening a

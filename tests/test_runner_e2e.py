@@ -131,8 +131,8 @@ class FakeAgent:
             raise RuntimeError(self.apply_patch_error)
         self.applied_patches.append(patch_text)
 
-    def land_branch(self, run_id, worktree, branch, base_branch):
-        self.landed.append((run_id, branch, base_branch))
+    def land_branch(self, run_id, worktree, branch, base_branch, message):
+        self.landed.append((run_id, branch, base_branch, message))
         if self.land_result is not None:
             return self.land_result
         return {"landed": True, "head": f"commit-{run_id}"}
@@ -555,6 +555,48 @@ def test_collect_opens_pr_records_pr_ref(config, taskdefs, store, tmp_path):
     assert repo == "agentalec/care"
     assert branch == "agent-hq/7"  # stable per-issue branch, not per-run
     assert base == "develop"
+
+
+def test_landed_commit_message_describes_the_work_not_the_run_id(
+    config, taskdefs, store, tmp_path
+):
+    """The one commit collect lands carries the ticket's subject, with the
+    run id demoted to a trailer -- a work-repo reader can't resolve a bare
+    run id, and the agent's own commits were squashed away by
+    `materialize_work_patch` long before this point."""
+    _seed(store, _run_dict("buildrun", "build", state="RUNNING"))
+    _stage(config, "buildrun", "impl/7.md", "the impl")
+    _write_execute_result(config, "buildrun")
+    _write_control(config, "buildrun", {"outcome": "complete"})
+    agent = FakeAgent(tmp_path / "work")
+    run_task("buildrun", "collect", config, taskdefs, store,
+             now_iso="2026-07-18T09:00:00Z",
+             adapter_fn=_adapters(tracker=FakeTracker(_details()), agent=agent))
+
+    _, _, _, message = agent.landed[0]
+    subject, _, trailers = message.partition("\n")
+    assert subject == "build: Add backend endpoint"
+    assert "buildrun" not in subject  # the run id is not the subject
+    assert "agent-hq-ticket: agentalec/agent_hq#7" in trailers
+    assert "agent-hq-run: buildrun" in trailers
+
+
+def test_long_ticket_title_is_truncated_in_the_commit_subject(
+    config, taskdefs, store, tmp_path
+):
+    _seed(store, _run_dict("buildrun", "build", state="RUNNING"))
+    _stage(config, "buildrun", "impl/7.md", "the impl")
+    _write_execute_result(config, "buildrun")
+    _write_control(config, "buildrun", {"outcome": "complete"})
+    agent = FakeAgent(tmp_path / "work")
+    details = _details(title="Add backend endpoint " * 10)
+    run_task("buildrun", "collect", config, taskdefs, store,
+             now_iso="2026-07-18T09:00:00Z",
+             adapter_fn=_adapters(tracker=FakeTracker(details), agent=agent))
+
+    subject = agent.landed[0][3].partition("\n")[0]
+    assert len(subject) <= 72
+    assert subject.endswith("...")
 
 
 def test_collect_reuses_stable_branch_and_pr_across_tasks(config, taskdefs, store, tmp_path):

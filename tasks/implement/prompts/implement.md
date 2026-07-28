@@ -14,11 +14,14 @@ repo -- another `implement` run handles those. For each criterion that
 applies:
 
 - write the code and its tests
-- commit with a Conventional Commits message (`feat:`, `fix:`, `test:`, ...)
+- commit it
 - keep the diff scoped to that criterion; don't fold in unrelated changes
 
 Never touch files outside your assigned repository. Commit as you go rather
-than batching everything into one commit at the end.
+than batching everything at the end -- it keeps your own working state
+recoverable. Your commits do not reach the work repo individually, though:
+the engine squashes this run into one commit and writes its message from the
+ticket, so don't spend effort composing them.
 
 When the work is committed, propose a single `review` handoff in your
 `.agent-hq/control.json` (see Control output below), forwarding
