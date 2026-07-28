@@ -171,6 +171,26 @@ def _raw_image_urls(md: str, repo: str, commit: str) -> str:
     )
 
 
+def _pr_body(config, ticket_id: str, ticket_body: str) -> str:
+    """A work-repo PR body: a link back to the agent-hq ticket that produced
+    it, above the ticket's own text. Whoever lands on the PR has to be able
+    to find the ticket -- the code lives in a work repo, the ticket lives in
+    the engine repo, and nothing else on the PR names it.
+
+    A plain reference, never a `Closes` keyword: the engine closes the issue
+    itself once the whole ticket finishes (`_complete_if_queue_empty`), and
+    one ticket can open a PR per work repo, so merging any single PR must not
+    close it. `ticket_body` is untrusted tracker content -- unchanged from
+    before, it was already the entire body."""
+    engine_repo = intake_repo(config)
+    ref = (
+        f"[{engine_repo}#{ticket_id}](https://github.com/{engine_repo}/issues/{ticket_id})"
+        if engine_repo
+        else f"`{ticket_id}`"
+    )
+    return f"agent-hq ticket: {ref}\n\n---\n\n{ticket_body}"
+
+
 def _write_parent_diff(worktree: Path, base: str | None, tip: str) -> bool:
     """Deterministically materialize the immediate parent's diff for
     read-only child tasks (review has no git tool): `.agent-hq/diff.patch` =
@@ -740,7 +760,8 @@ def _collect_success(
     pr_ref = (existing_work_repo or {}).get("pr_ref")
     if land["landed"] and taskdef.get("opens_pr") and not pr_ref:
         pr_ref = agent.open_draft_pr(
-            repo, branch, base_branch, details.title or f"hq: {ticket_id}", details.body,
+            repo, branch, base_branch, details.title or f"hq: {ticket_id}",
+            _pr_body(config, ticket_id, details.body),
         )
 
     result: dict = {}

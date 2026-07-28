@@ -555,6 +555,12 @@ def test_collect_opens_pr_records_pr_ref(config, taskdefs, store, tmp_path):
     assert repo == "agentalec/care"
     assert branch == "agent-hq/7"  # stable per-issue branch, not per-run
     assert base == "develop"
+    # The PR names the engine-repo ticket it came from -- the work repo has
+    # nothing else pointing back at it. A reference, never a closing keyword:
+    # the engine closes the issue itself, and one ticket can open several PRs.
+    assert "[agentalec/agent_hq#7](https://github.com/agentalec/agent_hq/issues/7)" in body
+    assert "closes" not in body.lower()
+    assert _LONG_BODY in body  # the ticket's own text still rides along
 
 
 def test_collect_reuses_stable_branch_and_pr_across_tasks(config, taskdefs, store, tmp_path):
