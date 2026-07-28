@@ -93,11 +93,14 @@ CI (`.github/workflows/ci.yml`) runs all five; a change isn't done until all pas
   a schema-invalid document fails the run, it is never silently ignored.
   Declared `outputs.artifacts` are ledger artifacts
   (`tickets/<id>/artifacts/<run_id>/`, `engine/state.py`
-  `write_artifact`/`read_artifact`) — persisted per producing run, restored
-  into a child only from its source (parent) run's namespace, and excluded
-  from the work-repo patch/commit. Every artifact path a handoff proposes is
-  containment-checked (no absolute path, `..`, or symlink escape) before
-  it's trusted (`engine/handoff.py`).
+  `write_artifact`/`read_artifact`) — persisted per producing run as **bytes**
+  (not all artifacts are text), restored into a child only from its source
+  (parent) run's namespace, and excluded from the work-repo patch/commit. An
+  entry ending in `/` is a directory artifact: the engine collects whatever
+  files it holds, zero or more, for output a task can't name in advance
+  (`engine/runner.py:_expand_declared`); plain entries stay required. Every
+  artifact path a handoff proposes is containment-checked (no absolute path,
+  `..`, or symlink escape) before it's trusted (`engine/handoff.py`).
 - `schemas/state.schema.json`/`event.schema.json`/`control.schema.json`/
   `execute-result.schema.json` and the dataclasses in `engine/models.py`
   must stay in sync (`tests/test_models.py`, `tests/test_schemas_valid.py`
@@ -105,6 +108,12 @@ CI (`.github/workflows/ci.yml`) runs all five; a change isn't done until all pas
 - Deviations from the requirements are ledgered in `docs/architecture.md`
   ("Deviation ledger"); deferred machinery lives in `docs/roadmap.md` with a
   restore trigger — don't re-add it without one.
+- Before building a feature, read `ROADMAP.md` "Planned" and
+  `docs/roadmap.md` — the work is often already sequenced there, sequenced
+  *behind* something else, or deferred with a restore trigger that hasn't
+  fired. Build what those say is next. If what's being asked contradicts
+  them, or the roadmap is silent, say so and get a decision before writing
+  code — shipping out of order is how the roadmap quietly stops being true.
 - Every new feature gets a row in `ROADMAP.md` ("Shipped") in the same
   change that ships it — one line, what it is and where it lives. If it was
   listed under "Planned" there (or deferred in `docs/roadmap.md`), drop that

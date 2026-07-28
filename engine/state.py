@@ -97,7 +97,7 @@ class Txn:
         self._tickets: dict[str, dict] = {}
         self._new_events: dict[str, list[dict]] = {}
         self._health: dict | None = None
-        self._artifacts: dict[tuple[str, str], dict[str, str]] = {}
+        self._artifacts: dict[tuple[str, str], dict[str, bytes]] = {}
         self.dirty_tickets: set[str] = set()
         self.dirty_events: set[str] = set()
         self.dirty_health = False
@@ -156,7 +156,7 @@ class Txn:
         self._health[f"{port}/{adapter}"] = {"ok": ok, "detail": detail, "ts": _now_iso()}
         self.dirty_health = True
 
-    def write_artifact(self, ticket_id: str, run_id: str, rel_path: str, content: str) -> None:
+    def write_artifact(self, ticket_id: str, run_id: str, rel_path: str, content: bytes) -> None:
         """Stage a ledger-artifact file under tickets/<id>/artifacts/<run_id>/,
         namespaced by the PRODUCING run so a later sibling handoff's child can
         never overwrite a shared path. Flushed and committed by `write()`
@@ -259,11 +259,26 @@ class GitJsonStateStore:
     def artifacts_dir(self, ticket_id: str, run_id: str) -> Path:
         return self.worktree_path / _ARTIFACTS_DIR.format(ticket_id=ticket_id, run_id=run_id)
 
-    def read_artifact(self, ticket_id: str, run_id: str, rel_path: str) -> str | None:
+    def read_artifact(self, ticket_id: str, run_id: str, rel_path: str) -> bytes | None:
+        """Raw bytes -- ledger artifacts are not all text. A directory
+        artifact (see `engine.runner._expand_declared`) holds whatever the
+        producing run put there, screenshots included."""
         path = self.artifacts_dir(ticket_id, run_id) / rel_path
         if not path.exists():
             return None
-        return path.read_text()
+        return path.read_bytes()
+
+    def read_artifact_text(self, ticket_id: str, run_id: str, rel_path: str) -> str | None:
+        """`read_artifact` for the callers that want text (review.md,
+        summary.md). Undecodable bytes read as None rather than raising --
+        a caller asking a PNG for its text gets "no text", not a crash."""
+        raw = self.read_artifact(ticket_id, run_id, rel_path)
+        if raw is None:
+            return None
+        try:
+            return raw.decode()
+        except UnicodeDecodeError:
+            return None
 
     def healthcheck(self) -> bool:
         return self.worktree_path.exists() and bool(self._git("remote").strip())
@@ -313,7 +328,7 @@ class GitJsonStateStore:
             for rel_path, content in files.items():
                 path = base / rel_path
                 path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(content)
+                path.write_bytes(content)
         if txn.dirty_health:
             path = self._health_path()
             path.parent.mkdir(parents=True, exist_ok=True)

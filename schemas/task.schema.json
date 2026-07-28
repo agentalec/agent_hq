@@ -104,6 +104,7 @@
       "additionalProperties": false,
       "properties": {
         "artifacts": {
+          "description": "Ledger artifacts this task produces. A plain path is a REQUIRED file -- a run that does not produce it fails. A path ending in '/' is a DIRECTORY artifact: the engine collects whatever files it holds, zero or more, for output a task cannot name in advance (qa's screenshots). Directory artifacts are never required.",
           "type": "array",
           "items": {
             "type": "string"

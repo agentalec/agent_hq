@@ -139,7 +139,18 @@ There is exactly one artifact namespace and one input source:
   accepted handoff forwards an artifact the run itself only *inherited*
   (e.g. `arch-plan` -> `breakdown` forwarding `spec.md`), collect also
   snapshots that file into the *source* run's own ledger directory, so a
-  transitive handoff still resolves.
+  transitive handoff still resolves. Artifacts are stored as **bytes** --
+  they are not all text (`qa`'s screenshots), and anything that inlines one
+  into a comment decodes it, skipping what has no text.
+- **Directory artifacts.** An `outputs.artifacts` entry ending in `/` is a
+  directory: the engine collects whatever files it holds, recursively, zero
+  or more (`engine.runner._expand_declared`). Use it for output a task cannot
+  name in advance -- `qa` writes one screenshot per acceptance criterion it
+  managed to exercise, which is not a list anyone can write into `task.yml`.
+  Unlike a plain entry they are never *required*: an empty or absent
+  directory is a valid run. They expand to concrete paths before anything is
+  recorded, so `run.artifacts`, handoff forwarding, and `_inputs_ready` only
+  ever see real files -- nothing downstream knows the convention exists.
 - **Input artifacts** on a handoff-spawned run
   (`run.input_artifacts`, copied from the accepted handoff's `artifacts[]`
   at apply time) are the run's **only** input source -- there is no
@@ -265,7 +276,7 @@ no terminal action.
 | clinical | Converted, defined, **unwired** until an accepted handoff selects it -- its own header names the one-line activation edit (point `spec`'s `handoff.allowed` at it). Gated (`clinical-reviewers`, `default` adapter). |
 | poll | Converted, defined, **unwired** -- needs the P1 reaction-based `poll` adapter (`docs/roadmap.md`); no task currently hands off to it. |
 | docs | Converted, defined, **unwired** until an accepted handoff selects it (its header names the activation edit: point `qa`'s `handoff.allowed` at it). |
-| qa | Converted (wired). `handoff.allowed: [finalize]`, always -- `qa` reports, it never gates. Stands the app up with the work repo's own tooling inside the devcontainer and screenshots each acceptance criterion; it declares **no** `components` port, so the deferred `qa-env` binding (`docs/ports/qa-env.md`) is still not required. Screenshots are work-repo files under `qa-screenshots/{ticket}/`, not ledger artifacts -- they land in the run's own patch, and collect rewrites `qa.md`'s repo-relative image links to raw URLs on that commit before posting it to the PR (`engine.runner._raw_image_urls`). |
+| qa | Converted (wired). `handoff.allowed: [finalize]`, always -- `qa` reports, it never gates. Stands the app up with the work repo's own tooling inside the devcontainer and screenshots each acceptance criterion; it declares **no** `components` port, so the deferred `qa-env` binding (`docs/ports/qa-env.md`) is still not required. Screenshots are ledger artifacts under the **directory artifact** `specs/{ticket}/screenshots/` -- kept out of the work repo, which is for product code -- and collect rewrites `qa.md`'s relative image links to their state-branch URLs before posting it to the PR (`engine.runner._ledger_image_urls`). |
 
 None of the above is a name the engine special-cases; every row describes a
 task-graph state (wired vs. defined-but-unwired), not an engine code path.
