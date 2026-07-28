@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from engine import state
 from engine.state import GitJsonStateStore, Txn
 
 BRANCH = "agent-hq-state"
@@ -356,6 +357,37 @@ def test_rejected_push_replay_converges_within_bounded_attempts(tmp_path, monkey
     assert calls["n"] == 3  # two simulated rejections, converges on the third
     check = _clone_worktree(tmp_path, origin, "check")
     assert (check / "tickets" / "ticket-1" / "state.json").exists()
+
+
+def test_replay_gives_up_loudly_after_the_bounded_attempts(tmp_path, monkeypatch):
+    """A writer that never wins the CAS raises rather than silently dropping
+    its write. The bound is what makes the replay safe to lean on now that the
+    credentialed jobs no longer pre-serialize themselves."""
+    origin = _make_origin(tmp_path)
+    store = GitJsonStateStore(_clone_worktree(tmp_path, origin, "wt1"))
+    calls = {"n": 0}
+
+    def always_rejected():
+        calls["n"] += 1
+        return subprocess.CompletedProcess(
+            args=["git", "push", "--porcelain"],
+            returncode=1,
+            stdout=(
+                "To origin\n"
+                "!\trefs/heads/agent-hq-state:refs/heads/agent-hq-state\t"
+                "[rejected] (non-fast-forward)\n"
+                "Done\n"
+            ),
+            stderr="still contended",
+        )
+
+    monkeypatch.setattr(store, "_push", always_rejected)
+    monkeypatch.setattr(state, "_retry_backoff_seconds", lambda attempt: 0)
+
+    with pytest.raises(RuntimeError, match="rejected after"):
+        store.write(lambda txn: txn.set_ticket("ticket-1", status="ACTIVE", pinned_comment_id=None))
+
+    assert calls["n"] == state._MAX_WRITE_ATTEMPTS
 
 
 def test_push_failure_that_is_not_a_rejection_fails_fast(tmp_path, monkeypatch):

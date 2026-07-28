@@ -12,8 +12,12 @@ permissions:
   contents: write
   issues: write
 
+# Dispatch is the one job that genuinely wants to be alone -- two concurrent
+# sweeps duplicate work and contend for nothing useful. Renamed off the shared
+# `agent-hq-state` key now that no other workflow takes it: the old name
+# implied a cross-workflow lock that no longer exists.
 concurrency:
-  group: agent-hq-state
+  group: agent-hq-dispatch
   cancel-in-progress: false
 
 env:

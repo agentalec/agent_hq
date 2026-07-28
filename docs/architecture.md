@@ -328,12 +328,14 @@ Summarized here so this doc is self-contained:
 4. **Fine-grained PAT, not a GitHub App** — one `AGENT_HQ_TOKEN` secret
    scoped to the pilot repos, not a dedicated least-privilege App
    installation.
-5. **Serialized state writes, not transactions** — the `agent-hq-state`
-   Actions concurrency group is still the primary concurrency control (D5).
-   The hardening plan (Task 7) adds a bounded fetch/reset/reapply replay
-   (`engine.state.GitJsonStateStore.write`, `_MAX_WRITE_ATTEMPTS`) as a
-   safety net on a confirmed non-fast-forward push rejection, not a
-   general-purpose transaction/conflict-resolution layer.
+5. **Replayed state writes, not transactions** — the bounded
+   fetch/reset/reapply replay (`engine.state.GitJsonStateStore.write`,
+   `_MAX_WRITE_ATTEMPTS`) on a confirmed non-fast-forward push rejection is
+   the concurrency control (D5), not a general-purpose
+   transaction/conflict-resolution layer. It was originally specified as a
+   safety net *behind* a shared `agent-hq-state` Actions concurrency group;
+   that group was removed once it proved to cancel bursts of pending runs
+   (`docs/operations.md` §11), leaving the replay as the whole mechanism.
 6. **Minimal dashboard** — one static state table (ticket/run, spend,
    artifact/PR links, waiting-on-humans), not the full kanban/timeline/spend
    breakdown view.
