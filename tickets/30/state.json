@@ -342,7 +342,8 @@
         "specs/30/qa.md"
       ],
       "deadline": "2026-07-28T15:44:20Z",
-      "attempt_started_at": "2026-07-28T15:29:20Z"
+      "attempt_started_at": "2026-07-28T15:29:20Z",
+      "base_commit": "de3607fef2ac4b7428a329140824ba17721959d2"
     }
   ],
   "work_repos": [
