@@ -10,3 +10,4 @@
 {"event_id": "f9dec7d0fa362389:queued", "kind": "run.queued", "ticket_id": "30", "run_id": "f9dec7d0fa362389", "task_id": "review", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "148ba5d36ed63ece:review:accepted", "kind": "handoff.accepted", "ticket_id": "30", "run_id": "148ba5d36ed63ece", "detail": "Implementation complete: clinical age format with tooltip on encounter card"}
 {"event_id": "148ba5d36ed63ece:succeeded", "kind": "run.succeeded", "ticket_id": "30", "run_id": "148ba5d36ed63ece", "state": "SUCCEEDED", "artifacts": []}
+{"event_id": "f9dec7d0fa362389:collected", "kind": "run.collected", "ticket_id": "30", "run_id": "f9dec7d0fa362389", "cost_usd": 0.0}
