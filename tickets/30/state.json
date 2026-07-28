@@ -243,6 +243,31 @@
       "deadline": "2026-07-28T15:17:30Z",
       "attempt_started_at": "2026-07-28T14:17:30Z",
       "base_commit": "05920756b792e9cf744b4f4da81def3c578ef898"
+    },
+    {
+      "run_id": "6511d7146fa409a1",
+      "task_id": "qa",
+      "task_version": 1,
+      "ticket_id": "30",
+      "state": "QUEUED",
+      "attempt": 1,
+      "bindings": {
+        "tracker": "github-issues",
+        "agent-session": "copilot-cli",
+        "messaging": "github-comment"
+      },
+      "cost_usd": null,
+      "tokens": null,
+      "usage_known": false,
+      "artifacts": [],
+      "chain_depth": 7,
+      "parent_run_id": "8c13c392def32f14",
+      "handoff_key": "qa-1",
+      "repo": "agentalec/care_fe",
+      "input_artifacts": [
+        "specs/30/spec.md",
+        "specs/30/review.md"
+      ]
     }
   ],
   "work_repos": [
