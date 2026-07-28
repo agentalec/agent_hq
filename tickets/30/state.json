@@ -127,7 +127,7 @@
       "task_id": "review",
       "task_version": 1,
       "ticket_id": "30",
-      "state": "QUEUED",
+      "state": "RUNNING",
       "attempt": 0,
       "bindings": {
         "tracker": "github-issues",
@@ -145,7 +145,9 @@
       "input_artifacts": [
         "specs/30/spec.md",
         "specs/30/review.md"
-      ]
+      ],
+      "deadline": "2026-07-28T14:26:57Z",
+      "attempt_started_at": "2026-07-28T13:56:57Z"
     }
   ],
   "work_repos": [
