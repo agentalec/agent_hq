@@ -237,18 +237,23 @@ class ClaudeCodeHeadless:
         except RuntimeError:
             return None
 
-    def land_branch(self, run_id: str, worktree: str | Path, branch: str, base_branch: str) -> dict:
-        """Commit the applied patch (if dirty) and fast-forward-push onto
-        the ticket's stable `branch` (created from `base_branch` on the
-        first push -- Task 12). A plain fast-forward push IS the lease:
-        every attempt is built on the branch's last recorded head, so a
-        rejection means someone moved it since. On rejection, fetch the
-        remote tip and compare its tree/parent to this attempt's own --
-        identical content from a retried (fresh-timestamp) attempt is
-        adopted (`landed: True`, the remote head); a real divergence is
-        reported (`landed: False`) for the caller to block."""
+    def land_branch(
+        self, run_id: str, worktree: str | Path, branch: str, base_branch: str, message: str
+    ) -> dict:
+        """Commit the applied patch (if dirty) under `message` and
+        fast-forward-push onto the ticket's stable `branch` (created from
+        `base_branch` on the first push -- Task 12). A plain fast-forward
+        push IS the lease: every attempt is built on the branch's last
+        recorded head, so a rejection means someone moved it since. On
+        rejection, fetch the remote tip and compare its tree/parent to this
+        attempt's own -- identical content from a retried (fresh-timestamp)
+        attempt is adopted (`landed: True`, the remote head); a real
+        divergence is reported (`landed: False`) for the caller to block.
+
+        `message` comes from the caller, not from here: this is the commit a
+        work-repo reader sees, and the adapter knows only a run id."""
         worktree = Path(worktree)
-        self._commit_if_dirty(worktree, f"agent-hq: {run_id}")
+        self._commit_if_dirty(worktree, message)
         head = self._git("rev-parse", "HEAD", cwd=worktree).strip()
         push = subprocess.run(
             ["git", "-C", str(worktree), *git_credential_args(), "push", "origin",

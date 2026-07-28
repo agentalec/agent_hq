@@ -319,7 +319,7 @@ def test_land_branch_creates_branch_then_fast_forwards_a_later_attempt(monkeypat
 
     first = executor.prepare_worktree("run-1", "o/r", base_commit)
     (first / "a.py").write_text("a\n")
-    landed_1 = executor.land_branch("run-1", first, "agent-hq/7", "main")
+    landed_1 = executor.land_branch("run-1", first, "agent-hq/7", "main", "build: first")
     assert landed_1["landed"] is True
 
     check = tmp_path / "check-1"
@@ -331,7 +331,7 @@ def test_land_branch_creates_branch_then_fast_forwards_a_later_attempt(monkeypat
     # its push is a plain fast-forward onto the same branch.
     second = executor.prepare_worktree("run-2", "o/r", landed_1["head"])
     (second / "b.py").write_text("b\n")
-    landed_2 = executor.land_branch("run-2", second, "agent-hq/7", "main")
+    landed_2 = executor.land_branch("run-2", second, "agent-hq/7", "main", "build: second")
     assert landed_2["landed"] is True
     assert landed_2["head"] != landed_1["head"]
 
@@ -361,14 +361,14 @@ def test_land_branch_adopts_identical_retry_and_blocks_a_real_conflict(monkeypat
     # matches, so it's adopted rather than blocked.
     ours = executor.prepare_worktree("run-adopt", "o/r", base_commit)
     (ours / "same.py").write_text("same\n")
-    landed = executor.land_branch("run-adopt", ours, "agent-hq/9", "main")
+    landed = executor.land_branch("run-adopt", ours, "agent-hq/9", "main", "build: adopt")
     assert landed == {"landed": True, "head": zombie_head}
 
     # A real conflict (different content from the same base) is reported,
     # never force-pushed over.
     conflicting = executor.prepare_worktree("run-conflict", "o/r", base_commit)
     (conflicting / "same.py").write_text("different\n")
-    blocked = executor.land_branch("run-conflict", conflicting, "agent-hq/9", "main")
+    blocked = executor.land_branch("run-conflict", conflicting, "agent-hq/9", "main", "build: conflict")
     assert blocked["landed"] is False
     assert blocked["remote_head"] == zombie_head
 
