@@ -216,26 +216,32 @@ def _pr_body(config, ticket_id: str, ticket_body: str) -> str:
     return f"agent-hq ticket: {ref}\n\n---\n\n{ticket_body}"
 
 
-def _commit_message(config, task_id: str, ticket_id: str, title: str, run_id: str) -> str:
+def _commit_message(
+    config, task_id: str, ticket_id: str, summary: str, title: str, run_id: str
+) -> str:
     """The message for the single commit a run lands on the work branch.
 
     The agent's own per-criterion commits never reach the work repo: execute
     transports a squashed diff against the run's base tag
     (`materialize_work_patch`), so collect re-commits the lot as one commit.
-    That commit read `agent-hq: <run_id>` -- sixteen hex characters naming a
-    run in a repo the reader can't see. Subject says what changed; the run id
-    moves to a trailer, where provenance belongs.
+    Its message is the agent's `control.summary` -- the run describing what it
+    changed, which is the only thing here that knows. Everything else the
+    engine could reach for (a run id, the ticket title) describes the *request*
+    rather than the change, and a work-repo reader can resolve neither.
 
-    ponytail: the subject is the ticket title, not the agent's own commit
-    subjects -- preserving those means transporting `git log` across the
-    execute/collect job boundary. Do that if a run's commits ever need to
-    land as more than one."""
+    A summary's first line is the subject, the rest its body; the ticket and
+    run become trailers. Falls back to the ticket title for a run that
+    declared no summary -- a stale-but-honest subject beats a hex run id."""
     engine_repo = intake_repo(config)
-    subject = f"{task_id}: {title.strip()}" if title.strip() else f"{task_id}: ticket {ticket_id}"
+    subject, _, body = summary.strip().partition("\n")
+    if not subject:
+        subject = f"{task_id}: {title.strip() or f'ticket {ticket_id}'}"
     if len(subject) > 72:
         subject = subject[:69].rstrip() + "..."
     ticket_ref = f"{engine_repo}#{ticket_id}" if engine_repo else ticket_id
-    return f"{subject}\n\nagent-hq-ticket: {ticket_ref}\nagent-hq-run: {run_id}\n"
+    trailers = f"agent-hq-ticket: {ticket_ref}\nagent-hq-run: {task_id} {run_id}\n"
+    blocks = [subject, body.strip(), trailers] if body.strip() else [subject, trailers]
+    return "\n\n".join(blocks)
 
 
 def _write_parent_diff(worktree: Path, base: str | None, tip: str) -> bool:
@@ -334,6 +340,15 @@ def _assemble_prompt(
             "Before finishing, write `.agent-hq/control.json` -- exactly one JSON object:",
             '- `{"outcome": "complete"}` if this task is done with nothing further to hand off.',
             '- `{"outcome": "blocked", "reason": "..."}` if you cannot proceed.',
+            "",
+            (
+                "If you changed any file in the work repo, add a `summary`: a "
+                "Conventional Commits description of what you changed (`feat: add the "
+                "patient-age formatter`), first line under 72 characters, optional body "
+                "after a blank line. It becomes the message of the commit your work "
+                "lands as -- your own commits are squashed into it, so this is the only "
+                "description that survives. Describe the change, not the ticket."
+            ),
         ]
         if allowed and max_handoffs:
             control_lines.append(
@@ -927,7 +942,9 @@ def _collect_success(
             return
     land = agent.land_branch(
         run_id, collect_clone, branch, base_branch,
-        _commit_message(config, taskdef["id"], ticket_id, details.title, run_id),
+        _commit_message(
+            config, taskdef["id"], ticket_id, control.get("summary", ""), details.title, run_id
+        ),
     )
 
     # PR is create-or-get: reuse a repo's already-recorded pr_ref (opened by

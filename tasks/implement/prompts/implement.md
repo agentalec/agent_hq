@@ -19,9 +19,10 @@ applies:
 
 Never touch files outside your assigned repository. Commit as you go rather
 than batching everything at the end -- it keeps your own working state
-recoverable. Your commits do not reach the work repo individually, though:
-the engine squashes this run into one commit and writes its message from the
-ticket, so don't spend effort composing them.
+recoverable. Your commits are squashed into one before they reach the work
+repo, so the message that ends up on the branch is the `summary` you write in
+`.agent-hq/control.json` (see Control output below) -- describe what you
+actually changed there, not what the ticket asked for.
 
 When the work is committed, propose a single `review` handoff in your
 `.agent-hq/control.json` (see Control output below), forwarding

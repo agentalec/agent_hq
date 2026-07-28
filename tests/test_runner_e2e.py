@@ -579,44 +579,48 @@ def test_collect_opens_pr_records_pr_ref(config, taskdefs, store, tmp_path):
     assert _LONG_BODY in body  # the ticket's own text still rides along
 
 
-def test_landed_commit_message_describes_the_work_not_the_run_id(
-    config, taskdefs, store, tmp_path
-):
-    """The one commit collect lands carries the ticket's subject, with the
-    run id demoted to a trailer -- a work-repo reader can't resolve a bare
-    run id, and the agent's own commits were squashed away by
-    `materialize_work_patch` long before this point."""
+def _landed_message(config, taskdefs, store, tmp_path, control, details=None):
     _seed(store, _run_dict("buildrun", "build", state="RUNNING"))
     _stage(config, "buildrun", "impl/7.md", "the impl")
     _write_execute_result(config, "buildrun")
-    _write_control(config, "buildrun", {"outcome": "complete"})
+    _write_control(config, "buildrun", control)
     agent = FakeAgent(tmp_path / "work")
     run_task("buildrun", "collect", config, taskdefs, store,
              now_iso="2026-07-18T09:00:00Z",
-             adapter_fn=_adapters(tracker=FakeTracker(_details()), agent=agent))
-
-    _, _, _, message = agent.landed[0]
-    subject, _, trailers = message.partition("\n")
-    assert subject == "build: Add backend endpoint"
-    assert "buildrun" not in subject  # the run id is not the subject
-    assert "agent-hq-ticket: agentalec/agent_hq#7" in trailers
-    assert "agent-hq-run: buildrun" in trailers
+             adapter_fn=_adapters(tracker=FakeTracker(details or _details()), agent=agent))
+    return agent.landed[0][3]
 
 
-def test_long_ticket_title_is_truncated_in_the_commit_subject(
+def test_landed_commit_message_is_the_run_s_own_summary(config, taskdefs, store, tmp_path):
+    """The commit collect lands describes what the run changed, in the run's
+    own words -- the agent's per-criterion commits are squashed by
+    `materialize_work_patch`, so `control.summary` is the only description
+    that survives to the work repo. Ticket and run id are trailers."""
+    message = _landed_message(config, taskdefs, store, tmp_path, {
+        "outcome": "complete",
+        "summary": "feat: add the patient-age formatter\n\nCovers the under-1y case.",
+    })
+    subject, _, rest = message.partition("\n")
+    assert subject == "feat: add the patient-age formatter"
+    assert "Covers the under-1y case." in rest
+    assert "Add backend endpoint" not in message  # not the ticket title
+    assert "agent-hq-ticket: agentalec/agent_hq#7" in rest
+    assert "agent-hq-run: build buildrun" in rest
+
+
+def test_landed_commit_falls_back_to_the_ticket_when_no_summary(
     config, taskdefs, store, tmp_path
 ):
-    _seed(store, _run_dict("buildrun", "build", state="RUNNING"))
-    _stage(config, "buildrun", "impl/7.md", "the impl")
-    _write_execute_result(config, "buildrun")
-    _write_control(config, "buildrun", {"outcome": "complete"})
-    agent = FakeAgent(tmp_path / "work")
-    details = _details(title="Add backend endpoint " * 10)
-    run_task("buildrun", "collect", config, taskdefs, store,
-             now_iso="2026-07-18T09:00:00Z",
-             adapter_fn=_adapters(tracker=FakeTracker(details), agent=agent))
+    """A run that declares no summary still beats a bare run id."""
+    message = _landed_message(config, taskdefs, store, tmp_path, {"outcome": "complete"})
+    assert message.partition("\n")[0] == "build: Add backend endpoint"
 
-    subject = agent.landed[0][3].partition("\n")[0]
+
+def test_long_commit_subject_is_truncated(config, taskdefs, store, tmp_path):
+    message = _landed_message(config, taskdefs, store, tmp_path, {
+        "outcome": "complete", "summary": "feat: " + "add the patient-age formatter " * 5,
+    })
+    subject = message.partition("\n")[0]
     assert len(subject) <= 72
     assert subject.endswith("...")
 

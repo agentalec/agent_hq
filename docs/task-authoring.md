@@ -122,10 +122,18 @@ schema-invalid means the run *fails* per its own retry budget, never
   required; the run is recorded blocked and the ticket moves to `BLOCKED`
   with that reason, escalating to a human with no auto-retry.
 
+Any outcome may also carry `summary` -- a Conventional Commits description of
+what the run changed in the work repo. Its first line becomes the subject of
+the commit the run lands, the rest the body; the ticket reference and run id
+are appended as trailers. A run's own commits are squashed into that single
+commit by `materialize_work_patch`, so `summary` is the only description that
+reaches the work repo. A run that changed no files can omit it (collect falls
+back to the ticket title).
+
 `engine.runner._assemble_prompt` injects this contract into every prompt
-automatically (the required outcome shapes, this task's own
-`handoff.allowed`/`max`, and the output path) -- a task never needs to spell
-this out itself, and it does not depend on the task including
+automatically (the required outcome shapes, the `summary` convention, this
+task's own `handoff.allowed`/`max`, and the output path) -- a task never needs
+to spell this out itself, and it does not depend on the task including
 `constitution.md` in `context`.
 
 ## Artifact namespace: ledger vs. work-patch
