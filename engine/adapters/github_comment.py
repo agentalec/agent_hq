@@ -52,5 +52,5 @@ class GithubCommentMessaging:
         try:
             self._client.get("/rate_limit")
             return True
-        except Exception:
+        except Exception:  # noqa: BLE001 -- any failure means unhealthy, by design
             return False

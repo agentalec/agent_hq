@@ -136,8 +136,10 @@ def test_git_credential_args_with_and_without_env(monkeypatch):
     args = _github.git_credential_args()
     assert args == [
         "-c",
-        "credential.helper=!f(){ echo username=x-access-token; "
-        'echo "password=$AGENT_HQ_TOKEN"; };f',
+        (
+            "credential.helper=!f(){ echo username=x-access-token; "
+            'echo "password=$AGENT_HQ_TOKEN"; };f'
+        ),
     ]
     monkeypatch.delenv("AGENT_HQ_TOKEN", raising=False)
     assert _github.git_credential_args() == []

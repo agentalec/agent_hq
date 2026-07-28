@@ -32,21 +32,21 @@ CONFIG = Config(
 
 
 def _run(**overrides) -> TaskRun:
-    kwargs = dict(
-        run_id="src-1",
-        task_id="spec",
-        task_version=1,
-        ticket_id=TICKET_ID,
-        state=RunState.RUNNING,
-        attempt=1,
-        bindings={},
-        cost_usd=None,
-        tokens=None,
-        usage_known=False,
-        artifacts=[],
-        chain_depth=0,
-        input_artifacts=["specs/T-1/plan.md"],
-    )
+    kwargs = {
+        "run_id": "src-1",
+        "task_id": "spec",
+        "task_version": 1,
+        "ticket_id": TICKET_ID,
+        "state": RunState.RUNNING,
+        "attempt": 1,
+        "bindings": {},
+        "cost_usd": None,
+        "tokens": None,
+        "usage_known": False,
+        "artifacts": [],
+        "chain_depth": 0,
+        "input_artifacts": ["specs/T-1/plan.md"],
+    }
     kwargs.update(overrides)
     return TaskRun(**kwargs)
 

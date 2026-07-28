@@ -16,7 +16,7 @@ itself, in the same write that advances the run.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from engine.adapters._github import GitHubClient
 from engine.adapters.pr_review import add_working_hours
@@ -41,7 +41,7 @@ _STATUS_BY_COMMAND = {
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _parse_decision(body: str, run_id: str) -> tuple[str, str] | None:
@@ -159,8 +159,10 @@ class GithubIssueCommentGate:
             heading = f"### Gate auto-approved: `{subject.get('task_id', '')}` ({run_id})"
             footer = [
                 "",
-                f"_Decided by task config (`auto_approve`), not by a human. Would "
-                f"otherwise have asked `{group}`. No action needed._",
+                (
+                    "_Decided by task config (`auto_approve`), not by a human. Would "
+                    f"otherwise have asked `{group}`. No action needed._"
+                ),
             ]
         else:
             heading = f"### Approval requested: `{subject.get('task_id', '')}` ({run_id})"
@@ -173,8 +175,10 @@ class GithubIssueCommentGate:
                 "- `/agent-hq request-changes <reason>`",
                 "- `/agent-hq reject <reason>`",
                 "",
-                f"<sub>Decides the gate open on this ticket. Add the run id "
-                f"(`/agent-hq approve {run_id}`) to be explicit.</sub>",
+                (
+                    "<sub>Decides the gate open on this ticket. Add the run id "
+                    f"(`/agent-hq approve {run_id}`) to be explicit.</sub>"
+                ),
             ]
 
         body = "\n".join(
@@ -237,5 +241,5 @@ class GithubIssueCommentGate:
         try:
             self._client.get("/rate_limit")
             return True
-        except Exception:
+        except Exception:  # noqa: BLE001 -- any failure means unhealthy, by design
             return False

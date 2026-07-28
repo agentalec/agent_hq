@@ -1,6 +1,6 @@
 import json
 import subprocess
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -8,13 +8,13 @@ import pytest
 from engine.adapters import claude_code_headless as cch
 from engine.adapters.claude_code_headless import ClaudeCodeHeadless
 
-FUTURE_DEADLINE = (datetime.now(timezone.utc) + timedelta(hours=1)).strftime(
+FUTURE_DEADLINE = (datetime.now(UTC) + timedelta(hours=1)).strftime(
     "%Y-%m-%dT%H:%M:%SZ"
 )
 
 
 def _git(*args: str, cwd: Path | None = None) -> str:
-    result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+    result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
     return result.stdout
 

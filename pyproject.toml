@@ -14,7 +14,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff"]
+# ruff pinned to a minor: its DEFAULT rule set grows between minors, so an
+# unpinned `ruff` turned every CI run into a lint-config change nobody made
+# (0.16 added 48 findings to a green tree). Bump deliberately, fix the new
+# findings in that same change.
+dev = ["pytest", "ruff==0.16.*"]
 
 [project.scripts]
 agent-hq = "engine.cli:main"

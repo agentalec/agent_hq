@@ -108,8 +108,8 @@ def test_cli_tasks_validate_exits_zero():
         [sys.executable, "-m", "engine.cli", "tasks", "validate", "--repo-root", str(REPO_ROOT)],
         capture_output=True,
         text=True,
-        cwd=REPO_ROOT,
-    )
+        cwd=REPO_ROOT, check=False
+)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "tasks OK" in result.stdout
 

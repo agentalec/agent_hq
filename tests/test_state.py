@@ -26,7 +26,7 @@ RUN = {
 
 
 def _git(*args: str, cwd: Path | None = None) -> str:
-    result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+    result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
     return result.stdout
 

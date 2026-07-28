@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from test_state import _clone_worktree, _make_origin
+
 from engine.config import Config
 from engine.engine import (
     apply_handoffs,
@@ -14,7 +16,6 @@ from engine.engine import (
 )
 from engine.models import Handoff, TicketDetails
 from engine.state import GitJsonStateStore
-from test_state import _clone_worktree, _make_origin
 
 
 def _store(tmp_path: Path) -> tuple[GitJsonStateStore, Path]:
@@ -25,14 +26,14 @@ def _store(tmp_path: Path) -> tuple[GitJsonStateStore, Path]:
 
 def test_enqueue_is_idempotent(tmp_path):
     store, worktree = _store(tmp_path)
-    kwargs = dict(
-        ticket_id="ticket-1",
-        source_event_id="evt-1",
-        task_id="task-1",
-        task_version=1,
-        bindings={},
-        chain_depth=0,
-    )
+    kwargs = {
+        "ticket_id": "ticket-1",
+        "source_event_id": "evt-1",
+        "task_id": "task-1",
+        "task_version": 1,
+        "bindings": {},
+        "chain_depth": 0,
+    }
 
     run_id_1 = enqueue(store, **kwargs)
     run_id_2 = enqueue(store, **kwargs)
@@ -50,14 +51,14 @@ def test_enqueue_is_idempotent(tmp_path):
 
 def test_enqueue_attempt_increment_yields_distinct_run_id(tmp_path):
     store, _ = _store(tmp_path)
-    kwargs = dict(
-        ticket_id="ticket-1",
-        source_event_id="evt-1",
-        task_id="task-1",
-        task_version=1,
-        bindings={},
-        chain_depth=0,
-    )
+    kwargs = {
+        "ticket_id": "ticket-1",
+        "source_event_id": "evt-1",
+        "task_id": "task-1",
+        "task_version": 1,
+        "bindings": {},
+        "chain_depth": 0,
+    }
 
     run_id_0 = enqueue(store, attempt=0, **kwargs)
     run_id_1 = enqueue(store, attempt=1, **kwargs)
