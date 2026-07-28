@@ -193,10 +193,8 @@ over. To recover:
 
 ## 11. Push/replay as cross-ticket serialization (Task 13)
 
-No lock guards `agent-hq-state` for correctness. The credentialed jobs
-(dispatch, prepare, collect) do still take a short-held `agent-hq-state`
-Actions concurrency group -- but that only reduces how often writers contend;
-what actually serializes them is per-ticket run exclusivity (at most one
+No lock guards `agent-hq-state`, for correctness or otherwise. What
+serializes writers is per-ticket run exclusivity (at most one
 `RUNNING`/`WAITING_GATE` run per ticket, enforced in `claim_run`) plus every
 state write being a short transaction -- read, mutate in memory, commit,
 push. A write whose push is rejected (someone
@@ -204,6 +202,24 @@ else's commit landed first) just replays: fetch, `reset --hard`, re-run the
 same mutation against fresh state (`engine/state.py`'s bounded retry). That
 push/replay loop, not a separate lock, is what serializes concurrent writers
 across *different* tickets sharing the one `agent-hq-state` branch.
+
+`run.yml` and `intake.yml` used to *also* take a shared `agent-hq-state`
+Actions concurrency group, on the theory that reducing contention was free.
+It was not: GitHub keeps a single *pending* slot per group, so a burst of
+triggers cancelled each other's queued runs. A cancelled `run.yml` left its
+run `QUEUED` to be re-triggered next sweep -- survivable, but a ticket that
+was never last in a batch could starve indefinitely. A cancelled intake was
+worse: no ticket exists yet, so nothing re-drives it and the issue is dropped
+silently. Both are now keyed to the thing they actually own (`run-<run_id>`,
+`intake-<issue>`), and concurrent state writes are left to the replay loop,
+which is what the model always claimed was load-bearing. `dispatch.yml` keeps
+a global group (`agent-hq-dispatch`) because two concurrent sweeps are pure
+duplicate work.
+
+Because that raised the realistic concurrent-writer count -- up to
+`in_flight_cap` claimed runs, the dispatcher, and one intake per issue in a
+filing burst -- `_MAX_WRITE_ATTEMPTS` went from 5 to 12. A writer can lose to
+each of its peers before winning, and retries are sub-second.
 
 Collect never holds that transaction open across its external side effects
 (branch push, PR open, gate request) -- it does those first, then commits

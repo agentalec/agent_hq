@@ -70,9 +70,10 @@ CI (`.github/workflows/ci.yml`) runs all five; a change isn't done until all pas
   a rejected push is the CAS that serializes concurrent writers across
   tickets (`docs/operations.md` §11). It fires only on a confirmed
   non-fast-forward push rejection (parsed from `git push --porcelain`, not
-  stderr) — auth/network/server errors fail fast instead. The short-held
-  `agent-hq-state` Actions concurrency group on credentialed jobs only
-  reduces contention; it is not required for correctness.
+  stderr) — auth/network/server errors fail fast instead. No Actions
+  concurrency group backs it up: `run.yml`/`intake.yml` are keyed per
+  run/issue, because one shared group made bursts cancel each other's pending
+  runs (`docs/operations.md` §11).
 - The agent child process env is an allowlist built from scratch (PD-5) —
   never pass `AGENT_HQ_TOKEN`/`GITHUB_TOKEN`/`GH_TOKEN` into it, and tokens
   never appear in git argv (env-var credential helper only). The default

@@ -8,8 +8,14 @@ permissions:
   issues: write
   contents: write
 
+# Keyed per issue, not globally: one issue's `opened` + `labeled` deliveries
+# still serialize (they are the same intake, and it is idempotent), but two
+# different issues never queue behind each other. A shared group kept a single
+# pending slot, so filing several issues at once cancelled all but the last --
+# and unlike a run.yml cancellation, a cancelled intake is lost outright: no
+# ticket exists yet for the sweep to re-drive.
 concurrency:
-  group: agent-hq-state
+  group: "intake-${{ github.event.issue.number }}"
   cancel-in-progress: false
 
 env:

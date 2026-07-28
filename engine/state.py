@@ -4,9 +4,10 @@ Reads/writes JSON documents on a worktree of the orphan `agent-hq-state`
 branch: `tickets/<id>/state.json` (per-ticket doc), `tickets/<id>/events.jsonl`
 (append-only), `health/latest.json`. The bounded fetch/reset/replay retry on a
 confirmed non-fast-forward push rejection is the concurrency model (the CAS
-that serializes concurrent writers across tickets -- docs/operations.md §11);
-the short-held `agent-hq-state` Actions concurrency group on credentialed jobs
-only reduces contention, it is not required for correctness. See
+that serializes concurrent writers across tickets -- docs/operations.md §11).
+No Actions concurrency group stands behind it: the credentialed jobs are keyed
+per run/issue, since one shared group made a burst of triggers cancel each
+other's pending runs. See
 docs/ports/state-store.md for the contract. Not a registry port (PD-7) --
 callers construct this directly with a worktree path.
 """
@@ -25,7 +26,16 @@ from pathlib import Path
 # Bounded replay: fetch -> reset --hard -> re-run fn, only on a *confirmed*
 # non-fast-forward push rejection (see `_push_rejected`). Auth/network/server
 # errors are not CAS contention and fail on the first attempt.
-_MAX_WRITE_ATTEMPTS = 5
+#
+# A writer can lose to each of its N-1 concurrent peers before winning, so the
+# bound has to exceed the realistic writer count. That count went UP when the
+# credentialed jobs stopped sharing one Actions concurrency group (they were
+# cancelling each other's pending runs): concurrent writers are now up to
+# `in_flight_cap` claimed runs, the dispatcher, and one intake per issue in a
+# filing burst. 5 was sized for the serialized world and a 6-issue burst could
+# exhaust it. Retries are sub-second (see `_retry_backoff_seconds`), so the
+# cost of headroom here is a few seconds on a genuinely stuck writer.
+_MAX_WRITE_ATTEMPTS = 12
 
 # Run states that occupy a ticket's one in-flight slot for `claim_run`'s
 # per-ticket exclusivity and global in-flight cap. Duplicated from
@@ -317,9 +327,8 @@ class GitJsonStateStore:
 
     def write(self, fn: Callable[[Txn], None]) -> None:
         # This replay loop is the concurrency model: a rejected push is the
-        # CAS that forces a re-read (docs/operations.md §11). The short-held
-        # Actions concurrency group on credentialed jobs merely reduces how
-        # often it fires.
+        # CAS that forces a re-read (docs/operations.md §11). Nothing
+        # pre-serializes the writers any more, so this is the whole of it.
         for attempt in range(1, _MAX_WRITE_ATTEMPTS + 1):
             txn = Txn(self)
             fn(txn)
