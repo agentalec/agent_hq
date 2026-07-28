@@ -5,7 +5,7 @@ Before finishing `specs/{ticket}/qa.md`, confirm:
 - [ ] Every user-facing acceptance criterion in `spec.md` has its own section
       with a verdict — `pass`, `fail`, or `not-exercised` plus the reason.
 - [ ] Every `pass` verdict has a screenshot backing it, committed under
-      `qa-screenshots/{ticket}/` and embedded with a repo-relative link.
+      `specs/{ticket}/screenshots/` and embedded with a repo-relative link.
 - [ ] Screenshots show the state *after* the interaction, and both viewports
       where the ticket touches responsive behavior.
 - [ ] No test data resembles real patients — synthetic fixtures only.

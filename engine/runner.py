@@ -154,21 +154,45 @@ def _latest_review_round(review_md: str) -> str:
 
 
 _IMG_LINK = re.compile(r"(!\[[^\]]*\]\()(?!https?://)/?([^)\s]+)(\))")
+# Where ledger artifacts are readable from (scripts/checkout-state.sh owns the
+# branch name).
+_STATE_BRANCH = "agent-hq-state"
 
 
-def _raw_image_urls(md: str, repo: str, commit: str) -> str:
-    """Rewrite repo-relative markdown image paths to raw.githubusercontent
-    URLs on the commit this run just landed -- what makes QA's screenshots
-    actually render when `qa.md` is posted as a PR comment (a repo-relative
-    path renders as a broken image there). Pinned to the commit, not the
-    branch, so the comment keeps showing what that QA pass saw. Absolute URLs
-    are left alone.
-    ponytail: assumes a public work repo -- raw URLs on a private one need a
-    token GitHub's image proxy doesn't have; host the PNGs elsewhere if a
-    private work repo joins the pilot."""
-    return _IMG_LINK.sub(
-        lambda m: f"{m[1]}https://raw.githubusercontent.com/{repo}/{commit}/{m[2]}{m[3]}", md
-    )
+def _ledger_image_urls(
+    md: str, engine_repo: str, ticket_id: str, run_id: str, ledger: set[str]
+) -> str:
+    """Rewrite repo-relative markdown image paths to raw URLs for their copy
+    in this run's ledger namespace on the state branch -- what makes QA's
+    screenshots render when `qa.md` is posted as a PR comment (a relative path
+    renders as a broken image there). Absolute URLs are left alone.
+
+    Screenshots live in the ledger with the rest of a run's evidence, not in
+    the work repo: they are QA output, not product code, and committing them
+    to the PR branch would merge them into the product's history. The path is
+    namespaced by producing run, so the link keeps showing what THAT QA pass
+    saw even after a later round.
+
+    An image the run referenced but never produced becomes an explicit
+    "missing" note instead of a URL -- `ledger` is what actually reached the
+    ledger, so the check is against what exists, not what the agent claimed. A
+    broken-image icon would read as an infrastructure glitch rather than as
+    what it is: a screenshot that was never taken.
+
+    ponytail: assumes a public engine repo -- raw URLs on a private one need a
+    token GitHub's image proxy doesn't have."""
+
+    def rewrite(m: re.Match) -> str:
+        rel = m[2]
+        if rel not in ledger:
+            return f"_[missing screenshot: `{rel}` — referenced but never produced]_"
+        path = artifact_ledger_path(ticket_id, run_id, rel)
+        return (
+            f"{m[1]}https://raw.githubusercontent.com/{engine_repo}"
+            f"/{_STATE_BRANCH}/{path}{m[3]}"
+        )
+
+    return _IMG_LINK.sub(rewrite, md)
 
 
 def _pr_body(config, ticket_id: str, ticket_body: str) -> str:
@@ -345,7 +369,7 @@ def _restore_input_artifacts(store, dest_dir: Path, ticket_id: str, run: dict) -
             continue
         full = dest_dir / rel_path
         full.parent.mkdir(parents=True, exist_ok=True)
-        full.write_text(content)
+        full.write_bytes(content)
 
 
 def _materialize_inputs(inputs_dir: Path, worktree: Path) -> list[str]:
@@ -361,8 +385,47 @@ def _materialize_inputs(inputs_dir: Path, worktree: Path) -> list[str]:
         rel = src.relative_to(inputs_dir)
         dest = worktree / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(src.read_text())
+        dest.write_bytes(src.read_bytes())
         paths.append(str(rel))
+    return paths
+
+
+def _as_text(raw: bytes | None) -> str:
+    """Ledger bytes as text, empty for anything undecodable. Everything that
+    embeds an artifact in a comment (gate request, review/QA reflection) wants
+    text; a directory artifact can hold PNGs, and a PNG has no text to inline."""
+    if raw is None:
+        return ""
+    try:
+        return raw.decode()
+    except UnicodeDecodeError:
+        return ""
+
+
+def _expand_declared(root: Path, declared: list[str]) -> list[str]:
+    """Resolve declared outputs against `root`. A plain entry stands for
+    itself; an entry ending in `/` is a DIRECTORY artifact that expands to
+    whatever files it holds -- zero or more.
+
+    Directory artifacts are how a task emits a set it cannot name in advance:
+    `qa` writes one screenshot per acceptance criterion it managed to
+    exercise, which is not a list anyone can write into `task.yml`. They are
+    deliberately NOT required: an empty (or absent) directory is a valid QA
+    pass over a ticket with nothing user-facing to show. A plain entry stays
+    required -- that contract is unchanged."""
+    paths: list[str] = []
+    for entry in declared:
+        if not entry.endswith("/"):
+            paths.append(entry)
+            continue
+        rel = entry.rstrip("/")
+        if _check_containment(root, rel) is not None:
+            continue  # absent or unsafe: an empty directory artifact is fine
+        base = root / rel
+        paths.extend(
+            str(p.relative_to(root)) for p in sorted(base.rglob("*"))
+            if p.is_file() and p.resolve().is_relative_to(root)
+        )
     return paths
 
 
@@ -381,7 +444,7 @@ def _stage_files(worktree: Path, candidates: list[str], staging: Path) -> None:
             continue
         dest = staging / rel_path
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text((worktree / rel_path).read_text())
+        dest.write_bytes((worktree / rel_path).read_bytes())
 
 
 def _prepare(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskdef) -> dict:
@@ -489,9 +552,13 @@ def _execute(config, store, adapter_fn, run, taskdef) -> dict:
             (out_dir / "control.json").write_text(control_src.read_text())
 
         declared = bundle.get("output_paths", [])
-        agent.collect_outputs(worktree, declared)  # raises if a declared artifact is missing
+        # Only plain entries are required; a directory artifact may legitimately
+        # be empty (see `_expand_declared`), so it is expanded, never demanded.
+        required = [p for p in declared if not p.endswith("/")]
+        agent.collect_outputs(worktree, required)  # raises if a declared artifact is missing
 
-        candidates = sorted(set(declared) | set(input_paths))
+        expanded = _expand_declared(worktree.resolve(), declared)
+        candidates = sorted(set(expanded) | set(input_paths))
         _stage_files(worktree, candidates, out_dir / "outputs")
 
         patch_text = agent.materialize_work_patch(worktree, candidates)
@@ -600,7 +667,10 @@ def _validate_staged_declared(staging_dir: Path, declared: list[str]) -> str | N
     not a partial success -- the same contract `collect_outputs` enforced
     at execute, re-checked here against what actually arrived."""
     root = staging_dir.resolve()
-    reasons = [r for r in (_check_containment(root, p) for p in declared) if r]
+    # Directory artifacts are exempt: "whatever is in there" includes nothing
+    # (see `_expand_declared`). Plain entries stay required.
+    required = [p for p in declared if not p.endswith("/")]
+    reasons = [r for r in (_check_containment(root, p) for p in required) if r]
     if reasons:
         return "missing declared artifacts: " + "; ".join(reasons)
     return None
@@ -719,9 +789,13 @@ def _collect_success(
     # transitive handoff (e.g. arch-plan -> breakdown forwarding spec.md)
     # finds it in the SOURCE run's own namespace. Read from the transported
     # staging dir, never the work-repo clone -- neither is work-repo code.
+    # A directory artifact expands here against what actually arrived, so the
+    # ledger (and `run.artifacts`) records concrete files, never the directory
+    # entry itself -- nothing downstream has to know the convention existed.
+    declared = _expand_declared(staging_dir.resolve(), declared)
     ledger_paths = set(declared) | {p for h in accepted for p in (h.artifacts or [])}
     artifact_contents = {
-        rel_path: (staging_dir / rel_path).read_text()
+        rel_path: (staging_dir / rel_path).read_bytes()
         for rel_path in ledger_paths
         if (staging_dir / rel_path).is_file()
     }
@@ -825,10 +899,11 @@ def _collect_success(
                     # (the escape hatch when the content is too big to inline).
                     "artifacts": {
                         p: {
-                            "content": artifact_contents.get(p, ""),
+                            "content": _as_text(artifact_contents.get(p)),
                             "ledger_path": artifact_ledger_path(ticket_id, run_id, p),
                         }
                         for p in declared
+                        if _as_text(artifact_contents.get(p))
                     },
                     # Renders the comment as a record rather than a request:
                     # no approval grammar, no @-mention of people who have
@@ -965,7 +1040,8 @@ def _collect_success(
     if pr_ref and review_path in declared:
         eng.post_pr_comment(
             config, adapter_fn, pr_ref,
-            "### agent-hq review\n\n" + _latest_review_round(artifact_contents.get(review_path, "")),
+            "### agent-hq review\n\n"
+            + _latest_review_round(_as_text(artifact_contents.get(review_path))),
             f"{run_id}:pr-review",
         )
 
@@ -977,7 +1053,10 @@ def _collect_success(
         eng.post_pr_comment(
             config, adapter_fn, pr_ref,
             "### agent-hq QA\n\n"
-            + _raw_image_urls(artifact_contents.get(qa_path, ""), repo, land["head"]),
+            + _ledger_image_urls(
+                _as_text(artifact_contents.get(qa_path)),
+                intake_repo(config), ticket_id, run_id, set(artifact_contents),
+            ),
             f"{run_id}:pr-qa",
         )
 

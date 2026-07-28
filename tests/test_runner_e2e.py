@@ -29,7 +29,8 @@ from engine.engine import _complete_if_queue_empty, dispatch, post_pr_comment, s
 from engine.models import GateDecision, GateRequest, GateStatus, TicketDetails
 from engine.runner import (
     _latest_review_round,
-    _raw_image_urls,
+    _expand_declared,
+    _ledger_image_urls,
     execute_dir_for,
     intake_ticket,
     prepare_dir_for,
@@ -277,12 +278,13 @@ def _write_control(config, run_id: str, control: dict, patch: str = "fake-patch"
     (out / "work.patch").write_text(patch)
 
 
-def _stage(config, run_id: str, rel_path: str, content: str) -> None:
+def _stage(config, run_id: str, rel_path: str, content: str | bytes) -> None:
     """Simulate execute's staged declared/input artifact -- collect
-    re-validates containment against this transported dir (Task 12)."""
+    re-validates containment against this transported dir (Task 12).
+    Accepts bytes: ledger artifacts are not all text (qa's screenshots)."""
     out = execute_dir_for(config, run_id) / "outputs" / rel_path
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(content)
+    out.write_bytes(content if isinstance(content, bytes) else content.encode())
 
 
 # --------------------------------------------------------------------------
@@ -526,7 +528,7 @@ def test_collect_gated_task_waits_gate(config, taskdefs, store, tmp_path):
     health = json.loads((store.worktree_path / "health" / "latest.json").read_text())
     assert any(k.startswith("agent-session/") for k in health)
     # The declared artifact is persisted to the ledger, keyed by this run.
-    assert store.read_artifact("7", "specrun", "specs/7/spec.md") == "the spec"
+    assert store.read_artifact("7", "specrun", "specs/7/spec.md") == b"the spec"
     # The work landed on the ticket's stable per-issue branch.
     work_repo = store.read_state("7")["work_repos"][0]
     assert work_repo["branch"] == "agent-hq/7"
@@ -737,7 +739,7 @@ def test_review_park_posts_findings_comment_then_awaits_human(config, taskdefs, 
     _seed(store, review)
     store.write(
         lambda txn: txn.write_artifact(
-            "7", "revrun", "specs/7/review.md", "## Round 3\n- blocker: auth check still missing\n"
+            "7", "revrun", "specs/7/review.md", b"## Round 3\n- blocker: auth check still missing\n"
         )
     )
     tracker = FakeTracker(_details())
@@ -817,23 +819,93 @@ def test_latest_review_round_returns_only_the_last_section():
     assert _latest_review_round("no round headers") == "no round headers"
 
 
-def test_raw_image_urls_rewrites_only_relative_images():
-    """QA writes repo-relative screenshot links; the PR comment needs raw URLs
-    pinned to the commit that landed them, or GitHub renders a broken image.
-    Absolute images and ordinary links are left alone."""
-    md = (
-        "![desktop](qa-screenshots/42/a.png)\n"
-        "![leading slash](/qa-screenshots/42/b.png)\n"
-        "![remote](https://example.com/c.png)\n"
-        "[not an image](qa-screenshots/42/d.png)\n"
-    )
-    out = _raw_image_urls(md, "agentalec/care_fe", "abc123")
+def test_expand_declared_resolves_directory_artifacts(tmp_path):
+    """A trailing slash means "whatever is in there": the engine collects a
+    set the task could not name in advance. Plain entries pass through
+    untouched, and an absent directory is not an error -- a QA pass with
+    nothing user-facing to show produces no screenshots."""
+    shots = tmp_path / "specs" / "7" / "screenshots"
+    (shots / "nested").mkdir(parents=True)
+    (shots / "b.png").write_bytes(b"\x89PNG")
+    (shots / "a.png").write_bytes(b"\x89PNG")
+    (shots / "nested" / "c.png").write_bytes(b"\x89PNG")
 
-    prefix = "https://raw.githubusercontent.com/agentalec/care_fe/abc123"
-    assert f"![desktop]({prefix}/qa-screenshots/42/a.png)" in out
-    assert f"![leading slash]({prefix}/qa-screenshots/42/b.png)" in out
+    out = _expand_declared(tmp_path, ["specs/7/qa.md", "specs/7/screenshots/"])
+
+    assert out == [
+        "specs/7/qa.md",  # plain entry: passed through, existence not checked here
+        "specs/7/screenshots/a.png",
+        "specs/7/screenshots/b.png",
+        "specs/7/screenshots/nested/c.png",
+    ]
+    # An absent directory artifact yields nothing rather than failing.
+    assert _expand_declared(tmp_path, ["specs/7/nope/"]) == []
+
+
+def test_collect_stores_a_directory_artifact_as_bytes(config, taskdefs, store, tmp_path):
+    """End to end: a PNG in a directory artifact reaches the ledger intact.
+    Screenshots are ledger artifacts, so they must survive transport as bytes
+    -- and they must NOT be inlined into a gate comment, which wants text."""
+    taskdefs["spec"]["outputs"]["artifacts"] = ["specs/{ticket}/spec.md", "specs/{ticket}/shots/"]
+    png = b"\x89PNG\r\n\x1a\n\x00\xff\xfe"
+    _seed(store, _run_dict("specrun", "spec", state="RUNNING"))
+    _stage(config, "specrun", "specs/7/spec.md", "the spec")
+    _stage(config, "specrun", "specs/7/shots/desktop.png", png)
+    _write_execute_result(config, "specrun", cost_usd=1.0, tokens=10)
+    _write_control(config, "specrun", {"outcome": "complete"})
+
+    gate = FakeGate()
+    run_task("specrun", "collect", config, taskdefs, store, now_iso="2026-07-18T09:00:00Z",
+             adapter_fn=_adapters(tracker=FakeTracker(_details()),
+                                  agent=FakeAgent(tmp_path / "work"), gate=gate))
+
+    assert store.read_artifact("7", "specrun", "specs/7/shots/desktop.png") == png
+    # Recorded as concrete files -- the directory entry itself never leaks out.
+    assert store.read_state("7")["runs"][0]["artifacts"] == [
+        "specs/7/spec.md", "specs/7/shots/desktop.png",
+    ]
+
+
+def test_ledger_image_urls_flags_a_screenshot_that_was_never_produced():
+    """The care_fe#3 case: the QA agent wrote the image markdown but never
+    saved the PNG, so the comment rendered a broken image -- which reads as an
+    infrastructure glitch rather than a screenshot that was never taken.
+    Checked against what actually reached the LEDGER, not what was claimed."""
+    ledger = {"specs/19/qa.md", "specs/19/screenshots/real.png"}
+    md = (
+        "![taken](specs/19/screenshots/real.png)\n"
+        "![never taken](specs/19/screenshots/login-page-desktop.png)\n"
+        "![escapes](../../etc/passwd)\n"
+    )
+    out = _ledger_image_urls(md, "agentalec/agent_hq", "19", "run7", ledger)
+
+    assert (
+        "![taken](https://raw.githubusercontent.com/agentalec/agent_hq/agent-hq-state"
+        "/tickets/19/artifacts/run7/specs/19/screenshots/real.png)"
+    ) in out
+    assert "_[missing screenshot: `specs/19/screenshots/login-page-desktop.png`" in out
+    assert "_[missing screenshot: `../../etc/passwd`" in out
+    assert "/../.." not in out
+
+
+def test_ledger_image_urls_rewrites_only_relative_images():
+    """QA writes repo-relative screenshot links; the PR comment needs raw URLs
+    into the ledger, or GitHub renders a broken image. Absolute images and
+    ordinary links are left alone."""
+    ledger = {"specs/42/screenshots/a.png", "specs/42/screenshots/b.png"}
+    md = (
+        "![desktop](specs/42/screenshots/a.png)\n"
+        "![leading slash](/specs/42/screenshots/b.png)\n"
+        "![remote](https://example.com/c.png)\n"
+        "[not an image](specs/42/screenshots/a.png)\n"
+    )
+    out = _ledger_image_urls(md, "agentalec/agent_hq", "42", "run7", ledger)
+
+    prefix = "https://raw.githubusercontent.com/agentalec/agent_hq/agent-hq-state"
+    assert f"![desktop]({prefix}/tickets/42/artifacts/run7/specs/42/screenshots/a.png)" in out
+    assert f"![leading slash]({prefix}/tickets/42/artifacts/run7/specs/42/screenshots/b.png)" in out
     assert "![remote](https://example.com/c.png)" in out
-    assert "[not an image](qa-screenshots/42/d.png)" in out
+    assert "[not an image](specs/42/screenshots/a.png)" in out
 
 
 def test_collect_failure_records_spend_then_retries(config, taskdefs, store, tmp_path):

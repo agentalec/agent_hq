@@ -93,11 +93,14 @@ CI (`.github/workflows/ci.yml`) runs all five; a change isn't done until all pas
   a schema-invalid document fails the run, it is never silently ignored.
   Declared `outputs.artifacts` are ledger artifacts
   (`tickets/<id>/artifacts/<run_id>/`, `engine/state.py`
-  `write_artifact`/`read_artifact`) — persisted per producing run, restored
-  into a child only from its source (parent) run's namespace, and excluded
-  from the work-repo patch/commit. Every artifact path a handoff proposes is
-  containment-checked (no absolute path, `..`, or symlink escape) before
-  it's trusted (`engine/handoff.py`).
+  `write_artifact`/`read_artifact`) — persisted per producing run as **bytes**
+  (not all artifacts are text), restored into a child only from its source
+  (parent) run's namespace, and excluded from the work-repo patch/commit. An
+  entry ending in `/` is a directory artifact: the engine collects whatever
+  files it holds, zero or more, for output a task can't name in advance
+  (`engine/runner.py:_expand_declared`); plain entries stay required. Every
+  artifact path a handoff proposes is containment-checked (no absolute path,
+  `..`, or symlink escape) before it's trusted (`engine/handoff.py`).
 - `schemas/state.schema.json`/`event.schema.json`/`control.schema.json`/
   `execute-result.schema.json` and the dataclasses in `engine/models.py`
   must stay in sync (`tests/test_models.py`, `tests/test_schemas_valid.py`

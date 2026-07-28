@@ -280,13 +280,13 @@ def test_artifact_round_trip(tmp_path):
     store = GitJsonStateStore(worktree)
 
     store.write(
-        lambda txn: txn.write_artifact("ticket-1", "run-1", "specs/ticket-1/spec.md", "hello")
+        lambda txn: txn.write_artifact("ticket-1", "run-1", "specs/ticket-1/spec.md", b"hello")
     )
 
     assert store.artifacts_dir("ticket-1", "run-1") == (
         worktree / "tickets" / "ticket-1" / "artifacts" / "run-1"
     )
-    assert store.read_artifact("ticket-1", "run-1", "specs/ticket-1/spec.md") == "hello"
+    assert store.read_artifact("ticket-1", "run-1", "specs/ticket-1/spec.md") == b"hello"
     assert store.read_artifact("ticket-1", "run-1", "missing.md") is None
 
     # pushed to origin, not just written locally

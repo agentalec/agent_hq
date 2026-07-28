@@ -748,7 +748,7 @@ def _complete_if_queue_empty(store, config, adapter_fn, ticket_id, terminal_run:
         # same as summary.md above; the engine special-cases no task name.
         review_path = subst("specs/{ticket}/review.md", ticket_id)
         if review_path in (terminal_run.get("artifacts") or []):
-            findings = store.read_artifact(ticket_id, terminal_run["run_id"], review_path) or ""
+            findings = store.read_artifact_text(ticket_id, terminal_run["run_id"], review_path) or ""
             notify_ticket(
                 config, adapter_fn, ticket_id,
                 "Review rounds exhausted with unresolved findings; the PR is left in "
@@ -760,7 +760,7 @@ def _complete_if_queue_empty(store, config, adapter_fn, ticket_id, terminal_run:
         )
         return
 
-    summary = store.read_artifact(ticket_id, terminal_run["run_id"], summary_path) or ""
+    summary = store.read_artifact_text(ticket_id, terminal_run["run_id"], summary_path) or ""
     tracker.post_closing_summary(ticket_id, summary, f"{done_key}:closing-summary")
     for work_repo in state.get("work_repos", []):
         if work_repo.get("pr_ref"):
