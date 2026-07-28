@@ -1042,14 +1042,25 @@ def test_collect_failure_records_spend_then_retries(config, taskdefs, store, tmp
     assert agent.opened_prs == []
 
 
-def test_collect_failure_exhausted_blocks(config, taskdefs, store, tmp_path):
+def test_collect_failure_exhausted_blocks_and_escalates(config, taskdefs, store, tmp_path):
+    """Retries exhausted stops the ticket dead -- only a manual re-enqueue
+    restarts it -- so it must tell someone, exactly as the unknown-spend block
+    does. It did not: ticket 30 blocked while its issue still read "work has
+    been queued", and the only trace was on the state branch."""
     _seed(store, _run_dict("buildrun", "build", state="RUNNING", attempt=1))
     _write_execute_result(
         config, "buildrun", outcome="failure", cost_usd=3.0, tokens=20, usage_known=True,
     )
     adapters = _adapters(agent=FakeAgent(tmp_path / "work"))
     run_task("buildrun", "collect", config, taskdefs, store, adapter_fn=adapters)
+
     assert store.read_state("7")["status"] == "BLOCKED"
+    assert len(adapters.messaging.calls) == 1
+    audience, message, event_id = adapters.messaging.calls[0]
+    assert "exhausted its retry budget" in message
+    assert "build" in message  # names the task that failed
+    assert audience["mentions"]  # the escalation group is actually pinged
+    assert event_id == "buildrun:escalation"  # idempotent on re-delivery
 
 
 def test_collect_unknown_usage_blocks_never_retries(config, taskdefs, store, tmp_path):

@@ -497,6 +497,16 @@ def _handle_failure(
         reenqueue_same(store, run, taskdef, run["attempt"] + 1)
         return
     _block_ticket(store, ticket_id, run_id, "retries exhausted")
+    # Escalate, exactly like the unknown-spend block above. Retries-exhausted
+    # is the failure mode that most needs a human -- the ticket stops dead and
+    # only a manual re-enqueue restarts it -- and it was the one that told
+    # nobody: the block landed on the state branch while the issue still read
+    # "work has been queued".
+    _escalate(
+        store, config, adapter_fn, ticket_id, run_id,
+        f"`{taskdef['id']}` failed {run['attempt'] + 1} time(s) and exhausted its retry budget; "
+        "the ticket is blocked pending human review.",
+    )
 
 
 # --------------------------------------------------------------------------
