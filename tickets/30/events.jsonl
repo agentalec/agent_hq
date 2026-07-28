@@ -38,3 +38,4 @@
 {"event_id": "0f80c4b344a055ca:collected", "kind": "run.collected", "ticket_id": "30", "run_id": "0f80c4b344a055ca", "tokens": 0, "cost_usd": 0.0}
 {"event_id": "0f80c4b344a055ca:failed", "kind": "run.failed", "ticket_id": "30", "run_id": "0f80c4b344a055ca", "state": "FAILED"}
 {"event_id": "6511d7146fa409a1:queued", "kind": "run.queued", "ticket_id": "30", "run_id": "6511d7146fa409a1", "task_id": "qa", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
+{"event_id": "6511d7146fa409a1:collected", "kind": "run.collected", "ticket_id": "30", "run_id": "6511d7146fa409a1", "tokens": 0, "cost_usd": 0.0}
