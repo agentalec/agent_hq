@@ -105,6 +105,12 @@ CI (`.github/workflows/ci.yml`) runs all five; a change isn't done until all pas
 - Deviations from the requirements are ledgered in `docs/architecture.md`
   ("Deviation ledger"); deferred machinery lives in `docs/roadmap.md` with a
   restore trigger — don't re-add it without one.
+- Before building a feature, read `ROADMAP.md` "Planned" and
+  `docs/roadmap.md` — the work is often already sequenced there, sequenced
+  *behind* something else, or deferred with a restore trigger that hasn't
+  fired. Build what those say is next. If what's being asked contradicts
+  them, or the roadmap is silent, say so and get a decision before writing
+  code — shipping out of order is how the roadmap quietly stops being true.
 - Every new feature gets a row in `ROADMAP.md` ("Shipped") in the same
   change that ships it — one line, what it is and where it lives. If it was
   listed under "Planned" there (or deferred in `docs/roadmap.md`), drop that
