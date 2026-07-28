@@ -25,12 +25,19 @@ from pathlib import Path
 import pytest
 
 from engine.config import load_config
-from engine.engine import _complete_if_queue_empty, dispatch, post_pr_comment, sweep
+from engine.engine import (
+    _complete_if_queue_empty,
+    dispatch,
+    post_pr_comment,
+    resolve_setup,
+    sweep,
+)
 from engine.models import GateDecision, GateRequest, GateStatus, TicketDetails
 from engine.runner import (
     _latest_review_round,
     _expand_declared,
     _ledger_image_urls,
+    _run_setup,
     execute_dir_for,
     intake_ticket,
     prepare_dir_for,
@@ -276,6 +283,13 @@ def _write_control(config, run_id: str, control: dict, patch: str = "fake-patch"
     out.mkdir(parents=True, exist_ok=True)
     (out / "control.json").write_text(json.dumps(control))
     (out / "work.patch").write_text(patch)
+
+
+def _mkworktree(tmp_path) -> Path:
+    """A worktree with the `.agent-hq/` dir a setup command writes notes into."""
+    wt = tmp_path / "wt"
+    (wt / ".agent-hq").mkdir(parents=True)
+    return wt
 
 
 def _stage(config, run_id: str, rel_path: str, content: str | bytes) -> None:
@@ -817,6 +831,59 @@ def test_latest_review_round_returns_only_the_last_section():
     md = "# Review\n\n## Round 1\n- old\n\n## Round 2\n- new\n"
     assert _latest_review_round(md) == "## Round 2\n- new\n"
     assert _latest_review_round("no round headers") == "no round headers"
+
+
+def test_run_setup_prepares_the_worktree_and_hides_credentials(tmp_path, monkeypatch):
+    """The configured command runs in the worktree, before the agent, with the
+    engine's credentials stripped -- it is operator config, not agent output,
+    but it has no business holding tokens either."""
+    monkeypatch.setenv("AGENT_HQ_TOKEN", "secret-pat")
+    monkeypatch.setenv("COPILOT_GITHUB_TOKEN", "secret-seat")
+    monkeypatch.setenv("HARMLESS", "kept")
+
+    assert _run_setup(
+        'printenv AGENT_HQ_TOKEN > leaked.txt; printenv COPILOT_GITHUB_TOKEN >> leaked.txt;'
+        ' printenv HARMLESS > kept.txt; echo ready > .agent-hq/setup-notes.md; true',
+        _mkworktree(tmp_path), None,
+    ) is None
+
+    assert (tmp_path / "wt" / "kept.txt").read_text().strip() == "kept"
+    assert not (tmp_path / "wt" / "leaked.txt").read_text().strip()
+    assert (tmp_path / "wt" / ".agent-hq" / "setup-notes.md").read_text().strip() == "ready"
+
+
+def test_run_setup_failure_is_a_normal_run_failure(tmp_path):
+    """A broken environment fails the run through the ordinary retry path
+    rather than handing the agent a half-built one to flail in -- and the
+    reason reaches the ticket, so an operator can see which command broke."""
+    result = _run_setup("echo 'compose blew up' >&2; exit 3", _mkworktree(tmp_path), None)
+
+    assert result["outcome"] == "failure"
+    assert result["usage_known"] is True  # no agent ran: spend is known to be zero
+    assert "setup failed (exit 3)" in result["detail"]
+    assert "compose blew up" in result["detail"]
+
+
+def test_run_setup_is_bounded_by_the_run_deadline(tmp_path):
+    """A hanging `docker compose up` must not silently consume the run."""
+    past = "2020-01-01T00:00:00Z"  # already expired -> minimum 1s timeout
+    result = _run_setup("sleep 30", _mkworktree(tmp_path), past)
+
+    assert result["outcome"] == "failure"
+    assert "setup timed out" in result["detail"]
+
+
+def test_no_setup_configured_is_not_a_failure(tmp_path):
+    assert _run_setup(None, _mkworktree(tmp_path), None) is None
+
+
+def test_resolve_setup_prefers_the_task_over_default(config):
+    config.repos["agentalec/care_fe"]["setup"] = {"default": "npm ci", "qa": "make qa-env"}
+
+    assert resolve_setup(config, "agentalec/care_fe", "qa") == "make qa-env"
+    assert resolve_setup(config, "agentalec/care_fe", "implement") == "npm ci"
+    assert resolve_setup(config, "agentalec/care", "qa") is None  # no setup block
+    assert resolve_setup(config, None, "qa") is None
 
 
 def test_expand_declared_resolves_directory_artifacts(tmp_path):

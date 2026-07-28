@@ -216,6 +216,51 @@ that should be automatic in one environment and staffed in another wants a
 config-level switch instead, which does not exist yet
 (`docs/roadmap.md`).
 
+## Environment setup
+
+A task rarely wants to build its own environment. `repos.yml` carries a
+`setup` map per repo — task id to shell command, with `default` covering any
+task that has no entry of its own:
+
+```yaml
+agentalec/care_fe:
+  setup:
+    default: npm ci
+    qa: |
+      make -C .agent-hq/care up load-fixtures
+      npm ci && npm run build
+```
+
+The engine runs it in the worktree before the agent starts
+(`engine.runner._run_setup`), and resolution is
+`setup[task_id] or setup["default"] or None`
+(`engine.engine.resolve_setup`). It lives in config, not in a prompt or in
+engine code, so a different project configures a different command without
+touching either.
+
+Why it is not the agent's job: a fixed sequence of shell commands costs one
+agent request per step under a per-request billing model, fails differently
+every time, and is exactly the part that needs no judgment. Doing it in shell
+also means a broken environment **fails the run** — non-zero exit becomes a
+normalized `execute-result` failure carrying the command and a log tail, so
+the ordinary retry budget applies and the reason reaches the ticket. The
+alternative is an agent flailing against a half-built environment and
+reporting whatever it managed, which is what QA did before this existed.
+
+The command runs with the engine's credentials stripped
+(`AGENT_HQ_TOKEN`/`GITHUB_TOKEN`/`GH_TOKEN`/`COPILOT_GITHUB_TOKEN`): it is
+operator-authored config and so trusted further than agent output, but it has
+no business holding tokens. It is bounded by the run's own deadline — note
+that deadline starts at *claim* time, so setup time comes out of the task's
+`budget.max_runtime_min`.
+
+Anything the agent needs to know goes in `.agent-hq/setup-notes.md` (URLs,
+credentials, paths). When a setup command is configured, the assembled prompt
+gains an Environment section telling the agent the worktree is already
+prepared, to read that file, and not to rebuild anything itself. The engine
+never learns what the command did — that contract is entirely between the
+config and the notes file.
+
 ## Budgets
 
 Per-task `budget.max_cost_usd`/`max_runtime_min`/`retries` bound one run.

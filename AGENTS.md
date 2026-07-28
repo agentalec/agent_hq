@@ -49,7 +49,9 @@ CI (`.github/workflows/ci.yml`) runs all five; a change isn't done until all pas
   `docs/operations.md` §4). `projects.yml`'s `engine_repo` is the engine's
   own issue tracker (intake, pinned comments, escalations, gate comments) —
   distinct from the work repos in `repos.yml` that `resolve_target_repo`
-  selects for code and PRs.
+  selects for code and PRs. `repos.yml`'s `setup` map (task id → shell
+  command, `default` for the rest) is run in the worktree before the agent
+  starts — structured setup is config, never a prompt (`docs/task-authoring.md`).
 - `.github/workflows/` + `scripts/` — the Actions surface (`docs/operations.md`).
 
 ## Invariants (test-enforced — don't break them)
