@@ -41,7 +41,7 @@ def test_prompt_inlines_task_instructions_context_and_required_outputs():
 
     prompt = _assemble_prompt(taskdef, details, None)
 
-    assert "Acceptance criteria are phrased as Given/When/Then" in prompt
+    assert "# Spec quality checklist" in prompt
     assert "# Constitution" in prompt
     assert "`specs/HQ-7/spec.md`" in prompt
     assert "{ticket}" not in prompt
