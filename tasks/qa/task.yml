@@ -2,9 +2,11 @@
 # `finalize`. It stands the app up with the repo's own tooling inside the
 # devcontainer (Node 22 + docker-in-docker) -- the compose-based `qa-env`
 # adapter stays deferred (docs/roadmap.md), so nothing here binds to it.
-# Screenshots are work-repo files, not ledger artifacts: they land in this
-# run's own patch, and the engine rewrites qa.md's relative image links to raw
-# URLs on that commit when it posts qa.md to the PR.
+# `screenshots/` is a DIRECTORY artifact (trailing slash): its contents cannot
+# be named in advance, so the engine collects whatever is there, zero or more.
+# They are ledger artifacts like every other output -- kept out of the work
+# repo, which is for product code -- and the engine rewrites qa.md's relative
+# image links to their ledger URLs when it posts qa.md to the PR.
 id: qa
 version: 1
 description: Verify the change in a running app and reflect screenshots onto the PR.
@@ -18,6 +20,7 @@ skills:
 outputs:
   artifacts:
     - specs/{ticket}/qa.md
+    - specs/{ticket}/screenshots/
 handoff:
   allowed:
     - finalize
