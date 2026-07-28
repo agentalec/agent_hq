@@ -60,7 +60,7 @@ The fixed task chain became agent-chosen handoffs, validated by the engine.
 | Task-authoring guide, dispositions, handoff + concurrency docs | `docs/task-authoring.md`, `docs/operations.md` |
 | `hq-*` operator skills — setup, authoring, inspection, recovery | `.claude/skills/` |
 
-### 2026-07-22 → 07-25 — pilot hardening (live smoke tests)
+### 2026-07-22 → 07-28 — pilot hardening (live smoke tests)
 
 Every row here is a merged PR — the live smoke-test rounds against a real
 work repo, and the fixes each round surfaced.
@@ -79,6 +79,7 @@ work repo, and the fixes each round surfaced.
 | #23 | Workflow concurrency keyed to what each job owns (`run-<run_id>`, `intake-<issue>`, `agent-hq-dispatch`) instead of one shared `agent-hq-state` group. GitHub keeps a single pending slot per group, so bursts cancelled each other: task runs starved (a ticket never last in a batch might never start) and intakes were dropped outright. `_MAX_WRITE_ATTEMPTS` 5 → 12 for the higher concurrent-writer count that follows | `.github/workflows/`, `engine/state.py` |
 | #22 | Gate approvals made usable: the request inlines every artifact the gated run produced (collapsed `<details>`, truncated past 20000 chars, each linked to its ledger copy on the state branch); a `WAITING_GATE` run labels its issue `hq:waiting-gate` until a decision lands; the run id in the approval grammar became optional — a bare `/agent-hq approve` decides the open gate, made safe by ignoring any comment predating `gate_requested_at`; and `gates.post[].auto_approve` lets a task decide its own gate without a human — honored both at gate-open and by the sweep for runs already parked, still posting the artifact-carrying comment (as a record, not a request) and a `gate.decided` event. The pilot's `spec` gate is now auto-approved | `engine/adapters/github_issue_comment_gate.py`, `engine/engine.py`, `engine/runner.py`, `engine/state.py`, `schemas/task.schema.json` |
 | #15 | `qa` wired into the route (`review` → `qa` → `finalize`): stands the app up with the work repo's own tooling, screenshots each acceptance criterion, and posts `qa.md` to the PR with its images. Collect rewrites repo-relative image links to raw URLs on the landed commit; the work patch now carries binary files (`git diff --binary`), without which no screenshot could land at all | `tasks/qa/`, `tasks/review/`, `engine/runner.py`, `engine/adapters/claude_code_headless.py` |
+| #24 | `spec` and `review` prompts write for the comment they become, not a document: each says where its file is posted, criteria are capped one-liners, capability notes are path-named bullets, findings are one line with a location and a fix, and the over-engineering / security passes became lenses feeding the severity list instead of two sections reporting nothing every round | `tasks/spec/`, `tasks/review/` |
 
 ## Planned
 
