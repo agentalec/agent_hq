@@ -36,3 +36,4 @@
 {"event_id": "8c13c392def32f14:qa-1:accepted", "kind": "handoff.accepted", "ticket_id": "30", "run_id": "8c13c392def32f14", "detail": "Implementation clean after Round 3 review. All blockers resolved: tooltip now handles 0-day-old patients correctly, singular/plural forms are grammatically correct, and capitalization is consistent. Ready for QA to verify age display formatting across all age ranges on the encounter page patient card."}
 {"event_id": "8c13c392def32f14:succeeded", "kind": "run.succeeded", "ticket_id": "30", "run_id": "8c13c392def32f14", "state": "SUCCEEDED", "artifacts": ["specs/30/review.md"]}
 {"event_id": "0f80c4b344a055ca:collected", "kind": "run.collected", "ticket_id": "30", "run_id": "0f80c4b344a055ca", "tokens": 0, "cost_usd": 0.0}
+{"event_id": "0f80c4b344a055ca:failed", "kind": "run.failed", "ticket_id": "30", "run_id": "0f80c4b344a055ca", "state": "FAILED"}
