@@ -27,7 +27,12 @@ agentalec/care_fe:
     # seeds the admin/admin user the auth setup project logs in with.
     qa: |
       set -euo pipefail
-      export CI=1 NODE_ENV=production REACT_CARE_API_URL=http://localhost:9000
+      # NODE_ENV is deliberately NOT exported globally: with it set to
+      # production, `npm ci` skips devDependencies, so the `prepare` lifecycle
+      # script cannot find husky and exits 127. care_fe's own CI sets it only
+      # on the build and test steps -- mirrored below. HUSKY=0 is belt and
+      # braces: git hooks have no business installing in a throwaway worktree.
+      export CI=1 HUSKY=0 REACT_CARE_API_URL=http://localhost:9000
       git clone --depth 1 -b develop https://github.com/ohcnetwork/care .agent-hq/care
       {
         echo DISABLE_RATELIMIT=True
@@ -36,9 +41,9 @@ agentalec/care_fe:
       } >> .agent-hq/care/docker/.local.env
       make -C .agent-hq/care docker_config_file=docker-compose.local.yaml up load-fixtures
       npm ci --prefer-offline
-      npm run build
+      NODE_ENV=production npm run build
       npx playwright install --with-deps chromium
-      npx playwright test --project=setup --workers=1
+      NODE_ENV=production npx playwright test --project=setup --workers=1
       cat > .agent-hq/setup-notes.md <<'NOTES'
       # Environment (prepared for you -- do not rebuild it)
 
