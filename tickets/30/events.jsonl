@@ -25,3 +25,4 @@
 {"event_id": "1e3fa28dcf2c59b1:queued", "kind": "run.queued", "ticket_id": "30", "run_id": "1e3fa28dcf2c59b1", "task_id": "implement", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "2290fa8fc35ab5fb:review-to-implement-round-3:accepted", "kind": "handoff.accepted", "ticket_id": "30", "run_id": "2290fa8fc35ab5fb", "detail": "Blocker found: tooltip is empty string for 0-day-old patients (utils.ts:246-250). Also fix pluralization and capitalization issues in age display."}
 {"event_id": "2290fa8fc35ab5fb:succeeded", "kind": "run.succeeded", "ticket_id": "30", "run_id": "2290fa8fc35ab5fb", "state": "SUCCEEDED", "artifacts": ["specs/30/review.md"]}
+{"event_id": "1e3fa28dcf2c59b1:collected", "kind": "run.collected", "ticket_id": "30", "run_id": "1e3fa28dcf2c59b1", "cost_usd": 0.0}
