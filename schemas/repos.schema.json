@@ -12,7 +12,12 @@
       "role": { "type": "string", "enum": ["be", "fe", "docs"] },
       "branch_prefix": { "type": "string" },
       "product_area": { "type": "string" },
-      "base_branch": { "type": "string", "description": "Branch a fresh agent-hq/<issue> branch is cut from" }
+      "base_branch": { "type": "string", "description": "Branch a fresh agent-hq/<issue> branch is cut from" },
+      "setup": {
+        "type": "object",
+        "description": "Shell commands run in the worktree before the agent starts, per task id. 'default' applies to any task without its own entry; a task id overrides it. Structured setup belongs here, not in a prompt: it costs no agent requests, fails loudly, and is the same every run. The command may leave notes for the agent at .agent-hq/setup-notes.md.",
+        "additionalProperties": { "type": "string" }
+      }
     }
   }
 }

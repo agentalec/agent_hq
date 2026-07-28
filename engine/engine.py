@@ -273,6 +273,17 @@ def intake_repo(config: Config) -> str | None:
     return config.projects.get("engine_repo")
 
 
+def resolve_setup(config: Config, repo: str | None, task_id: str) -> str | None:
+    """The shell command that prepares `repo`'s worktree for `task_id`, from
+    `repos.yml`'s `setup` map: the task's own entry, else `default`, else
+    None. Config, so a different project configures a different command
+    without touching engine code or a prompt -- and so setup that is the same
+    every run costs no agent requests to perform."""
+    meta = (config.repos or {}).get(repo or "", {})
+    setup = meta.get("setup") or {}
+    return setup.get(task_id) or setup.get("default")
+
+
 def resolve_target_repo(config: Config, details) -> str | None:
     """Match a repos.yml product_area against the ticket's labels/title/body.
     Returns None when nothing matches (intake treats that as ineligible;

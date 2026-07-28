@@ -4,27 +4,24 @@ Read `constitution.md`, `specs/{ticket}/spec.md`, and `specs/{ticket}/review.md`
 Your worktree is already checked out at the implemented branch — the code
 under test is there, and you have Bash, Node 22, and Docker.
 
-## Stand the app up
+## The app is already running
 
-Use the repo's own tooling to install and run it (`package.json` scripts,
-`Makefile`, `README`, `docker-compose.yml`). Synthetic fixtures only — never
-real patient data.
+If the repository configured a setup command, it has already installed
+dependencies, started services and loaded fixtures — see the Environment
+section above and `.agent-hq/setup-notes.md`. **Do not stand anything up
+yourself**, and never point the app at a non-localhost API: a real deployment
+holds real patient data, and nothing here may touch it. Synthetic fixtures
+only.
 
-If the app needs a backend you cannot stand up, **do not fake a pass**. In
-order of preference: mock at the network boundary, use whatever
-component/story/route-level harness the repo already has, or fall back to
-screenshotting the component in isolation. Whatever you end up doing, say so
-plainly in `qa.md` — an honest "could not exercise the live queue board,
-screenshotted the component with mocked props" is worth more than a green
-tick that means nothing.
+If the environment is not there — no setup was configured for this repo, or
+it left less than you need — **do not fake a pass** and do not spend the run
+building one by hand. Screenshot whatever you can reach, mark the rest
+`not-exercised` with the reason, and say plainly in `qa.md` what was missing.
+An honest "the queue board needs a backend this repo has no setup command
+for" is worth more than a green tick that means nothing, and it tells the
+operator exactly which command to add.
 
 ## Screenshot every user-facing change
-
-Install the browser once, then drive the UI:
-
-```bash
-npx playwright install --with-deps chromium
-```
 
 For each user-facing acceptance criterion in `spec.md`, navigate to the state
 it describes and capture a screenshot. Save each PNG to

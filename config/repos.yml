@@ -1,6 +1,14 @@
 # Repos config (§6). `product_area` is the intake routing keyword --
 # engine.engine.resolve_target_repo substring-matches it against a ticket's
 # title+body+labels, first match wins in this order (no match = ineligible).
+#
+# `setup` maps a task id to a shell command run in the worktree BEFORE the
+# agent starts (`default` covers any task without its own entry). It is here,
+# in config, so a different project configures a different command without
+# touching engine code or a task prompt -- and because setup that is identical
+# every run should not cost agent requests to perform. A non-zero exit fails
+# the run through the ordinary retry path; leave the agent anything it needs
+# to know at `.agent-hq/setup-notes.md`.
 agentalec/care:
   role: be
   branch_prefix: agent-hq
@@ -11,6 +19,38 @@ agentalec/care_fe:
   branch_prefix: agent-hq
   product_area: frontend
   base_branch: develop
+  setup:
+    # Mirrors care_fe's own .github/workflows/playwright.yaml -- the recipe
+    # the repo already maintains for E2E, not one invented here. Everything
+    # lands under .agent-hq/ (excluded from the work patch) so none of it can
+    # reach the PR. No secrets: jwks.b64.txt is committed, and load-fixtures
+    # seeds the admin/admin user the auth setup project logs in with.
+    qa: |
+      set -euo pipefail
+      export CI=1 NODE_ENV=production REACT_CARE_API_URL=http://localhost:9000
+      git clone --depth 1 -b develop https://github.com/ohcnetwork/care .agent-hq/care
+      {
+        echo DISABLE_RATELIMIT=True
+        echo "JWKS_BASE64=\"$(cat .github/runner-files/jwks.b64.txt)\""
+        echo MAX_QUESTIONNAIRE_TEXT_RESPONSE_SIZE=500
+      } >> .agent-hq/care/docker/.local.env
+      make -C .agent-hq/care docker_config_file=docker-compose.local.yaml up load-fixtures
+      npm ci --prefer-offline
+      npm run build
+      npx playwright install --with-deps chromium
+      npx playwright test --project=setup --workers=1
+      cat > .agent-hq/setup-notes.md <<'NOTES'
+      # Environment (prepared for you -- do not rebuild it)
+
+      - care backend: http://localhost:9000, seeded via `make load-fixtures`
+      - Start the frontend with `npm run preview` -> http://localhost:4000
+        (already built; do NOT point it at any non-localhost API)
+      - Signed-in browser state: `tests/.auth/user.json`. Load it with
+        `browser.newContext({ storageState: 'tests/.auth/user.json' })` --
+        the login and a seeded facility/patient/questionnaire already exist.
+      - Chromium is installed. Drive it with Playwright directly; you do not
+        need to add tests to the repo's suite.
+      NOTES
 agentalec/care_docs:
   role: docs
   branch_prefix: agent-hq
