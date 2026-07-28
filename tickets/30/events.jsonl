@@ -15,3 +15,4 @@
 {"event_id": "6d8a9176aa763b8a:queued", "kind": "run.queued", "ticket_id": "30", "run_id": "6d8a9176aa763b8a", "task_id": "implement", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "f9dec7d0fa362389:30-round2-implement:accepted", "kind": "handoff.accepted", "ticket_id": "30", "run_id": "f9dec7d0fa362389", "detail": "Fix blocker: revert unintended formatting change in tests/PLAYWRIGHT_GUIDE.md lines 196-213 that removed all newlines from URL examples."}
 {"event_id": "f9dec7d0fa362389:succeeded", "kind": "run.succeeded", "ticket_id": "30", "run_id": "f9dec7d0fa362389", "state": "SUCCEEDED", "artifacts": ["specs/30/review.md"]}
+{"event_id": "6d8a9176aa763b8a:collected", "kind": "run.collected", "ticket_id": "30", "run_id": "6d8a9176aa763b8a", "cost_usd": 0.0}
