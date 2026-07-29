@@ -84,12 +84,44 @@ def test_write_lands_as_one_commit_touching_three_files(tmp_path):
     assert state["runs"][0]["run_id"] == "run-1"
 
 
+def test_write_emits_the_dashboard_projection(tmp_path):
+    """`dashboard.json` at the branch root is the single document the static
+    dashboard fetches, so it must land in the same commit as the state it
+    projects -- otherwise the page reads a branch it cannot see."""
+    origin = _make_origin(tmp_path)
+    worktree = _clone_worktree(tmp_path, origin, "wt-dash")
+    store = GitJsonStateStore(worktree)
+
+    def fn(txn: Txn) -> None:
+        txn.set_ticket("ticket-1", status="ACTIVE", pinned_comment_id=None)
+        txn.put_run("ticket-1", dict(RUN))
+        txn.record_health("executor", "claude-code-headless", True, "ok")
+
+    store.write(fn)
+
+    assert "dashboard.json" in _git("show", "--stat", "--format=", "HEAD", cwd=worktree)
+
+    check = _clone_worktree(tmp_path, origin, "check-dash")
+    doc = json.loads((check / "dashboard.json").read_text())
+    assert doc["generated_at"].endswith("Z")
+    assert doc["health"]["executor/claude-code-headless"]["ok"] is True
+    # Whole ticket documents, not a trimmed summary: every view on the page
+    # is derived client-side from these.
+    assert doc["tickets"] == [
+        json.loads((check / "tickets" / "ticket-1" / "state.json").read_text())
+    ]
+
+
 def test_write_of_unchanged_values_is_a_no_op_not_an_error(tmp_path):
     """Dirtiness is declared by the mutators, not computed -- rewriting a
     field its current value still marks the ticket dirty. `git commit` fails
     outright on an empty tree, so without the staged-diff check any caller
     that re-writes an unchanged value (the sweep's PR-comment watermark, on a
-    pass that found nothing new) would raise every time."""
+    pass that found nothing new) would raise every time.
+
+    Also pins where `dashboard.json` is regenerated: it carries a fresh
+    `generated_at`, so building it before that check would make every no-op
+    write look like a change and this test would see a second commit."""
     origin = _make_origin(tmp_path)
     worktree = _clone_worktree(tmp_path, origin, "wt-noop")
     store = GitJsonStateStore(worktree)

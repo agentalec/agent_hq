@@ -13,7 +13,6 @@ Everything intentionally not in P0, with its restore trigger. Sources: the P0 sc
 | Scheduled adapter healthchecks (PA-3) | `agent-hq health` probing every configured adapter on the 15-min schedule + failure alerts | First incident where a broken adapter stranded a ticket undetected (P0 records health only for adapters each run exercised) |
 | GitHub App auth | Short-lived least-privilege App installation tokens replacing the pilot's fine-grained PAT | Before the first multi-repository production pilot |
 | Reload-reapply state transactions | Conflict-safe field-merge transactions on the state branch | The Actions-concurrency serialization of state writes throttles throughput |
-| Full dashboard | Kanban, per-ticket timelines, spend by task-type/adapter/month, effective-config view (P0 ships a single state-table page) | Someone actually asks for a view the minimal page lacks |
 | Monthly budget tracking (CFG-5) | Monthly API-$ and Actions-minutes budgets, threshold alerts, cap-driven intake stop | First month-end surprise, or pilot exit |
 | CI-green auto-undraft | Sweep polls PR checks, undrafts + requests reviewers when green | Human undrafting becomes a bottleneck |
 | Gate half-timeout alerts | Warning ping at 50% of a gate's working-hours timeout | Gates routinely expiring without warning |

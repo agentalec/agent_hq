@@ -930,13 +930,20 @@ def poll_pr_feedback(store, config, taskdefs, adapter_fn, ticket_id: str, state:
         run_id = compute_run_id(f"pr-comment:{latest_id}", 0, task_id, 0)
         result: dict = {}
 
-        def apply(txn: Txn, r=repo, w=watermark, rid=run_id, why=reason, cid=latest_id) -> None:
+        # `res=result` for the same reason as every other binding here: the
+        # closure is defined in a loop. It is called synchronously inside the
+        # iteration that built it, so late binding never actually bit -- but
+        # binding it is what the rest of the signature already does, and it
+        # is what stops ruff's B023 from being permanently red.
+        def apply(
+            txn: Txn, r=repo, w=watermark, rid=run_id, why=reason, cid=latest_id, res=result
+        ) -> None:
             # Cleared per attempt, like `claim_run`'s own flag: a write that
             # loses the push race re-runs this against fresh state, and only
             # the attempt that actually lands may decide the outcome. Without
             # the reset, a refusal on attempt 1 would still block the ticket
             # after attempt 2 enqueued successfully.
-            result.clear()
+            res.clear()
             txn.upsert_work_repo(ticket_id, r, comments_polled_at=w)
             doc = txn.ticket_doc(ticket_id)
             ok, _trace = check_loop_guard(
@@ -946,7 +953,7 @@ def poll_pr_feedback(store, config, taskdefs, adapter_fn, ticket_id: str, state:
             )
             verdict = check_budget(doc, taskdef["budget"], config.budgets["ticket_cap_usd"])
             if not ok or verdict["over_ticket_cap"] or verdict["insufficient_headroom"]:
-                result["refused"] = (
+                res["refused"] = (
                     "PR feedback would exceed this ticket's run/budget ceiling"
                 )
                 return
@@ -968,7 +975,7 @@ def poll_pr_feedback(store, config, taskdefs, adapter_fn, ticket_id: str, state:
             )
             if doc.get("status") == "AWAITING_MERGE":
                 txn.set_ticket(ticket_id, status="ACTIVE")
-            result["enqueued"] = rid
+            res["enqueued"] = rid
 
         store.write(apply)
 

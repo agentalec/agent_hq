@@ -1,105 +1,65 @@
-"""Dashboard snapshot + HTML render coverage (Task 16, D6 minimal dashboard).
+"""`dashboard.json` projection coverage (D6, NFR-OBS).
 
-The XSS check matters here: `tests/fixtures/state/tickets/HQ-1/state.json`
-plants a hostile `</script><img src=x onerror=alert(1)>` string inside a
-run's `artifacts`. The rendered page must embed it as inert JSON text, never
-as markup.
+The hostile-string check matters here and survives the move from a rendered
+page to a fetched document: `tests/fixtures/state/tickets/HQ-1/state.json`
+plants `</script><img src=x onerror=alert(1)>` inside a run's `artifacts`.
+It has to round-trip as inert JSON data — the page that consumes it never
+uses innerHTML (`dashboard/app.js`), so the string can only ever become text.
 """
 
 import json
 from argparse import Namespace
-from html.parser import HTMLParser
 from pathlib import Path
 
 from engine import cli
-from engine.dashboard import build, snapshot
+from engine.dashboard import document, write_document
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "state"
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-
-class _TagWalker(HTMLParser):
-    def __init__(self):
-        super().__init__()
-        self.script_count = 0
-        self.data_script_count = 0
-        self.img_count = 0
-        self._data_chunks: list[str] = []
-        self._in_data_script = False
-
-    def handle_starttag(self, tag, attrs):
-        self._open(tag, attrs)
-
-    def handle_startendtag(self, tag, attrs):
-        self._open(tag, attrs)
-
-    def _open(self, tag, attrs):
-        if tag == "script":
-            self.script_count += 1
-            if dict(attrs).get("id") == "data":
-                self.data_script_count += 1
-                self._in_data_script = True
-        if tag == "img":
-            self.img_count += 1
-
-    def handle_endtag(self, tag):
-        if tag == "script":
-            self._in_data_script = False
-
-    def handle_data(self, data):
-        if self._in_data_script:
-            self._data_chunks.append(data)
-
-    @property
-    def data_text(self) -> str:
-        return "".join(self._data_chunks)
+HOSTILE = "</script><img src=x onerror=alert(1)>"
 
 
-def test_snapshot_sums_only_usage_known_cost_and_lists_waiting_gate_runs():
-    snap = snapshot(FIXTURES, config=None)
+def test_document_carries_whole_ticket_documents_and_health():
+    doc = document(FIXTURES)
 
-    assert snap["total_spend_usd"] == 1.5
+    assert doc["generated_at"].endswith("Z")
+    assert len(doc["tickets"]) == 1
 
-    assert len(snap["waiting_on_humans"]) == 1
-    waiting = snap["waiting_on_humans"][0]
-    assert waiting["ticket_id"] == "HQ-1"
-    assert waiting["task_id"] == "review"
-    assert waiting["gate_request_id"] == 7
-    assert waiting["gate_requested_at"] == "2026-07-18T00:00:00Z"
+    ticket = doc["tickets"][0]
+    assert ticket["ticket_id"] == "HQ-1"
+    assert len(ticket["runs"]) == 3
+    # Copied through unmodified: a trimmed field is a field the page can
+    # never show, and every view is derived client-side from these.
+    assert ticket == json.loads((FIXTURES / "tickets" / "HQ-1" / "state.json").read_text())
 
-    assert len(snap["tickets"]) == 1
-    assert snap["tickets"][0]["ticket_id"] == "HQ-1"
-    assert len(snap["tickets"][0]["runs"]) == 3
-    assert snap["health"]["gate/github-pr"]["ok"] is False
+    assert doc["health"]["gate/github-pr"]["ok"] is False
 
 
-def test_build_renders_one_data_script_no_injected_markup_and_round_trips(tmp_path):
-    snap = snapshot(FIXTURES, config=None)
-    out_path = build(snap, tmp_path)
-    html = out_path.read_text()
+def test_document_preserves_the_hostile_artifact_string_verbatim():
+    doc = document(FIXTURES)
+    artifacts = [a for run in doc["tickets"][0]["runs"] for a in run.get("artifacts", [])]
 
-    walker = _TagWalker()
-    walker.feed(html)
-
-    # Exactly one <script id="data"> and exactly two <script> tags overall
-    # (the data payload + the inline render logic) -- the hostile artifact
-    # string must not have split into extra script/img elements.
-    assert walker.data_script_count == 1
-    assert walker.script_count == 2
-    assert walker.img_count == 0
-
-    assert json.loads(walker.data_text) == snap
-
-    assert "HQ-1" in html
-    assert "implement" in html
-    assert "review" in html
-    assert "docs" in html
-    assert "1.5" in html
-    assert "token expired" in html
+    assert HOSTILE in artifacts
 
 
-def test_cli_dashboard_writes_index_html(tmp_path):
+def test_written_document_round_trips_as_json(tmp_path):
+    doc = document(FIXTURES)
+    out_path = write_document(doc, tmp_path)
+
+    assert out_path.name == "dashboard.json"
+    assert json.loads(out_path.read_text()) == doc
+
+
+def test_document_of_an_empty_state_dir_is_still_valid(tmp_path):
+    doc = document(tmp_path)
+
+    assert doc["tickets"] == []
+    assert doc["health"] == {}
+
+
+def test_cli_dashboard_writes_dashboard_json(tmp_path):
     out_dir = tmp_path / "site"
     args = Namespace(state=str(FIXTURES), out=str(out_dir))
     cli._dashboard(args, REPO_ROOT)
-    assert (out_dir / "index.html").exists()
+    assert (out_dir / "dashboard.json").exists()

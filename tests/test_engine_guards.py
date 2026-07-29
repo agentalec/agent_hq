@@ -4,6 +4,7 @@ from test_state import _clone_worktree, _make_origin
 
 from engine.config import Config
 from engine.engine import (
+    STATUS_LABELS,
     apply_handoffs,
     check_budget,
     check_concurrency,
@@ -15,7 +16,6 @@ from engine.engine import (
     resolve_target_repo,
     set_status_label,
 )
-from engine.engine import STATUS_LABELS
 from engine.models import Handoff, TicketDetails
 from engine.state import GitJsonStateStore
 

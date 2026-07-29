@@ -1,0 +1,246 @@
+/* ============================================================================
+   CARE UI — Colors & Type
+   ----------------------------------------------------------------------------
+   VENDORED VERBATIM from the Claude Design project
+   `care-ui-design-system-12a1a755-26c9-4433-98b8-fe71af24f95b/colors_and_type.css`
+   (its `styles.css` only @imports this file, so this is the whole system).
+
+   Do not hand-edit: re-import from the design project instead, so the diff
+   stays reviewable. Known quirk kept as-is: `.ds-caption` double-wraps
+   `oklch(var(--muted-foreground))` and renders no colour — don't use it.
+   ----------------------------------------------------------------------------
+   shadcn/ui "neutral" base color, Tailwind v4 oklch token set.
+   Light + dark themes. Semantic role tokens + a UI type scale.
+   ============================================================================ */
+
+/* ---- Fonts ----------------------------------------------------------------
+   NOTE: the exact font-family in careui/src/index.css could not be read via
+   the public web. shadcn registries default to a clean grotesque sans. We use
+   a system-first stack with Inter as the web fallback. CONFIRM the real face.
+*/
+:root {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", "JetBrains Mono",
+    "Menlo", "Consolas", monospace;
+}
+
+/* ============================================================================
+   COLOR TOKENS — Light (shadcn neutral, Tailwind v4)
+   ============================================================================ */
+:root {
+  --radius: 0.625rem;            /* 10px — shadcn v4 default base radius */
+
+  --background:            oklch(1 0 0);
+  --foreground:            oklch(0.145 0 0);
+
+  --card:                  oklch(1 0 0);
+  --card-foreground:       oklch(0.145 0 0);
+
+  --popover:               oklch(1 0 0);
+  --popover-foreground:    oklch(0.145 0 0);
+
+  --primary:               oklch(0.205 0 0);   /* near-black ink */
+  --primary-foreground:    oklch(0.985 0 0);
+
+  --secondary:             oklch(0.97 0 0);
+  --secondary-foreground:  oklch(0.205 0 0);
+
+  --muted:                 oklch(0.97 0 0);
+  --muted-foreground:      oklch(0.556 0 0);
+
+  --accent:                oklch(0.97 0 0);
+  --accent-foreground:     oklch(0.205 0 0);
+
+  --destructive:           oklch(0.577 0.245 27.325);  /* red */
+  --destructive-foreground: oklch(0.985 0 0);
+
+  --border:                oklch(0.922 0 0);
+  --input:                 oklch(0.922 0 0);
+  --ring:                  oklch(0.708 0 0);
+
+  /* Chart / data-viz ramp (shadcn default) */
+  --chart-1: oklch(0.646 0.222 41.116);   /* orange */
+  --chart-2: oklch(0.6  0.118 184.704);   /* teal   */
+  --chart-3: oklch(0.398 0.07  227.392);  /* blue   */
+  --chart-4: oklch(0.828 0.189 84.429);   /* gold   */
+  --chart-5: oklch(0.769 0.188 70.08);    /* amber  */
+
+  /* Sidebar surface tokens */
+  --sidebar:                       oklch(0.985 0 0);
+  --sidebar-foreground:            oklch(0.145 0 0);
+  --sidebar-primary:               oklch(0.205 0 0);
+  --sidebar-primary-foreground:    oklch(0.985 0 0);
+  --sidebar-accent:                oklch(0.97 0 0);
+  --sidebar-accent-foreground:     oklch(0.205 0 0);
+  --sidebar-border:                oklch(0.922 0 0);
+  --sidebar-ring:                  oklch(0.708 0 0);
+
+  /* ---- Healthcare semantic status (CARE convention; CONFIRM exact hues) ---
+     CARE surfaces clinical urgency through status color. These are sensible,
+     accessible defaults harmonised with the chart ramp — confirm against the
+     real app palette. */
+  --status-stable:    oklch(0.62 0.13 155);   /* green  — stable / discharged */
+  --status-moderate:  oklch(0.80 0.16 85);    /* amber  — needs attention     */
+  --status-critical:  oklch(0.58 0.22 27);    /* red    — critical / ICU      */
+  --status-info:      oklch(0.55 0.12 240);   /* blue   — informational       */
+}
+
+/* ============================================================================
+   COLOR TOKENS — Dark (shadcn neutral, Tailwind v4)
+   ============================================================================ */
+.dark {
+  --background:            oklch(0.145 0 0);
+  --foreground:            oklch(0.985 0 0);
+
+  --card:                  oklch(0.205 0 0);
+  --card-foreground:       oklch(0.985 0 0);
+
+  --popover:               oklch(0.205 0 0);
+  --popover-foreground:    oklch(0.985 0 0);
+
+  --primary:               oklch(0.922 0 0);
+  --primary-foreground:    oklch(0.205 0 0);
+
+  --secondary:             oklch(0.269 0 0);
+  --secondary-foreground:  oklch(0.985 0 0);
+
+  --muted:                 oklch(0.269 0 0);
+  --muted-foreground:      oklch(0.708 0 0);
+
+  --accent:                oklch(0.269 0 0);
+  --accent-foreground:     oklch(0.985 0 0);
+
+  --destructive:           oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.985 0 0);
+
+  --border:                oklch(1 0 0 / 10%);
+  --input:                 oklch(1 0 0 / 15%);
+  --ring:                  oklch(0.556 0 0);
+
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17  162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+
+  --sidebar:                       oklch(0.205 0 0);
+  --sidebar-foreground:            oklch(0.985 0 0);
+  --sidebar-primary:               oklch(0.922 0 0);
+  --sidebar-primary-foreground:    oklch(0.205 0 0);
+  --sidebar-accent:                oklch(0.269 0 0);
+  --sidebar-accent-foreground:     oklch(0.985 0 0);
+  --sidebar-border:                oklch(1 0 0 / 10%);
+  --sidebar-ring:                  oklch(0.556 0 0);
+}
+
+/* ============================================================================
+   TYPE SCALE — UI-first (shadcn surfaces are 14px-base, dense, legible)
+   ============================================================================ */
+:root {
+  /* Font sizes */
+  --text-xs:   0.75rem;    /* 12px */
+  --text-sm:   0.875rem;   /* 14px — default UI body */
+  --text-base: 1rem;       /* 16px */
+  --text-lg:   1.125rem;   /* 18px */
+  --text-xl:   1.25rem;    /* 20px */
+  --text-2xl:  1.5rem;     /* 24px */
+  --text-3xl:  1.875rem;   /* 30px */
+  --text-4xl:  2.25rem;    /* 36px */
+  --text-5xl:  3rem;       /* 48px */
+
+  /* Weights */
+  --weight-normal:   400;
+  --weight-medium:   500;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+
+  /* Line heights */
+  --leading-tight:   1.2;
+  --leading-snug:    1.35;
+  --leading-normal:  1.5;
+  --leading-relaxed: 1.625;
+
+  /* Tracking */
+  --tracking-tight:  -0.02em;
+  --tracking-normal: 0;
+  --tracking-wide:   0.025em;
+}
+
+/* ---- Semantic text roles (use these in markup) ---- */
+.ds-display {
+  font-family: var(--font-sans);
+  font-size: var(--text-5xl);
+  font-weight: var(--weight-bold);
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-tight);
+}
+.ds-h1 {
+  font-family: var(--font-sans);
+  font-size: var(--text-4xl);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-tight);
+}
+.ds-h2 {
+  font-family: var(--font-sans);
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-snug);
+  letter-spacing: var(--tracking-tight);
+}
+.ds-h3 {
+  font-family: var(--font-sans);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-snug);
+}
+.ds-body {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-normal);
+  line-height: var(--leading-normal);
+}
+.ds-body-lg {
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  font-weight: var(--weight-normal);
+  line-height: var(--leading-relaxed);
+}
+.ds-label {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-normal);
+}
+.ds-caption {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-normal);
+  line-height: var(--leading-normal);
+  color: oklch(var(--muted-foreground));
+}
+.ds-mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-normal);
+  line-height: var(--leading-normal);
+}
+
+/* ============================================================================
+   ELEVATION / RADIUS scale (shadcn radius is derived from --radius)
+   ============================================================================ */
+:root {
+  --radius-sm:  calc(var(--radius) - 4px);   /* 6px  */
+  --radius-md:  calc(var(--radius) - 2px);   /* 8px  */
+  --radius-lg:  var(--radius);               /* 10px */
+  --radius-xl:  calc(var(--radius) + 4px);   /* 14px */
+  --radius-full: 9999px;
+
+  /* shadcn shadows are restrained; data-dense surfaces lean on borders */
+  --shadow-xs: 0 1px 2px 0 oklch(0 0 0 / 0.05);
+  --shadow-sm: 0 1px 3px 0 oklch(0 0 0 / 0.08), 0 1px 2px -1px oklch(0 0 0 / 0.08);
+  --shadow-md: 0 4px 6px -1px oklch(0 0 0 / 0.08), 0 2px 4px -2px oklch(0 0 0 / 0.06);
+  --shadow-lg: 0 10px 15px -3px oklch(0 0 0 / 0.08), 0 4px 6px -4px oklch(0 0 0 / 0.05);
+  --shadow-popover: 0 4px 24px -2px oklch(0 0 0 / 0.12), 0 2px 8px -2px oklch(0 0 0 / 0.08);
+}

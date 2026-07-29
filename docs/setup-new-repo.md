@@ -163,8 +163,12 @@ all five or the transition silently fails to label:
 - **The `agent-hq-state` branch**: `scripts/checkout-state.sh`
   self-bootstraps the orphan state branch on the first workflow run — no
   manual branch creation ([operations.md](operations.md) §3).
-- **The dashboard**: `pages.yml` builds and deploys it on a `*/5` schedule
-  and after intake/dispatch, once Pages is enabled (step 2).
+- **The dashboard**: `pages.yml` deploys `dashboard/` when that directory
+  changes, once Pages is enabled (step 2). It is static source — state
+  reaches it at view time, by fetching `dashboard.json` off the state
+  branch, so a state write never triggers a deploy. Point
+  `<meta name="agent-hq:engine-repo">` in `dashboard/index.html` at your
+  engine repo; it must be public for the page to read anything.
 - **The execute environment**: `run.yml`'s `execute` job builds the engine
   repo's own `.devcontainer/devcontainer.json` (pinned Node 22 +
   `@github/copilot`) via `devcontainers/ci` — the only phase that needs the

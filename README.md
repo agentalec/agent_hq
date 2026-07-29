@@ -41,7 +41,9 @@ every 15 minutes and triggers `run.yml`, which executes one task phase
 (prepare/execute/collect) inside the project devcontainer. The issue is the
 control plane, produced work lives on target-repo branches and selected
 draft PRs, and orchestration memory lives on an orphan `agent-hq-state`
-branch. A static dashboard (`pages.yml`) reports ticket/run state. See
+branch. A static operator dashboard (`dashboard/`, deployed by `pages.yml`)
+reports the gate queue, ticket board, run chains, spend and adapter
+health. See
 [where work and memory live](docs/architecture.md#where-work-and-memory-live)
 for the exact lifecycle and storage paths, and
 [`docs/task-authoring.md`](docs/task-authoring.md) for the generic task
