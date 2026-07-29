@@ -81,10 +81,11 @@ CI (`.github/workflows/ci.yml`) runs all five; a change isn't done until all pas
   never appear in git argv (env-var credential helper only). The default
   `copilot-cli` child carries ONLY `COPILOT_GITHUB_TOKEN` (a dedicated
   no-repo-access bot seat) — never the engine's own `AGENT_HQ_TOKEN` PAT.
-  Copilot's premium-request billing has no per-run USD metering (runs record
-  `cost_usd: 0.0`), so per-ticket USD budget caps don't bind under this
-  binding — `budget.retries`, the loop guard, in-flight cap, and runtime
-  deadlines still do (see `docs/architecture.md` deviation 9).
+  Copilot bills tokens as AI credits, and the CLI prints a session's credits
+  and token counts on stderr, so a run's `cost_usd` is the billed figure
+  (`_parse_usage`, 1 credit = $0.01) and the USD caps in `budgets.yml` do
+  bind — alongside `budget.retries`, the loop guard, the in-flight cap, and
+  runtime deadlines (see `docs/architecture.md` deviation 9).
 - `run_id` is causal (`compute_run_id`) for the intake root run; `enqueue`
   is idempotent by run_id. A handoff-spawned run instead derives its id via
   `compute_handoff_run_id` (see above).

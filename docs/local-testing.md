@@ -39,8 +39,12 @@ check, authenticate interactively and run a prompt that needs no tools:
 
 ```bash
 copilot login
-copilot -p "Reply exactly: OK" -s --no-ask-user --model claude-sonnet-4.5
+copilot -p "Reply exactly: OK" --no-ask-user --model claude-sonnet-4.5
 ```
+
+The `AI Credits` / `Tokens` trailer this prints on stderr is what the
+adapter parses a run's spend from (`copilot_cli._parse_usage`), so leave
+`-s` off — silent mode suppresses it.
 
 Interactive OAuth is the preferred local authentication. Do not create or
 export a PAT merely for this smoke test.
