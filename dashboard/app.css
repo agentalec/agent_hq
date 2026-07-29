@@ -310,6 +310,58 @@ button { font: inherit; cursor: pointer; }
 .artifact-plain { font-family: var(--font-mono); font-size: 11px; color: var(--muted-foreground); overflow-wrap: anywhere; }
 .attempt-note { font-size: 12px; color: var(--destructive); text-wrap: pretty; }
 
+/* ---- artifact viewer ------------------------------------------------------ */
+
+.artifact-body { padding: 24px; }
+.artifact-image { display: block; max-width: 100%; height: auto; border-radius: var(--radius-md); }
+
+/* Prose measure is capped: a spec read edge-to-edge on a wide monitor is
+   the fastest way to make a readable document unreadable. */
+.md-prose { max-width: 74ch; display: flex; flex-direction: column; gap: 16px; }
+.md-prose > :first-child { margin-top: 0; }
+
+.md-h { margin: 8px 0 0; line-height: var(--leading-snug); letter-spacing: -0.01em; }
+h1.md-h { font-size: var(--text-2xl); font-weight: var(--weight-semibold); }
+h2.md-h { font-size: var(--text-xl); font-weight: var(--weight-semibold); }
+h3.md-h { font-size: var(--text-lg); font-weight: var(--weight-semibold); }
+h4.md-h, h5.md-h, h6.md-h { font-size: var(--text-base); font-weight: var(--weight-medium); }
+
+.md-p { margin: 0; line-height: var(--leading-relaxed); text-wrap: pretty; }
+.md-list { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; }
+.md-list .md-list { margin-top: 6px; }
+.md-list li { line-height: var(--leading-relaxed); }
+
+.md-code {
+  font-family: var(--font-mono); font-size: 0.9em;
+  padding: 1px 5px; border-radius: var(--radius-sm);
+  background: var(--secondary); color: var(--secondary-foreground);
+  overflow-wrap: anywhere;
+}
+.md-pre {
+  margin: 0; padding: 14px 16px;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--background);
+  overflow-x: auto;
+}
+.md-pre code { font-family: var(--font-mono); font-size: 12px; line-height: 1.6; }
+
+.md-quote {
+  margin: 0; padding: 4px 0 4px 14px;
+  border-left: 3px solid var(--border); color: var(--muted-foreground);
+}
+.md-hr { border: 0; border-top: 1px solid var(--border); margin: 4px 0; }
+.md-img { max-width: 100%; height: auto; border-radius: var(--radius-md); }
+.md-broken { font-family: var(--font-mono); font-size: 12px; color: var(--muted-foreground); }
+
+/* Wide content scrolls inside its own box; the page never scrolls sideways. */
+.md-table-scroll { overflow-x: auto; }
+.md-table { border-collapse: collapse; font-size: 13px; }
+.md-table th, .md-table td {
+  border: 1px solid var(--border); padding: 7px 11px;
+  text-align: left; vertical-align: top;
+}
+.md-table th { background: var(--secondary); font-weight: var(--weight-medium); }
+
 /* ---- empty / error -------------------------------------------------------- */
 
 .state-card {

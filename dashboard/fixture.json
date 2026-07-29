@@ -3,6 +3,104 @@
   "engine_repo": "agentalec/agent_hq",
   "tickets": [
     {
+      "ticket_id": "20",
+      "pinned_comment_id": 5079711532,
+      "status": "ACTIVE",
+      "runs": [
+        {
+          "run_id": "70c0ff077356d84d",
+          "task_id": "spec",
+          "task_version": 1,
+          "ticket_id": "20",
+          "state": "FAILED",
+          "attempt": 0,
+          "bindings": {
+            "tracker": "github-issues",
+            "agent-session": "copilot-cli",
+            "messaging": "github-comment",
+            "gate": "github-issue-comment"
+          },
+          "cost_usd": null,
+          "tokens": null,
+          "usage_known": false,
+          "artifacts": [],
+          "chain_depth": 0,
+          "source_event_id": "20:labeled:2026-07-25T17:59:58Z",
+          "enqueue_index": 0,
+          "repo": "agentalec/care_fe",
+          "deadline": "2026-07-25T18:31:11Z",
+          "attempt_started_at": "2026-07-25T18:01:11Z",
+          "base_commit": "5466816828ba496f9d4e6099e77360eb516ece31"
+        },
+        {
+          "run_id": "8619d2b10be03ab7",
+          "task_id": "spec",
+          "task_version": 1,
+          "ticket_id": "20",
+          "state": "SUCCEEDED",
+          "attempt": 1,
+          "bindings": {
+            "tracker": "github-issues",
+            "agent-session": "copilot-cli",
+            "messaging": "github-comment",
+            "gate": "github-issue-comment"
+          },
+          "cost_usd": 0.0,
+          "tokens": null,
+          "usage_known": true,
+          "artifacts": [
+            "specs/20/spec.md"
+          ],
+          "chain_depth": 0,
+          "source_event_id": "20:labeled:2026-07-25T17:59:58Z",
+          "enqueue_index": 0,
+          "deadline": "2026-07-25T18:41:53Z",
+          "attempt_started_at": "2026-07-25T18:11:53Z",
+          "base_commit": "5466816828ba496f9d4e6099e77360eb516ece31",
+          "output_commit": "5466816828ba496f9d4e6099e77360eb516ece31",
+          "pr_ref": null
+        },
+        {
+          "run_id": "f91ed4f6018552f8",
+          "task_id": "spec",
+          "task_version": 1,
+          "ticket_id": "20",
+          "state": "SUCCEEDED",
+          "attempt": 0,
+          "bindings": {
+            "tracker": "github-issues",
+            "agent-session": "copilot-cli",
+            "messaging": "github-comment",
+            "gate": "github-issue-comment"
+          },
+          "cost_usd": 0.371,
+          "tokens": 458300,
+          "usage_known": true,
+          "artifacts": [
+            "specs/20/spec.md"
+          ],
+          "chain_depth": 0,
+          "source_event_id": "20:labeled:2026-07-29T12:10:55Z",
+          "enqueue_index": 0,
+          "repo": "agentalec/care_fe",
+          "deadline": "2026-07-29T12:42:00Z",
+          "attempt_started_at": "2026-07-29T12:12:00Z",
+          "base_commit": "5466816828ba496f9d4e6099e77360eb516ece31",
+          "output_commit": "5466816828ba496f9d4e6099e77360eb516ece31",
+          "pr_ref": null
+        }
+      ],
+      "work_repos": [
+        {
+          "repo": "agentalec/care_fe",
+          "branch": "agent-hq/20",
+          "base_branch": "develop",
+          "recorded_head": "5466816828ba496f9d4e6099e77360eb516ece31",
+          "pr_ref": null
+        }
+      ]
+    },
+    {
       "ticket_id": "35",
       "status": "ACTIVE",
       "pinned_comment_id": 5043111001,
@@ -31,7 +129,9 @@
           "cost_usd": 0.62,
           "tokens": 141200,
           "usage_known": true,
-          "artifacts": ["specs/35/spec.md"],
+          "artifacts": [
+            "specs/35/spec.md"
+          ],
           "chain_depth": 0,
           "repo": "agentalec/care_docs",
           "gate_request_id": "gr_9f21",
@@ -58,11 +158,16 @@
           "task_id": "spec",
           "state": "SUCCEEDED",
           "attempt": 0,
-          "bindings": { "agent-session": "copilot-cli", "gate": "github-issue-comment" },
+          "bindings": {
+            "agent-session": "copilot-cli",
+            "gate": "github-issue-comment"
+          },
           "cost_usd": 0.71,
           "tokens": 162000,
           "usage_known": true,
-          "artifacts": ["specs/41/spec.md"],
+          "artifacts": [
+            "specs/41/spec.md"
+          ],
           "chain_depth": 0
         },
         {
@@ -72,7 +177,10 @@
           "attempt": 0,
           "parent_run_id": "aa10bc4419e0f2a1",
           "handoff_key": "review",
-          "bindings": { "agent-session": "copilot-cli", "gate": "pr-review" },
+          "bindings": {
+            "agent-session": "copilot-cli",
+            "gate": "pr-review"
+          },
           "cost_usd": null,
           "tokens": null,
           "usage_known": false,
@@ -87,7 +195,11 @@
       "ticket_id": "44",
       "status": "ACTIVE",
       "work_repos": [
-        { "repo": "agentalec/care_fe", "branch": "agent-hq/44", "base_branch": "develop" }
+        {
+          "repo": "agentalec/care_fe",
+          "branch": "agent-hq/44",
+          "base_branch": "develop"
+        }
       ],
       "runs": [
         {
@@ -97,7 +209,9 @@
           "attempt": 0,
           "handoff_key": "implement-bed-capacity-filter",
           "parent_run_id": "9911aabbccddeeff",
-          "bindings": { "agent-session": "copilot-cli" },
+          "bindings": {
+            "agent-session": "copilot-cli"
+          },
           "cost_usd": null,
           "tokens": null,
           "usage_known": false,
@@ -128,11 +242,16 @@
           "attempt": 0,
           "handoff_key": "finalize-38",
           "parent_run_id": "1230984756abcdef",
-          "bindings": { "agent-session": "copilot-cli", "gate": "github-issue-comment" },
+          "bindings": {
+            "agent-session": "copilot-cli",
+            "gate": "github-issue-comment"
+          },
           "cost_usd": 0.18,
           "tokens": 41000,
           "usage_known": true,
-          "artifacts": ["specs/38/summary.md"],
+          "artifacts": [
+            "specs/38/summary.md"
+          ],
           "chain_depth": 4,
           "gate_request_id": "gr_b71e",
           "gate_requested_at": "2026-07-29T01:25:02Z"
@@ -145,7 +264,11 @@
       "block_reason": "three qa attempts failed the same assertion",
       "block_source": "engine",
       "work_repos": [
-        { "repo": "agentalec/care_ocr", "branch": "agent-hq/27", "base_branch": "main" }
+        {
+          "repo": "agentalec/care_ocr",
+          "branch": "agent-hq/27",
+          "base_branch": "main"
+        }
       ],
       "runs": [
         {
@@ -155,7 +278,9 @@
           "attempt": 2,
           "handoff_key": "qa-27",
           "parent_run_id": "abcdef1234567890",
-          "bindings": { "agent-session": "copilot-cli" },
+          "bindings": {
+            "agent-session": "copilot-cli"
+          },
           "cost_usd": null,
           "tokens": null,
           "usage_known": false,
@@ -211,74 +336,172 @@
       ],
       "runs": [
         {
-          "run_id": "1112aa2500000001", "task_id": "spec", "state": "SUCCEEDED", "attempt": 0,
-          "bindings": { "agent-session": "copilot-cli" },
-          "cost_usd": 0.54, "tokens": 121000, "usage_known": true,
-          "artifacts": ["specs/30/spec.md"], "chain_depth": 0
+          "run_id": "1112aa2500000001",
+          "task_id": "spec",
+          "state": "SUCCEEDED",
+          "attempt": 0,
+          "bindings": {
+            "agent-session": "copilot-cli"
+          },
+          "cost_usd": 0.54,
+          "tokens": 121000,
+          "usage_known": true,
+          "artifacts": [
+            "specs/30/spec.md"
+          ],
+          "chain_depth": 0
         },
         {
-          "run_id": "148ba5d300000002", "task_id": "implement", "state": "SUCCEEDED", "attempt": 0,
-          "parent_run_id": "1112aa2500000001", "handoff_key": "implement-clinical-age-display",
-          "bindings": { "agent-session": "copilot-cli" },
-          "cost_usd": 2.13, "tokens": 480000, "usage_known": true,
-          "artifacts": ["specs/30/implement-summary.md"], "chain_depth": 1
+          "run_id": "148ba5d300000002",
+          "task_id": "implement",
+          "state": "SUCCEEDED",
+          "attempt": 0,
+          "parent_run_id": "1112aa2500000001",
+          "handoff_key": "implement-clinical-age-display",
+          "bindings": {
+            "agent-session": "copilot-cli"
+          },
+          "cost_usd": 2.13,
+          "tokens": 480000,
+          "usage_known": true,
+          "artifacts": [
+            "specs/30/implement-summary.md"
+          ],
+          "chain_depth": 1
         },
         {
-          "run_id": "f9dec7d000000003", "task_id": "review", "state": "SUCCEEDED", "attempt": 0,
-          "parent_run_id": "148ba5d300000002", "handoff_key": "review",
-          "bindings": { "agent-session": "copilot-cli" },
-          "cost_usd": 0.44, "tokens": 99000, "usage_known": true,
-          "artifacts": ["specs/30/review-round1.md"], "chain_depth": 2
+          "run_id": "f9dec7d000000003",
+          "task_id": "review",
+          "state": "SUCCEEDED",
+          "attempt": 0,
+          "parent_run_id": "148ba5d300000002",
+          "handoff_key": "review",
+          "bindings": {
+            "agent-session": "copilot-cli"
+          },
+          "cost_usd": 0.44,
+          "tokens": 99000,
+          "usage_known": true,
+          "artifacts": [
+            "specs/30/review-round1.md"
+          ],
+          "chain_depth": 2
         },
         {
-          "run_id": "6d8a917600000004", "task_id": "implement", "state": "SUCCEEDED", "attempt": 0,
-          "parent_run_id": "f9dec7d000000003", "handoff_key": "30-round2-implement",
-          "bindings": { "agent-session": "copilot-cli" },
-          "cost_usd": null, "tokens": null, "usage_known": false,
-          "artifacts": [], "chain_depth": 3
+          "run_id": "6d8a917600000004",
+          "task_id": "implement",
+          "state": "SUCCEEDED",
+          "attempt": 0,
+          "parent_run_id": "f9dec7d000000003",
+          "handoff_key": "30-round2-implement",
+          "bindings": {
+            "agent-session": "copilot-cli"
+          },
+          "cost_usd": null,
+          "tokens": null,
+          "usage_known": false,
+          "artifacts": [],
+          "chain_depth": 3
         },
         {
-          "run_id": "2290fa8f00000005", "task_id": "review", "state": "SUCCEEDED", "attempt": 0,
-          "parent_run_id": "6d8a917600000004", "handoff_key": "review",
-          "bindings": { "agent-session": "copilot-cli" },
-          "cost_usd": 0.39, "tokens": 88000, "usage_known": true,
-          "artifacts": ["specs/30/review-round2.md"], "chain_depth": 4
+          "run_id": "2290fa8f00000005",
+          "task_id": "review",
+          "state": "SUCCEEDED",
+          "attempt": 0,
+          "parent_run_id": "6d8a917600000004",
+          "handoff_key": "review",
+          "bindings": {
+            "agent-session": "copilot-cli"
+          },
+          "cost_usd": 0.39,
+          "tokens": 88000,
+          "usage_known": true,
+          "artifacts": [
+            "specs/30/review-round2.md"
+          ],
+          "chain_depth": 4
         },
         {
-          "run_id": "1e3fa28d00000006", "task_id": "implement", "state": "SUCCEEDED", "attempt": 0,
-          "parent_run_id": "2290fa8f00000005", "handoff_key": "review-to-implement-round-3",
-          "bindings": { "agent-session": "copilot-cli" },
-          "cost_usd": null, "tokens": null, "usage_known": false,
-          "artifacts": [], "chain_depth": 5
+          "run_id": "1e3fa28d00000006",
+          "task_id": "implement",
+          "state": "SUCCEEDED",
+          "attempt": 0,
+          "parent_run_id": "2290fa8f00000005",
+          "handoff_key": "review-to-implement-round-3",
+          "bindings": {
+            "agent-session": "copilot-cli"
+          },
+          "cost_usd": null,
+          "tokens": null,
+          "usage_known": false,
+          "artifacts": [],
+          "chain_depth": 5
         },
         {
-          "run_id": "8c13c39200000007", "task_id": "review", "state": "SUCCEEDED", "attempt": 0,
-          "parent_run_id": "1e3fa28d00000006", "handoff_key": "review",
-          "bindings": { "agent-session": "copilot-cli" },
-          "cost_usd": 0.41, "tokens": 92000, "usage_known": true,
-          "artifacts": ["specs/30/review-round3.md"], "chain_depth": 6
+          "run_id": "8c13c39200000007",
+          "task_id": "review",
+          "state": "SUCCEEDED",
+          "attempt": 0,
+          "parent_run_id": "1e3fa28d00000006",
+          "handoff_key": "review",
+          "bindings": {
+            "agent-session": "copilot-cli"
+          },
+          "cost_usd": 0.41,
+          "tokens": 92000,
+          "usage_known": true,
+          "artifacts": [
+            "specs/30/review-round3.md"
+          ],
+          "chain_depth": 6
         },
         {
-          "run_id": "4a90c1e200000008", "task_id": "qa", "state": "FAILED", "attempt": 0,
-          "parent_run_id": "8c13c39200000007", "handoff_key": "qa-1",
-          "bindings": { "agent-session": "copilot-cli" },
-          "cost_usd": 0.0, "tokens": null, "usage_known": true,
-          "artifacts": [], "chain_depth": 7,
+          "run_id": "4a90c1e200000008",
+          "task_id": "qa",
+          "state": "FAILED",
+          "attempt": 0,
+          "parent_run_id": "8c13c39200000007",
+          "handoff_key": "qa-1",
+          "bindings": {
+            "agent-session": "copilot-cli"
+          },
+          "cost_usd": 0.0,
+          "tokens": null,
+          "usage_known": true,
+          "artifacts": [],
+          "chain_depth": 7,
           "detail": "execution timed out before the deadline"
         },
         {
-          "run_id": "77b0de5500000009", "task_id": "qa", "state": "FAILED", "attempt": 1,
-          "parent_run_id": "8c13c39200000007", "handoff_key": "qa-1",
-          "bindings": { "agent-session": "copilot-cli" },
-          "cost_usd": 0.07, "tokens": 18000, "usage_known": true,
-          "artifacts": [], "chain_depth": 7,
-          "detail": "preview build failed — develop moved under the branch"
+          "run_id": "77b0de5500000009",
+          "task_id": "qa",
+          "state": "FAILED",
+          "attempt": 1,
+          "parent_run_id": "8c13c39200000007",
+          "handoff_key": "qa-1",
+          "bindings": {
+            "agent-session": "copilot-cli"
+          },
+          "cost_usd": 0.07,
+          "tokens": 18000,
+          "usage_known": true,
+          "artifacts": [],
+          "chain_depth": 7,
+          "detail": "preview build failed \u2014 develop moved under the branch"
         },
         {
-          "run_id": "6ca2c03300000010", "task_id": "qa", "state": "SUCCEEDED", "attempt": 2,
-          "parent_run_id": "8c13c39200000007", "handoff_key": "qa-1",
-          "bindings": { "agent-session": "copilot-cli" },
-          "cost_usd": 1.24, "tokens": 280000, "usage_known": true,
+          "run_id": "6ca2c03300000010",
+          "task_id": "qa",
+          "state": "SUCCEEDED",
+          "attempt": 2,
+          "parent_run_id": "8c13c39200000007",
+          "handoff_key": "qa-1",
+          "bindings": {
+            "agent-session": "copilot-cli"
+          },
+          "cost_usd": 1.24,
+          "tokens": 280000,
+          "usage_known": true,
           "artifacts": [
             "specs/30/qa.md",
             "specs/30/screenshots/patient-newborn-15-days.png",
@@ -287,35 +510,79 @@
           "chain_depth": 7
         },
         {
-          "run_id": "0f31b7c400000011", "task_id": "finalize", "state": "SUCCEEDED", "attempt": 0,
-          "parent_run_id": "6ca2c03300000010", "handoff_key": "finalize-30",
-          "bindings": { "agent-session": "copilot-cli" },
-          "cost_usd": 1.42, "tokens": 320000, "usage_known": true,
-          "artifacts": ["specs/30/summary.md"], "chain_depth": 8
+          "run_id": "0f31b7c400000011",
+          "task_id": "finalize",
+          "state": "SUCCEEDED",
+          "attempt": 0,
+          "parent_run_id": "6ca2c03300000010",
+          "handoff_key": "finalize-30",
+          "bindings": {
+            "agent-session": "copilot-cli"
+          },
+          "cost_usd": 1.42,
+          "tokens": 320000,
+          "usage_known": true,
+          "artifacts": [
+            "specs/30/summary.md"
+          ],
+          "chain_depth": 8
         },
         {
-          "run_id": "c5417ab800000012", "task_id": "qa", "state": "BLOCKED", "attempt": 3,
-          "parent_run_id": "8c13c39200000007", "handoff_key": "qa-1",
-          "bindings": { "agent-session": "copilot-cli" },
-          "cost_usd": null, "tokens": null, "usage_known": false,
-          "artifacts": ["</script><img src=x onerror=alert(1)>", "../../../etc/passwd"],
+          "run_id": "c5417ab800000012",
+          "task_id": "qa",
+          "state": "BLOCKED",
+          "attempt": 3,
+          "parent_run_id": "8c13c39200000007",
+          "handoff_key": "qa-1",
+          "bindings": {
+            "agent-session": "copilot-cli"
+          },
+          "cost_usd": null,
+          "tokens": null,
+          "usage_known": false,
+          "artifacts": [
+            "</script><img src=x onerror=alert(1)>",
+            "../../../etc/passwd"
+          ],
           "chain_depth": 7,
           "detail": "blocked by the operator after the third screenshot diff"
         },
         {
-          "run_id": "a742dbc400000013", "task_id": "qa", "state": "SUCCEEDED", "attempt": 4,
-          "parent_run_id": "8c13c39200000007", "handoff_key": "qa-1",
-          "bindings": { "agent-session": "copilot-cli" },
-          "cost_usd": 1.31, "tokens": 296000, "usage_known": true,
-          "artifacts": ["specs/30/qa.md", "specs/30/screenshots/patient-newborn-15-days.png"],
+          "run_id": "a742dbc400000013",
+          "task_id": "qa",
+          "state": "SUCCEEDED",
+          "attempt": 4,
+          "parent_run_id": "8c13c39200000007",
+          "handoff_key": "qa-1",
+          "bindings": {
+            "agent-session": "copilot-cli"
+          },
+          "cost_usd": 1.31,
+          "tokens": 296000,
+          "usage_known": true,
+          "artifacts": [
+            "specs/30/qa.md",
+            "specs/30/screenshots/patient-newborn-15-days.png"
+          ],
           "chain_depth": 7
         },
         {
-          "run_id": "b8e2d19000000014", "task_id": "finalize", "state": "SUCCEEDED", "attempt": 0,
-          "parent_run_id": "a742dbc400000013", "handoff_key": "finalize-30",
-          "bindings": { "agent-session": "copilot-cli" },
-          "cost_usd": 1.66, "tokens": 374000, "usage_known": true,
-          "artifacts": ["specs/30/summary.md"], "chain_depth": 8
+          "run_id": "b8e2d19000000014",
+          "task_id": "finalize",
+          "state": "SUCCEEDED",
+          "attempt": 0,
+          "parent_run_id": "a742dbc400000013",
+          "handoff_key": "finalize-30",
+          "bindings": {
+            "agent-session": "copilot-cli"
+          },
+          "cost_usd": 1.66,
+          "tokens": 374000,
+          "usage_known": true,
+          "artifacts": [
+            "specs/30/summary.md"
+          ],
+          "chain_depth": 8
         }
       ]
     },
@@ -324,32 +591,71 @@
       "status": "DONE",
       "work_repos": [
         {
-          "repo": "agentalec/care_docs", "branch": "agent-hq/22", "base_branch": "main",
+          "repo": "agentalec/care_docs",
+          "branch": "agent-hq/22",
+          "base_branch": "main",
           "recorded_head": "aa11bb22cc33dd44ee55ff6677889900aabbccdd",
           "pr_ref": "agentalec/care_docs#3"
         }
       ],
       "runs": [
         {
-          "run_id": "2200000000000001", "task_id": "spec", "state": "SUCCEEDED", "attempt": 0,
-          "bindings": { "agent-session": "claude-code-headless" },
-          "cost_usd": 0.88, "tokens": 190000, "usage_known": true,
-          "artifacts": ["specs/22/spec.md"], "chain_depth": 0
+          "run_id": "2200000000000001",
+          "task_id": "spec",
+          "state": "SUCCEEDED",
+          "attempt": 0,
+          "bindings": {
+            "agent-session": "claude-code-headless"
+          },
+          "cost_usd": 0.88,
+          "tokens": 190000,
+          "usage_known": true,
+          "artifacts": [
+            "specs/22/spec.md"
+          ],
+          "chain_depth": 0
         },
         {
-          "run_id": "2200000000000002", "task_id": "finalize", "state": "SUCCEEDED", "attempt": 0,
-          "parent_run_id": "2200000000000001", "handoff_key": "finalize-22",
-          "bindings": { "agent-session": "claude-code-headless" },
-          "cost_usd": 0.51, "tokens": 110000, "usage_known": true,
-          "artifacts": ["specs/22/summary.md"], "chain_depth": 1
+          "run_id": "2200000000000002",
+          "task_id": "finalize",
+          "state": "SUCCEEDED",
+          "attempt": 0,
+          "parent_run_id": "2200000000000001",
+          "handoff_key": "finalize-22",
+          "bindings": {
+            "agent-session": "claude-code-headless"
+          },
+          "cost_usd": 0.51,
+          "tokens": 110000,
+          "usage_known": true,
+          "artifacts": [
+            "specs/22/summary.md"
+          ],
+          "chain_depth": 1
         }
       ]
     }
   ],
   "health": {
-    "agent-session/copilot-cli": { "ok": true, "detail": "collect", "ts": "2026-07-29T02:16:23Z" },
-    "tracker/github-issues": { "ok": true, "detail": "poll · 11 tickets seen", "ts": "2026-07-29T02:16:21Z" },
-    "messaging/github-comment": { "ok": true, "detail": "post", "ts": "2026-07-29T02:14:58Z" },
-    "gate/github-issue-comment": { "ok": false, "detail": "403 while reading comment 5043543793", "ts": "2026-07-29T01:58:40Z" }
+    "agent-session/copilot-cli": {
+      "ok": true,
+      "detail": "collect",
+      "ts": "2026-07-29T02:16:23Z"
+    },
+    "tracker/github-issues": {
+      "ok": true,
+      "detail": "poll \u00b7 11 tickets seen",
+      "ts": "2026-07-29T02:16:21Z"
+    },
+    "messaging/github-comment": {
+      "ok": true,
+      "detail": "post",
+      "ts": "2026-07-29T02:14:58Z"
+    },
+    "gate/github-issue-comment": {
+      "ok": false,
+      "detail": "403 while reading comment 5043543793",
+      "ts": "2026-07-29T01:58:40Z"
+    }
   }
 }
