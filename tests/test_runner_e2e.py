@@ -37,8 +37,8 @@ from engine.models import GateDecision, GateRequest, GateStatus, TicketDetails
 from engine.runner import (
     _expand_declared,
     _latest_review_round,
-    _rework_comments,
     _ledger_image_urls,
+    _rework_comments,
     _run_setup,
     execute_dir_for,
     intake_ticket,
