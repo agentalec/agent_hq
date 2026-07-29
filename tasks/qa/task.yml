@@ -17,6 +17,10 @@ context:
 skills:
   - prompts/qa.md
   - checklists/qa-coverage.md
+# qa verifies; it never edits the product. Everything it leaves in the
+# worktree is scratch, so the engine discards its work patch outright rather
+# than trusting the prompt's "put scratch in .agent-hq/" to hold.
+writes_code: false
 outputs:
   artifacts:
     - specs/{ticket}/qa.md

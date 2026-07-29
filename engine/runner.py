@@ -680,7 +680,15 @@ def _execute(config, store, adapter_fn, run, taskdef) -> dict:
         candidates = sorted(set(expanded) | set(input_paths))
         _stage_files(worktree, candidates, out_dir / "outputs")
 
-        patch_text = agent.materialize_work_patch(worktree, candidates)
+        # A task that declares it writes no product code contributes no patch
+        # at all -- its worktree changes are scratch by definition, and an
+        # instruction not to leave any is advisory where this is not. QA left
+        # eight driver scripts in a product PR before this existed.
+        patch_text = (
+            agent.materialize_work_patch(worktree, candidates)
+            if taskdef.get("writes_code", True)
+            else ""
+        )
         (out_dir / "work.patch").write_text(patch_text)
 
     return result
