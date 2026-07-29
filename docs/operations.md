@@ -84,11 +84,14 @@ setup, and again after any change to `scripts/checkout-state.sh`,
    run it locally (or via `workflow_dispatch` on `dispatch.yml`) with
    `AGENT_HQ_TOKEN` set and confirm `./_state` clones/bootstraps and a
    subsequent `agent-hq intake`/`dispatch` write pushes cleanly.
-2. **One real `copilot -p "say hi" -s` run** -- logged in locally via
-   `copilot` (or with `COPILOT_GITHUB_TOKEN` set to the bot-seat PAT in CI)
-   -- confirms the pinned Copilot CLI version still runs non-interactively
-   and exits cleanly, and that its billing shows up as a Copilot premium
-   request rather than direct Anthropic spend. Re-check whenever
+2. **One real `copilot -p "say hi" --no-ask-user` run** -- logged in locally
+   via `copilot` (or with `COPILOT_GITHUB_TOKEN` set to the bot-seat PAT in
+   CI) -- confirms the pinned Copilot CLI version still runs
+   non-interactively and exits cleanly, that its billing shows up against
+   the Copilot seat rather than as direct Anthropic spend, and that the
+   end-of-session trailer (`AI Credits`, `Tokens`) still prints on stderr in
+   the format `copilot_cli._parse_usage` reads a run's spend from. Omit `-s`:
+   silent mode suppresses that trailer. Re-check whenever
    `postCreateCommand` in `.devcontainer/devcontainer.json` bumps the
    `@github/copilot` version. The current pin is `1.0.54` on Node.js 22.
 3. **Devcontainer build** -- `devcontainer build --workspace-folder .` (or

@@ -35,8 +35,9 @@
    from the source run's ledger, and writes the prompt bundle to
    `bundle.json` -- no work-repo clone) -> **execute** (credential-free,
    `permissions: {}`, only `COPILOT_GITHUB_TOKEN`; clones the public repo,
-   spawns `copilot -p "<prompt>" -s --no-ask-user --model
-   claude-sonnet-4.5`, and emits a work patch, the normalized
+   spawns `copilot -p "<prompt>" --no-ask-user --model
+   claude-sonnet-4.5` (no `-s`: silent mode would suppress the session
+   trailer the run's spend is parsed from), and emits a work patch, the normalized
    `execute-result.json`, `control.json`, and staged declared/input
    artifacts, all as a transported Actions artifact -- runs inside the
    project devcontainer, the only phase that needs the `copilot`/`claude`
@@ -377,13 +378,20 @@ Summarized here so this doc is self-contained:
    to `copilot-cli` (spawns `copilot -p ... --model claude-sonnet-4.5`,
    billed through a dedicated GitHub Copilot seat), not
    `claude-code-headless` (direct Anthropic API key), which stays registered
-   as a one-line-swap fallback. Copilot's premium-request subscription
-   billing has no per-run USD metering, so runs record `cost_usd: 0.0`,
-   `usage_known: true` — per-ticket USD budget caps (`budgets.yml`) don't
-   bind under this binding; runaway work is still bounded by
-   `budget.retries`, the loop guard (25 runs / depth 12), the in-flight cap,
-   and runtime deadlines (see "Credential boundary" above for the PD-5
-   assessment of the resulting `COPILOT_GITHUB_TOKEN` in the child env).
+   as a one-line-swap fallback. Copilot bills the underlying input / cached /
+   output tokens, converted to AI credits at published per-model rates
+   (1 credit = $0.01), and `copilot -p` prints the session's credits and
+   token counts as an end-of-session trailer on **stderr** — so
+   `copilot_cli._parse_usage` records the *billed* USD per run, not an
+   estimate, and the per-ticket USD caps in `budgets.yml` bind normally
+   alongside `budget.retries`, the loop guard (25 runs / depth 12), the
+   in-flight cap, and runtime deadlines. Two consequences worth knowing: the
+   adapter must not pass `-s` (silent mode suppresses that trailer), and a
+   run whose trailer never appears (kill, or a future format change) records
+   `cost_usd: 0.0`, `usage_known: true` — deliberately understating rather
+   than reporting unknown usage, which would block the ticket on every
+   transient failure. See "Credential boundary" above for the PD-5
+   assessment of the resulting `COPILOT_GITHUB_TOKEN` in the child env.
 10. **`DONE` merge-tracking is a permanent decision, not a P0 cut —
     supersedes deviation 7.** Deviation 7's "no `pull_request: closed`
     closing-summary path" was recorded as an operational extra cut for P0;
