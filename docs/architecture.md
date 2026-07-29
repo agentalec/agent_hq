@@ -57,9 +57,14 @@
    `dispatch.yml`'s sweep polls gate status, applies the stored handoffs on
    approval, and completes the run. Merge is always a human action — no task
    auto-merges a PR.
-6. `pages.yml` renders a static dashboard (ticket/run state table, spend,
-   waiting-on-humans list) after intake/dispatch/collect and on a `*/5`
-   schedule.
+6. The operator dashboard (`dashboard/`) is static source deployed by
+   `pages.yml` on a push that changes it — never on a schedule, and it never
+   reads the state branch at build time. Instead every
+   `GitJsonStateStore.write()` emits `dashboard.json` at the branch root
+   (`engine/dashboard.py`) and the page fetches that one document from
+   `raw.githubusercontent.com`, deriving the gate queue, board, run chains,
+   spend and health client-side. Requirements:
+   `docs/dashboard-design-requirements.md`.
 
 ## Where work and memory live
 
@@ -364,9 +369,11 @@ Summarized here so this doc is self-contained:
    safety net *behind* a shared `agent-hq-state` Actions concurrency group;
    that group was removed once it proved to cancel bursts of pending runs
    (`docs/operations.md` §11), leaving the replay as the whole mechanism.
-6. **Minimal dashboard** — one static state table (ticket/run, spend,
-   artifact/PR links, waiting-on-humans), not the full kanban/timeline/spend
-   breakdown view.
+6. ~~**Minimal dashboard**~~ — **resolved.** The P0 cut was one static state
+   table instead of the full view. `docs/roadmap.md`'s restore trigger
+   ("someone actually asks for a view the minimal page lacks") fired; the
+   dashboard is now a gate queue, board, deep-linkable ticket detail with
+   run chains, spend breakdown and adapter health (`dashboard/`).
 7. **Operational extras cut** — no monthly budget alerts, no CI-green
    auto-undraft sweep, no `pull_request: closed` closing-summary path, no
    gate half-timeout alerts.

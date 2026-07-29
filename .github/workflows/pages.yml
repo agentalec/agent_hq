@@ -1,8 +1,15 @@
 name: Pages
 
+# The site is static source, not a render of state: the page fetches
+# dashboard.json off the state branch at view time. So this deploys when the
+# dashboard changes, never on a schedule -- state moving is not a reason to
+# rebuild (docs/dashboard-design-requirements.md §4.5).
 on:
-  schedule:
-    - cron: "*/5 * * * *"
+  push:
+    branches: [main]
+    paths:
+      - "dashboard/**"
+      - ".github/workflows/pages.yml"
   workflow_dispatch: {}
 
 permissions:
@@ -14,9 +21,8 @@ concurrency:
   group: pages
   cancel-in-progress: false
 
-env:
-  AGENT_HQ_TOKEN: ${{ secrets.AGENT_HQ_TOKEN }}
-  AGENT_HQ_ENGINE_REPO: ${{ github.repository }}
+# No AGENT_HQ_TOKEN here any more: nothing in this job reads the state
+# branch, so the deploy needs no credential at all.
 
 jobs:
   deploy:
@@ -29,12 +35,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: ./.github/actions/setup
-      - run: bash scripts/checkout-state.sh
-      - run: agent-hq dashboard --state ./_state --out ./site
+      # No state checkout and no build step: the deploy must never read the
+      # state branch, and there is nothing to compile.
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: ./site
+          path: ./dashboard
       - id: deployment
         uses: actions/deploy-pages@v4

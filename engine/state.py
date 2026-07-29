@@ -336,6 +336,17 @@ class GitJsonStateStore:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(txn._health, indent=2) + "\n")
 
+    def _write_dashboard_document(self) -> None:
+        """Rebuild `dashboard.json` at the branch root from what is on disk.
+
+        # ponytail: re-reads every ticket file per write -- 11 tickets is
+        # ~60 KB, so it costs nothing today. If the branch grows past a few
+        # hundred tickets, project incrementally from `txn._tickets` instead.
+        """
+        from engine.dashboard import document, write_document
+
+        write_document(document(self.worktree_path), self.worktree_path)
+
     def _commit_message(self, txn: Txn) -> str:
         ids = sorted(txn.dirty_tickets | txn.dirty_events | txn.dirty_artifacts)
         if ids:
@@ -362,6 +373,13 @@ class GitJsonStateStore:
             # watermark, re-read with no new comments) would raise every pass.
             if not self._git("diff", "--cached", "--name-only").strip():
                 return
+            # Only now that the state really moved: `dashboard.json` carries a
+            # fresh `generated_at`, so regenerating it before the check above
+            # would make every no-op write look like a change and undo that
+            # guard. It is a projection -- rebuilt from what was just
+            # flushed, never read back as state.
+            self._write_dashboard_document()
+            self._git("add", "-A")
             self._git("commit", "-m", self._commit_message(txn))
             result = self._push()
             if result.returncode == 0:

@@ -88,14 +88,17 @@ def _run(args: argparse.Namespace, repo_root: Path) -> None:
 
 
 def _dashboard(args: argparse.Namespace, repo_root: Path) -> None:
-    from engine.dashboard import build, snapshot
+    """Rebuild `dashboard.json` from a state worktree.
+
+    The engine emits this on every state write; this is the manual path, for
+    inspecting the projection or repairing a branch whose copy went missing.
+    The page itself is static (`dashboard/`) and is deployed from source.
+    """
+    from engine.dashboard import document, write_document
 
     if not args.state:
         raise SystemExit("--state (state-store worktree path) is required")
-    config = load_config(repo_root / "config", repo_root / "schemas")
-    snap = snapshot(args.state, config)
-    out_path = build(snap, args.out or "./site")
-    print(out_path)
+    print(write_document(document(args.state), args.out or args.state))
 
 
 def _config_validate(args: argparse.Namespace, repo_root: Path) -> None:
@@ -173,9 +176,11 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--execute-outcome", help="Outcome recorded by the execute phase")
     run_parser.set_defaults(func=_run)
 
-    dashboard_parser = subparsers.add_parser("dashboard", help="Render the status dashboard")
+    dashboard_parser = subparsers.add_parser(
+        "dashboard", help="Rebuild dashboard.json from a state worktree"
+    )
     _add_common_args(dashboard_parser)
-    dashboard_parser.add_argument("--out", help="Output directory (default: ./site)")
+    dashboard_parser.add_argument("--out", help="Output directory (default: the state worktree)")
     dashboard_parser.set_defaults(func=_dashboard)
 
     return parser
