@@ -70,7 +70,8 @@
       "artifacts": [],
       "chain_depth": 0,
       "source_event_id": "20:labeled:2026-07-29T12:10:55Z",
-      "enqueue_index": 0
+      "enqueue_index": 0,
+      "repo": "agentalec/care_fe"
     }
   ],
   "work_repos": [
