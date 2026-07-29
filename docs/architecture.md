@@ -126,8 +126,9 @@ A ticket carries one of three lifecycle states (`engine.models.TicketStatus`):
 | State | Meaning |
 |---|---|
 | `ACTIVE` | Queued, running, or waiting-gate work remains. |
-| `BLOCKED` | A non-engine issue close or operator `block` interrupted active work; the queue and any pending gate are preserved for resume. |
-| `DONE` | Engine complete — see below. Merge status is never tracked or implied. |
+| `AWAITING_MERGE` | The engine is finished — summary posted, work PRs marked ready — but a recorded PR is still open. The issue stays **open**; the sweep watches the PRs. |
+| `BLOCKED` | A non-engine issue close, an operator `block`, or a work PR closed unmerged interrupted active work; the queue and any pending gate are preserved for resume. |
+| `DONE` | Every recorded work PR merged (or the ticket recorded none) — see below. |
 
 A ticket also reaches `BLOCKED` **today** whenever a run's own accounting
 says it must stop: a `blocked` control outcome, a rejected/expired gate, a
@@ -145,13 +146,33 @@ that:
   `/agent-hq reopen <reason>` command, the native `issues: reopened` event,
   or operator `unblock`: retains the queue and pending gates, and enqueues
   attempt+1 of any `interrupted_run_id`.
-- **[live, Task 9]** `ACTIVE` -> `DONE` — queue, current, and pending gates
+- **[live]** `ACTIVE` -> `AWAITING_MERGE` — queue, current, and pending gates
   are exhausted and the terminal run's own recorded artifacts include the
-  closing summary: required work PRs are marked ready and the issue is
-  closed (`engine.engine._complete_if_queue_empty`). `DONE` is displayed as
-  **"engine complete; merge status not tracked"** (PLAN.md decision 12) —
-  whether a human subsequently merges those PRs is out of scope for ticket
-  state.
+  closing summary: the summary posts and every recorded work PR is marked
+  ready (`engine.engine._complete_if_queue_empty`). The issue stays **open**.
+  Engine-complete is not ticket-complete while a human still has to merge:
+  closing here (the original Task 9 behaviour, reversing PLAN.md decision 12)
+  told the tracker "done" over unreviewed code, and a reviewer arriving later
+  found a closed ticket.
+- **[live]** `ACTIVE` -> `DONE` — the same trigger on a ticket that recorded
+  **no** work PR (it changed no code): nothing to wait on, so the issue
+  closes immediately.
+- **[live]** `AWAITING_MERGE` -> `DONE` — the sweep observes every recorded
+  PR merged (`engine.engine.resolve_awaiting_merge`, via the `agent-session`
+  port's `pr_state`): it posts the merge notice and closes the issue.
+- **[live]** `AWAITING_MERGE` -> `BLOCKED` — any recorded PR closed
+  **unmerged**: a human declined the work, so the ticket blocks and
+  escalates rather than completing silently. Checked before the merge case —
+  one abandoned PR outweighs merged siblings.
+- **[live]** `AWAITING_MERGE` -> `ACTIVE` — an approver comments
+  `/agent-hq request-changes <reason>` on a work PR
+  (`engine.engine.poll_pr_feedback`): `projects.feedback_task` is enqueued
+  with the reason threaded into its prompt.
+
+Both PR-driven edges are **polled from the sweep**, not event-driven: the
+engine repository's workflows cannot observe product-repo events at all, and
+no cross-repo forwarder exists (`docs/roadmap.md`). The sweep already visits
+every ticket, so a read per watched PR costs nothing new.
 - **[planned, Task 16]** `DONE` -> `ACTIVE` — an authorized reopen/native
   reopen when every recorded work PR is still open or none exists: enqueues
   the configured `initial_task`. Any recorded PR already merged or closed
@@ -237,10 +258,16 @@ and skipped, not as the first word of a reason (real ids are `sha1[:16]`).
 The request comment inlines every artifact the gated run declared, each in a
 collapsed `<details>` block (truncated past 20000 characters, well beyond any
 real spec) — an approver decides from the issue thread without opening the
-state branch. While a run is `WAITING_GATE` the issue also carries
-`hq:waiting-gate` (`engine.engine.set_gate_label`), removed as soon as a
-decision is observed; it is a *view* of run state, never the source of it,
-and it makes the tickets a human is holding up findable by label. Note that
+state branch. While a run is `WAITING_GATE` the issue carries
+`hq:waiting-gate` — one of the engine-owned lifecycle labels
+(`engine.engine.STATUS_LABELS`: `hq:active`, `hq:waiting-gate`,
+`hq:awaiting-merge`, `hq:blocked`, `hq:done`), applied one at a time by
+`set_status_label` and swapped as soon as the status changes. A label is
+always a *view* of state, never the source of it, and is written only after
+the state write it reflects. Only labels in that map are ever removed:
+`set_status_labels` replaces the whole `hq:`-prefixed set on the issue, so
+filtering on the prefix instead would strip `hq:intake`, `hq:public-safe`,
+and `hq:executor=`. Note that
 `WAITING_GATE` counts against `in_flight_cap`, so un-actioned gates hold
 slots that queued tickets need.
 

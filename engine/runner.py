@@ -861,6 +861,7 @@ def _block_from_control(store, config, adapter_fn, ticket_id, run_id, reason: st
         txn.set_block(ticket_id, reason=reason, source="task", interrupted_run=run_id)
 
     store.write(fn)
+    eng.set_status_label(config, adapter_fn, ticket_id, "BLOCKED")
     _escalate(store, config, adapter_fn, ticket_id, run_id, f"Task reported blocked: {reason}")
 
 
@@ -1128,13 +1129,14 @@ def _collect_success(
     if result.get("gated"):
         # Post-write side effect, like the PR comment below: the label is a
         # view of state, never the source of it.
-        eng.set_gate_label(config, adapter_fn, ticket_id, waiting=True)
+        eng.set_status_label(config, adapter_fn, ticket_id, "WAITING_GATE")
         return
 
     if result.get("zombie"):
         return
 
     if result.get("blocked"):
+        eng.set_status_label(config, adapter_fn, ticket_id, "BLOCKED")
         _escalate(
             store, config, adapter_fn, ticket_id, run_id,
             "Work branch conflict: agent-hq/"
@@ -1279,6 +1281,7 @@ def intake_ticket(issue_ref: str, event_key: str, config, taskdefs, store, adapt
     store.write(
         lambda txn: txn.set_ticket(ticket_id, status="ACTIVE", pinned_comment_id=pinned_id)
     )
+    eng.set_status_label(config, adapter_fn, ticket_id, "ACTIVE")
 
     repo = resolve_target_repo(config, details)
     initial_task = taskdefs[config.projects["initial_task"]]

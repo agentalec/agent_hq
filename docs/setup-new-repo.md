@@ -62,6 +62,11 @@ checks shape against `schemas/`, not that the values are real — see
 - `intake_label`: the label that makes an issue a ticket (`hq:intake` in
   the pilot config).
 - `initial_task`: the task id a newly accepted ticket enqueues (`spec`).
+- `feedback_task` / `feedback_approvers`: the task enqueued when an approver
+  comments `/agent-hq request-changes <reason>` on a work-repo PR, and the
+  `approvers.yml` group allowed to do it (`implement` / `product-owners` in
+  the pilot). A PR is a wider audience than the engine issue, so this is an
+  explicit allowlist — drop either key to switch PR-comment feedback off.
 - `intake.min_body_words` / `intake.excluded_labels`: eligibility filter
   applied before any state write (30 words / `hq:excluded` in the pilot).
 - `public: true` plus `public_safe_label` (`hq:public-safe`): when public,
@@ -145,6 +150,13 @@ defaults:
   (`public_safe_label`).
 - `hq:excluded` — blocks a ticket from automation
   (`intake.excluded_labels`).
+
+Plus the engine-owned lifecycle labels (`engine.engine.STATUS_LABELS`), one
+of which the engine applies to every ticket as its status changes — create
+all five or the transition silently fails to label:
+
+- `hq:active`, `hq:waiting-gate`, `hq:awaiting-merge`, `hq:blocked`,
+  `hq:done`.
 
 ## 6. What bootstraps itself
 

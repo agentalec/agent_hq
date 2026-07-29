@@ -12,6 +12,10 @@ credential-free job; `prepare_worktree` (again, for a fresh landing clone) /
 `request_reviewers` run only in **collect**'s credentialed job. Execute
 never holds a push credential and never calls the last group.
 
+`pr_state` is the one op the **dispatcher** calls (from `sweep`, to resolve
+an `AWAITING_MERGE` ticket) rather than a run phase -- it is a pure read, so
+it needs no push credential and belongs to no run.
+
 ## Ops
 
 - `prepare_worktree(run_id, repo, base_commit) -> Path` -- checkout `repo`
@@ -50,6 +54,11 @@ never holds a push credential and never calls the last group.
 - `open_draft_pr(repo, branch, base, title, body) -> str` -- create-or-get:
   collect only calls this once per repo per ticket (checking
   `work_repos[repo].pr_ref` first), after a successful land.
+- `pr_state(pr_ref) -> dict` -- `{"state": "open"|"closed", "merged": bool}`
+  for a recorded work PR. Read-only, called by the sweep, never by a run.
+  `merged` must be reported separately from `state`: a closed-unmerged PR is
+  a human declining the work (ticket `BLOCKED`), a merged one is the work
+  landing (ticket `DONE`), and `state` is `"closed"` for both.
 - `healthcheck() -> bool`
 
 ## Control output and the four artifact payloads

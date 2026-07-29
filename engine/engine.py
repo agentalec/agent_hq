@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 from collections.abc import Callable
 
+from engine.commands import parse_decision
 from engine.config import Config
 from engine.models import (
     Event,
@@ -38,8 +39,21 @@ BINDABLE_PORTS = ("tracker", "agent-session", "messaging")
 # would let a batch of already-queued tickets starve every future dispatch
 # once the cap is reached (mirrors `state._EXCLUSIVE_STATES` in `claim_run`).
 EXCLUSIVE_STATES = {"RUNNING", "WAITING_GATE"}
-# The one engine-owned issue label that tracks run state (see set_gate_label).
-GATE_LABEL = "hq:waiting-gate"
+# The engine-owned lifecycle labels: exactly one is applied at a time, so the
+# issue list answers "where is this ticket" without reading the state branch.
+# WAITING_GATE is a *run* state rather than a ticket status, but it is the one
+# a human needs to act on, so it surfaces here alongside the ticket statuses.
+# This map is the ONLY set `set_status_label` may remove -- every other
+# `hq:`-prefixed label (`hq:intake`, `hq:public-safe`, `hq:executor=...`) is
+# owned by config or a human and must survive a transition.
+STATUS_LABELS = {
+    "ACTIVE": "hq:active",
+    "WAITING_GATE": "hq:waiting-gate",
+    "AWAITING_MERGE": "hq:awaiting-merge",
+    "BLOCKED": "hq:blocked",
+    "DONE": "hq:done",
+}
+_OWNED_LABELS = frozenset(STATUS_LABELS.values())
 
 
 def _put_queued_run(txn: Txn, run_id: str, *, ticket_id: str, task_id: str, task_version: int,
@@ -299,22 +313,24 @@ def subst(template: str, ticket_id: str) -> str:
     return template.replace("{ticket}", ticket_id)
 
 
-def set_gate_label(config, adapter_fn, ticket_id: str, waiting: bool) -> None:
-    """Flag/unflag the ticket issue as blocked on a human gate, so the tickets
-    a human is holding up are findable by label instead of by reading the
-    state branch. Idempotent -- the tracker no-ops when the label set already
-    matches.
+def set_status_label(config, adapter_fn, ticket_id: str, status: str) -> None:
+    """Put the ticket issue's lifecycle label in sync with `status`, so where a
+    ticket stands is findable by label instead of by reading the state branch.
+    Idempotent -- the tracker no-ops when the label set already matches.
+
+    Always a POST-write side effect: the label is a *view* of state, never the
+    source of it. A label that lags a crash is corrected by the next
+    transition; a label trusted as state would be a second, forkable copy.
 
     Reads the issue's current labels and re-sends them: `set_status_labels`
     replaces the WHOLE `hq:`-prefixed set, so anything else the issue carries
-    (`hq:intake`) has to be passed back through or it gets stripped."""
+    (`hq:intake`, `hq:public-safe`, `hq:executor=...`) has to be passed back
+    through or it gets stripped. Only `STATUS_LABELS` values are dropped --
+    filtering on the `hq:` prefix instead would strip config's own labels."""
     tracker = adapter_fn("tracker", config.components["tracker"]["adapter"], repo=intake_repo(config))
-    keep = [name for name in tracker.fetch_ticket(ticket_id).labels if name != GATE_LABEL]
-    tracker.set_status_labels(
-        ticket_id,
-        "WAITING_GATE" if waiting else "ACTIVE",
-        keep + ([GATE_LABEL] if waiting else []),
-    )
+    keep = [name for name in tracker.fetch_ticket(ticket_id).labels if name not in _OWNED_LABELS]
+    label = STATUS_LABELS.get(status)
+    tracker.set_status_labels(ticket_id, status, keep + ([label] if label else []))
 
 
 def notify_ticket(config, adapter_fn, ticket_id, message: str, event_id: str, mentions=None) -> None:
@@ -346,7 +362,7 @@ def _escalate(store, config, adapter_fn, ticket_id, run_id, message: str) -> Non
     notify_ticket(config, adapter_fn, ticket_id, message, f"{run_id}:escalation", mentions=members)
 
 
-def _block_ticket(store, ticket_id, run_id, reason: str) -> None:
+def _block_ticket(store, config, adapter_fn, ticket_id, run_id, reason: str) -> None:
     def fn(txn: Txn) -> None:
         txn.set_ticket(ticket_id, status="BLOCKED")
         txn.append_event(
@@ -361,6 +377,7 @@ def _block_ticket(store, ticket_id, run_id, reason: str) -> None:
         )
 
     store.write(fn)
+    set_status_label(config, adapter_fn, ticket_id, "BLOCKED")
 
 
 def reenqueue_same(store, run: dict, taskdef: dict, attempt: int) -> str:
@@ -487,7 +504,7 @@ def _handle_failure(
     """
     run_id = run["run_id"]
     if block_on_unknown_usage and run.get("usage_known") is False:
-        _block_ticket(store, ticket_id, run_id, "attempt failed with unknown spend")
+        _block_ticket(store, config, adapter_fn, ticket_id, run_id, "attempt failed with unknown spend")
         _escalate(
             store, config, adapter_fn, ticket_id, run_id,
             "Run failed with unknown spend; blocked pending human review.",
@@ -496,7 +513,7 @@ def _handle_failure(
     if run["attempt"] < taskdef["budget"]["retries"]:
         reenqueue_same(store, run, taskdef, run["attempt"] + 1)
         return
-    _block_ticket(store, ticket_id, run_id, "retries exhausted")
+    _block_ticket(store, config, adapter_fn, ticket_id, run_id, "retries exhausted")
     # Escalate, exactly like the unknown-spend block above. Retries-exhausted
     # is the failure mode that most needs a human -- the ticket stops dead and
     # only a manual re-enqueue restarts it -- and it was the one that told
@@ -607,11 +624,12 @@ def sweep(
         status = decision.status.value if hasattr(decision.status, "value") else decision.status
 
         if status != "PENDING":
-            # Cleared on "a decision exists", before the branches below --
-            # several of them return early, and the label means "a human is
-            # holding this up", which stopped being true the moment the
-            # decision landed.
-            set_gate_label(config, adapter_fn, ticket_id, waiting=False)
+            # Back to ACTIVE on "a decision exists", before the branches below
+            # -- several of them return early, and `hq:waiting-gate` means "a
+            # human is holding this up", which stopped being true the moment
+            # the decision landed. A branch that then blocks the ticket
+            # overwrites this with `hq:blocked` via `_block_ticket`.
+            set_status_label(config, adapter_fn, ticket_id, "ACTIVE")
 
         if status == "APPROVED":
             pending = [Handoff.from_dict(h) for h in (run.get("pending_handoffs") or [])]
@@ -654,13 +672,13 @@ def sweep(
             store.write(approve)
             if result["apply_reason"] is not None:
                 _mark_gate_terminal(store, ticket_id, run, "run.failed", "handoff_apply_failed")
-                _block_ticket(store, ticket_id, run_id, result["apply_reason"])
+                _block_ticket(store, config, adapter_fn, ticket_id, run_id, result["apply_reason"])
                 return
             _complete_if_queue_empty(store, config, adapter_fn, ticket_id, {**run, "state": "SUCCEEDED"})
         elif status == "CHANGES_REQUESTED":
             if run["attempt"] >= 2:
                 _mark_gate_terminal(store, ticket_id, run, "run.rework", "rework_final")
-                _block_ticket(store, ticket_id, run_id, "max rework cycles reached")
+                _block_ticket(store, config, adapter_fn, ticket_id, run_id, "max rework cycles reached")
                 return
             _mark_gate_terminal(store, ticket_id, run, "run.changes_requested", "changes_requested")
             new_run_id = reenqueue_same(store, run, taskdef, run["attempt"] + 1)
@@ -678,10 +696,10 @@ def sweep(
             )
         elif status == "REJECTED":
             _mark_gate_terminal(store, ticket_id, run, "run.rejected", "rejected")
-            _block_ticket(store, ticket_id, run_id, decision.comments or "gate rejected")
+            _block_ticket(store, config, adapter_fn, ticket_id, run_id, decision.comments or "gate rejected")
         elif status == "EXPIRED":
             _mark_gate_terminal(store, ticket_id, run, "run.gate_expired", "gate_expired")
-            _block_ticket(store, ticket_id, run_id, "gate timed out")
+            _block_ticket(store, config, adapter_fn, ticket_id, run_id, "gate timed out")
             _escalate(
                 store, config, adapter_fn, ticket_id, run_id,
                 "Review gate expired without a decision; blocked pending escalation.",
@@ -691,6 +709,25 @@ def sweep(
     for ticket_id in (ticket_ids if ticket_ids is not None else store.list_tickets()):
         state = store.read_state(ticket_id)
         if state is None:
+            continue
+        in_flight = any(r["state"] in NON_TERMINAL for r in state.get("runs", []))
+        if state.get("status") in ("ACTIVE", "AWAITING_MERGE") and not in_flight:
+            # Per-ticket, not per-run: PR feedback is about the ticket's work
+            # PRs, and no run has to be in flight for a reviewer to ask for
+            # changes -- that is the gap this closes.
+            #
+            # Skipped entirely while anything IS in flight, rather than
+            # queueing alongside it: a rework run enqueued mid-flight would
+            # race the run already working the same branch, and a second
+            # reviewer comment would stack a third. Nothing is lost by
+            # waiting -- the watermark only advances on a pass that actually
+            # polls, so the comment is still there once the queue drains.
+            poll_pr_feedback(store, config, taskdefs, adapter_fn, ticket_id, state)
+            state = store.read_state(ticket_id) or state
+        if state.get("status") == "AWAITING_MERGE":
+            # Every run on an AWAITING_MERGE ticket is terminal by
+            # construction, so the run loop below finds nothing to do here.
+            resolve_awaiting_merge(store, config, adapter_fn, ticket_id, state)
             continue
         for run in list(state.get("runs", [])):
             taskdef = taskdefs.get(run["task_id"])
@@ -739,15 +776,25 @@ def _mark_gate_terminal(store, ticket_id, run: dict, kind: str, event_suffix: st
 
 def _complete_if_queue_empty(store, config, adapter_fn, ticket_id, terminal_run: dict) -> None:
     """After a terminal SUCCEEDED with nothing else in flight and no pending
-    handoffs anywhere on the ticket: DONE only if the TERMINAL run's own
-    recorded artifacts include the declared closing summary (so a reopened
-    ticket can't complete off a prior lifecycle's stale summary) -- read
-    that ledger copy, post the closing summary, mark every recorded work PR
-    ready, close the issue, and mark the ticket DONE; else pin "awaiting
-    human input". ponytail: idempotency keyed off `status == "ACTIVE"` (once
-    DONE this never re-fires) plus the tracker methods' own event-marker
-    dedup on the closing side effects, rather than a separate
-    `{ticket}:{run}:done` record.
+    handoffs anywhere on the ticket: post the closing summary and mark every
+    recorded work PR ready -- but only if the TERMINAL run's own recorded
+    artifacts include the declared closing summary (so a reopened ticket
+    can't complete off a prior lifecycle's stale summary); else pin "awaiting
+    human input".
+
+    The engine's work being finished is NOT the ticket being finished. With a
+    work PR recorded, this stops at `AWAITING_MERGE` and leaves the issue
+    OPEN: whether a human merges is the answer to "is this done", and closing
+    at ready-time told the tracker "done" while the code was still unreviewed
+    -- and left a reviewer arriving later commenting on a closed ticket.
+    `resolve_awaiting_merge` (the sweep) takes it from here. With no PR
+    anywhere (a ticket that changed no code) there is nothing to wait on, so
+    it completes to DONE exactly as before.
+
+    ponytail: idempotency keyed off the status each phase transitions OUT of
+    -- this one requires `ACTIVE`, its sweep counterpart requires
+    `AWAITING_MERGE`, so neither can re-fire -- plus the tracker methods' own
+    event-marker dedup, rather than a separate `{ticket}:{run}:done` record.
     """
     state = store.read_state(ticket_id)
     if state is None or state.get("status") != "ACTIVE":
@@ -783,15 +830,224 @@ def _complete_if_queue_empty(store, config, adapter_fn, ticket_id, terminal_run:
 
     summary = store.read_artifact_text(ticket_id, terminal_run["run_id"], summary_path) or ""
     tracker.post_closing_summary(ticket_id, summary, f"{done_key}:closing-summary")
-    for work_repo in state.get("work_repos", []):
-        if work_repo.get("pr_ref"):
-            agent = adapter_fn(
-                "agent-session", config.components["agent-session"]["adapter"],
-                repo=work_repo["repo"],
+    watched = [wr for wr in state.get("work_repos", []) if wr.get("pr_ref")]
+    for work_repo in watched:
+        agent = adapter_fn(
+            "agent-session", config.components["agent-session"]["adapter"],
+            repo=work_repo["repo"],
+        )
+        agent.mark_pr_ready(work_repo["pr_ref"])
+
+    if not watched:
+        tracker.close_issue(ticket_id)
+        store.write(lambda txn: txn.set_ticket(ticket_id, status="DONE"))
+        set_status_label(config, adapter_fn, ticket_id, "DONE")
+        return
+
+    store.write(lambda txn: txn.set_ticket(ticket_id, status="AWAITING_MERGE"))
+    set_status_label(config, adapter_fn, ticket_id, "AWAITING_MERGE")
+    notify_ticket(
+        config, adapter_fn, ticket_id,
+        "Engine work is complete and "
+        + ", ".join(wr["pr_ref"] for wr in watched)
+        + " is ready for review. This issue stays open until the PR is merged or "
+        "closed; comment `/agent-hq request-changes <reason>` on the PR to send work "
+        "back.",
+        f"{done_key}:awaiting-merge",
+    )
+
+
+def poll_pr_feedback(store, config, taskdefs, adapter_fn, ticket_id: str, state: dict) -> None:
+    """Send work back when an approver comments `/agent-hq request-changes
+    <reason>` on one of the ticket's work PRs.
+
+    This is the only path by which review feedback reaches the engine once no
+    run is gated: the `pr-review` gate polls a PR *while a run waits on it*,
+    which is exactly when the queue is not empty. Polled from `sweep` for the
+    same reason `resolve_awaiting_merge` is -- the engine repository cannot
+    receive product-repo events.
+
+    Deliberately narrow. A PR is a wider, lower-trust audience than the
+    engine issue, so:
+    - only an explicit command counts, never "an approver said something"
+    - only `feedback_approvers` members count, checked before the body is
+      read at all
+    - the loop/budget guards run first, so a comment thread cannot spend past
+      the ceilings a handoff respects
+
+    Every qualifying comment in the window folds into ONE run, and that run's
+    id derives causally from the latest such comment
+    (`pr-comment:<comment_id>`), so re-polling the same comment resolves to
+    the same run id and re-enqueues nothing. That -- not the watermark -- is
+    what makes this idempotent; `comments_polled_at` only keeps the read
+    small.
+    """
+    task_id = config.projects.get("feedback_task")
+    group = config.projects.get("feedback_approvers")
+    if not task_id or not group or task_id not in taskdefs:
+        return
+    members = set(config.approvers.get("groups", {}).get(group, {}).get("members", []))
+    if not members:
+        return
+    taskdef = taskdefs[task_id]
+
+    for work_repo in list(state.get("work_repos", [])):
+        pr_ref = work_repo.get("pr_ref")
+        if not pr_ref:
+            continue
+        repo, _, number = pr_ref.rpartition("#")
+        messaging = adapter_fn("messaging", config.components["messaging"]["adapter"], repo=repo)
+        comments = messaging.list_comments(number, work_repo.get("comments_polled_at"))
+        if not comments:
+            continue
+
+        requests = []
+        for comment in comments:
+            if comment["author"] not in members:
+                continue
+            parsed = parse_decision(comment["body"], "")
+            if parsed is None or parsed[0] != "request-changes":
+                continue
+            requests.append((comment, parsed[1]))
+
+        # Advance past everything read, qualifying or not -- a thread of
+        # ordinary conversation must not be re-read every sweep forever.
+        watermark = max(c["created_at"] for c in comments)
+
+        if not requests:
+            store.write(
+                lambda txn, r=repo, w=watermark: txn.upsert_work_repo(
+                    ticket_id, r, comments_polled_at=w
+                )
             )
-            agent.mark_pr_ready(work_repo["pr_ref"])
+            continue
+
+        # One run for the whole window, carrying every reason in it: three
+        # comments asking for three fixes are one rework, not three runs
+        # racing for the same branch.
+        latest_id = requests[-1][0]["id"]
+        reason = "\n\n".join(f"@{c['author']}: {text}" for c, text in requests if text)
+        run_id = compute_run_id(f"pr-comment:{latest_id}", 0, task_id, 0)
+        result: dict = {}
+
+        def apply(txn: Txn, r=repo, w=watermark, rid=run_id, why=reason, cid=latest_id) -> None:
+            # Cleared per attempt, like `claim_run`'s own flag: a write that
+            # loses the push race re-runs this against fresh state, and only
+            # the attempt that actually lands may decide the outcome. Without
+            # the reset, a refusal on attempt 1 would still block the ticket
+            # after attempt 2 enqueued successfully.
+            result.clear()
+            txn.upsert_work_repo(ticket_id, r, comments_polled_at=w)
+            doc = txn.ticket_doc(ticket_id)
+            ok, _trace = check_loop_guard(
+                doc,
+                max_runs=config.budgets["loop_guard"]["max_runs"],
+                max_depth=config.budgets["loop_guard"]["max_depth"],
+            )
+            verdict = check_budget(doc, taskdef["budget"], config.budgets["ticket_cap_usd"])
+            if not ok or verdict["over_ticket_cap"] or verdict["insufficient_headroom"]:
+                result["refused"] = (
+                    "PR feedback would exceed this ticket's run/budget ceiling"
+                )
+                return
+            if not _put_queued_run(
+                txn, rid, ticket_id=ticket_id, task_id=task_id,
+                task_version=taskdef["version"], bindings={}, attempt=0, chain_depth=0,
+                source_event_id=f"pr-comment:{cid}", enqueue_index=0, repo=r,
+            ):
+                return  # already applied on an earlier pass
+            # `_rework_comments` reads this back at prepare time and inlines it
+            # under "## Requested changes" -- the same channel the gate's own
+            # CHANGES_REQUESTED path uses.
+            txn.append_event(
+                ticket_id,
+                Event(
+                    event_id=f"{rid}:rework", kind="run.rework", ticket_id=ticket_id,
+                    run_id=rid, detail=why,
+                ).to_dict(),
+            )
+            if doc.get("status") == "AWAITING_MERGE":
+                txn.set_ticket(ticket_id, status="ACTIVE")
+            result["enqueued"] = rid
+
+        store.write(apply)
+
+        if result.get("refused"):
+            _block_ticket(store, config, adapter_fn, ticket_id, run_id, result["refused"])
+            _escalate(store, config, adapter_fn, ticket_id, run_id, result["refused"])
+            return
+        if result.get("enqueued"):
+            set_status_label(config, adapter_fn, ticket_id, "ACTIVE")
+            post_pr_comment(
+                config, adapter_fn, pr_ref,
+                "Queued rework for this feedback.", f"{run_id}:ack",
+            )
+
+
+def resolve_awaiting_merge(store, config, adapter_fn, ticket_id: str, state: dict) -> None:
+    """Second half of completion: watch an `AWAITING_MERGE` ticket's recorded
+    work PRs and finish the ticket when they resolve.
+
+    Polled from `sweep` rather than driven by a `pull_request` event: the
+    engine repository's workflows cannot observe product-repo events at all
+    (no cross-repo forwarder exists -- `docs/roadmap.md`), and the sweep
+    already visits every ticket, so a read per watched PR costs nothing new.
+
+    - every PR merged -> the work landed: close the issue, ticket `DONE`
+    - any PR closed unmerged -> a human declined the work. That needs a
+      person, not a silent completion, so the ticket `BLOCKED`s and
+      escalates. Checked FIRST: one abandoned PR outweighs merged siblings.
+    - anything still open -> leave it for the next sweep
+
+    Keyed off `status == "AWAITING_MERGE"` by its caller, the status
+    `_complete_if_queue_empty` transitions INTO -- so the two halves cannot
+    re-fire each other.
+    """
+    watched = [wr for wr in state.get("work_repos", []) if wr.get("pr_ref")]
+    if not watched:
+        # Defensive: phase A only parks here with a PR to watch, so this is
+        # unreachable rather than a state to model -- but stranding a ticket
+        # forever is the one outcome worth a guard.
+        return
+
+    pr_states = {}
+    for work_repo in watched:
+        agent = adapter_fn(
+            "agent-session", config.components["agent-session"]["adapter"],
+            repo=work_repo["repo"],
+        )
+        pr_states[work_repo["pr_ref"]] = agent.pr_state(work_repo["pr_ref"])
+
+    # The run whose completion parked the ticket here -- gives the block and
+    # escalation events a real causal id instead of a synthetic one.
+    runs = state.get("runs", [])
+    run_id = runs[-1]["run_id"] if runs else ""
+
+    abandoned = [
+        ref for ref, pr in pr_states.items() if pr["state"] == "closed" and not pr["merged"]
+    ]
+    if abandoned:
+        reason = "work PR closed unmerged: " + ", ".join(sorted(abandoned))
+        _block_ticket(store, config, adapter_fn, ticket_id, run_id, reason)
+        _escalate(
+            store, config, adapter_fn, ticket_id, run_id,
+            f"{reason}. The engine finished its work, but the PR was closed without "
+            "merging, so the ticket is blocked pending human review.",
+        )
+        return
+
+    if not all(pr["merged"] for pr in pr_states.values()):
+        return
+
+    tracker = adapter_fn("tracker", config.components["tracker"]["adapter"], repo=intake_repo(config))
+    notify_ticket(
+        config, adapter_fn, ticket_id,
+        "Merged: " + ", ".join(sorted(pr_states)) + ". Closing the ticket.",
+        f"{ticket_id}:merged",
+    )
     tracker.close_issue(ticket_id)
     store.write(lambda txn: txn.set_ticket(ticket_id, status="DONE"))
+    set_status_label(config, adapter_fn, ticket_id, "DONE")
 
 
 def _target_repo(config, adapter_fn, ticket_id) -> str | None:
@@ -874,12 +1130,12 @@ def dispatch(
                 len(runs) > budgets["loop_guard"]["max_runs"]
                 or max_chain_depth > budgets["loop_guard"]["max_depth"]
             ):
-                _block_ticket(store, ticket_id, run_id, "loop guard tripped")
+                _block_ticket(store, config, adapter_fn, ticket_id, run_id, "loop guard tripped")
                 break
 
             verdict = check_budget(state, taskdef["budget"], budgets["ticket_cap_usd"])
             if verdict["over_ticket_cap"] or verdict["insufficient_headroom"]:
-                _block_ticket(store, ticket_id, run_id, "ticket budget exhausted")
+                _block_ticket(store, config, adapter_fn, ticket_id, run_id, "ticket budget exhausted")
                 break
 
             if not check_concurrency(

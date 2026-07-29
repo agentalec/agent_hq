@@ -20,6 +20,14 @@
       "type": "string",
       "description": "Task id enqueued (with the root run's resolved repo) for a newly accepted ticket"
     },
+    "feedback_task": {
+      "type": "string",
+      "description": "Task id enqueued when an approver sends work back with /agent-hq request-changes on a work-repo PR; omit to ignore PR commands entirely"
+    },
+    "feedback_approvers": {
+      "type": "string",
+      "description": "approvers.yml group whose members may drive feedback_task from a work-repo PR comment; omit to ignore PR commands entirely"
+    },
     "intake": {
       "type": "object",
       "description": "Eligibility filter applied before the first state/artifact write",

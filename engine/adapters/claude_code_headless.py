@@ -305,6 +305,18 @@ class ClaudeCodeHeadless:
         if result.get("errors"):
             raise RuntimeError(f"GitHub markPullRequestReadyForReview failed: {result['errors']}")
 
+    def pr_state(self, pr_ref: str) -> dict:
+        """Whether a work PR is still open, and if closed whether it was
+        merged -- what the sweep needs to resolve an AWAITING_MERGE ticket
+        (`engine.engine.resolve_awaiting_merge`). Closed-unmerged is a human
+        declining the work, so the caller must be able to tell it from a
+        merge; `state` alone cannot.
+        ponytail: no helper in `_github.py` for a one-line GET with exactly
+        one caller -- same shape as `mark_pr_ready` right above."""
+        repo, _, number = pr_ref.rpartition("#")
+        pr = GitHubClient().get(f"/repos/{repo}/pulls/{number}")
+        return {"state": pr["state"], "merged": bool(pr.get("merged_at"))}
+
     def request_reviewers(self, pr_ref: str, members: list[str]) -> None:
         repo, _, number = pr_ref.rpartition("#")
         request_reviewers(GitHubClient(), repo, number, members)

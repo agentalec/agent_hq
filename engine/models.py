@@ -46,6 +46,11 @@ class GateStatus(str, Enum):
 
 class TicketStatus(str, Enum):
     ACTIVE = "ACTIVE"
+    # Queue drained and the closing summary posted, but the work PRs are not
+    # resolved yet -- the issue stays OPEN and the sweep watches the PRs
+    # (engine.engine.resolve_awaiting_merge). No run is exclusive here, so an
+    # AWAITING_MERGE ticket holds no in_flight_cap slot.
+    AWAITING_MERGE = "AWAITING_MERGE"
     BLOCKED = "BLOCKED"
     DONE = "DONE"
 

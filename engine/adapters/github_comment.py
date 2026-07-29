@@ -48,6 +48,37 @@ class GithubCommentMessaging:
 
         self._client.post(f"/repos/{repo}/issues/{ticket_id}/comments", json={"body": body})
 
+    def list_comments(self, subject_id: str, since: str | None = None) -> list[dict]:
+        """Comments on `subject_id` (an issue or PR number in this adapter's
+        repo -- a PR is an issue), oldest first, as
+        `{"id", "body", "author", "created_at"}`.
+
+        The read half of the same work-repo pairing `notify` writes: the
+        sweep polls a work PR for authorized `/agent-hq` commands, which is
+        the only way review feedback reaches the engine (the engine
+        repository cannot receive product-repo events).
+
+        `since` is passed to GitHub, so an already-polled window costs one
+        near-empty response rather than a full re-read. It is a watermark,
+        not the dedupe -- the caller still dedupes by comment id, because
+        `since` is inclusive at the boundary second.
+        """
+        params: dict = {"per_page": 100}
+        if since:
+            params["since"] = since
+        comments = self._client.get(
+            f"/repos/{self.repo}/issues/{subject_id}/comments", params=params
+        ) or []
+        return [
+            {
+                "id": c["id"],
+                "body": c.get("body") or "",
+                "author": (c.get("user") or {}).get("login") or "",
+                "created_at": c.get("created_at") or "",
+            }
+            for c in comments
+        ]
+
     def healthcheck(self) -> bool:
         try:
             self._client.get("/rate_limit")
