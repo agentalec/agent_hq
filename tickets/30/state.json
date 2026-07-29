@@ -1,7 +1,7 @@
 {
   "ticket_id": "30",
   "pinned_comment_id": 5104738804,
-  "status": "ACTIVE",
+  "status": "BLOCKED",
   "runs": [
     {
       "run_id": "1112aa256e1bf396",
@@ -354,7 +354,7 @@
       "task_id": "qa",
       "task_version": 1,
       "ticket_id": "30",
-      "state": "RUNNING",
+      "state": "BLOCKED",
       "attempt": 3,
       "bindings": {
         "tracker": "github-issues",
@@ -386,5 +386,8 @@
       "recorded_head": "de3607fef2ac4b7428a329140824ba17721959d2",
       "pr_ref": "agentalec/care_fe#6"
     }
-  ]
+  ],
+  "block_reason": "branch_conflict",
+  "block_source": "task",
+  "interrupted_run_id": "2a71b2c7d52cad57"
 }

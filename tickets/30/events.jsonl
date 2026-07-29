@@ -51,3 +51,4 @@
 {"event_id": "38e4967e962b1fd1:succeeded", "kind": "run.succeeded", "ticket_id": "30", "run_id": "38e4967e962b1fd1", "state": "SUCCEEDED", "artifacts": ["specs/30/summary.md"]}
 {"event_id": "2a71b2c7d52cad57:queued", "kind": "run.queued", "ticket_id": "30", "run_id": "2a71b2c7d52cad57", "task_id": "qa", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "2a71b2c7d52cad57:collected", "kind": "run.collected", "ticket_id": "30", "run_id": "2a71b2c7d52cad57", "cost_usd": 0.0}
+{"event_id": "2a71b2c7d52cad57:branch_conflict", "kind": "run.blocked", "ticket_id": "30", "run_id": "2a71b2c7d52cad57", "state": "BLOCKED", "detail": "branch_conflict"}
