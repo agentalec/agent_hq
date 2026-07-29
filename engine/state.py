@@ -355,6 +355,13 @@ class GitJsonStateStore:
                 return
             self._flush(txn)
             self._git("add", "-A")
+            # Dirtiness is DECLARED by the mutators, not computed -- writing a
+            # field its current value still marks the ticket dirty. Without
+            # this check `git commit` fails outright on an empty tree, so a
+            # caller that re-writes an unchanged value (the sweep's PR-comment
+            # watermark, re-read with no new comments) would raise every pass.
+            if not self._git("diff", "--cached", "--name-only").strip():
+                return
             self._git("commit", "-m", self._commit_message(txn))
             result = self._push()
             if result.returncode == 0:

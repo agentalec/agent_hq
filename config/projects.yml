@@ -6,6 +6,15 @@ repos:
 intake_label: hq:intake
 engine_repo: agentalec/agent_hq
 initial_task: spec
+# Enqueued when an approver sends work back with `/agent-hq request-changes`
+# on a work-repo PR. Names the task, so the engine keeps no task-name
+# special case -- point it wherever rework belongs in your route. Drop
+# either key to switch PR-comment feedback off entirely.
+feedback_task: implement
+# Who may spend engine budget from a work-repo PR. A PR is a wider audience
+# than the engine issue, so this is an explicit allowlist, never "anyone who
+# can comment".
+feedback_approvers: product-owners
 intake:
   min_body_words: 30
   excluded_labels:

@@ -203,6 +203,19 @@ same mutation against fresh state (`engine/state.py`'s bounded retry). That
 push/replay loop, not a separate lock, is what serializes concurrent writers
 across *different* tickets sharing the one `agent-hq-state` branch.
 
+**Writing a `write(fn)`.** Two consequences fall out of that replay, and both
+have bitten:
+
+- `fn` may run **more than once**. Anything it records in an enclosing scope
+  accumulates unless `fn` clears it first, so only the attempt that lands
+  decides anything (`claim_run`'s `claimed` flag,
+  `poll_pr_feedback`'s `result`).
+- Dirtiness is **declared** by the mutators, not computed: writing a field
+  its current value still marks the ticket dirty. `write` therefore checks
+  the staged diff and returns without committing when nothing actually
+  changed — `git commit` fails outright on an empty tree, so a caller that
+  re-writes an unchanged value would otherwise raise on every pass.
+
 `run.yml` and `intake.yml` used to *also* take a shared `agent-hq-state`
 Actions concurrency group, on the theory that reducing contention was free.
 It was not: GitHub keeps a single *pending* slot per group, so a burst of
@@ -241,3 +254,50 @@ A re-driven (retried) lost run therefore never duplicates a comment, PR, or
 state entry, even if its original attempt is still straggling: the
 straggler observes its own claim is gone and stops, rather than relying
 solely on the branch's fast-forward rejection to keep it harmless.
+
+## 12. What the sweep polls on work repos
+
+The engine repository's workflows cannot receive product-repo events, and no
+cross-repo forwarder exists (`docs/roadmap.md` hardening list). Everything the
+engine learns about a work-repo PR it therefore *polls*, on the dispatcher's
+15-minute schedule (`dispatch.yml`) plus every issue-scoped wake-up. Two
+readers, both per ticket, both driven off `work_repos[*].pr_ref` — the engine
+only ever watches PRs it opened:
+
+- **`resolve_awaiting_merge`** — for `AWAITING_MERGE` tickets only. Reads each
+  recorded PR (`agent-session.pr_state`). All merged: post the merge notice,
+  close the issue, ticket `DONE`. Any closed-unmerged: ticket `BLOCKED` +
+  escalation, checked first so one abandoned PR outweighs merged siblings.
+  Anything still open: leave it.
+- **`poll_pr_feedback`** — for `ACTIVE` and `AWAITING_MERGE` tickets with
+  **nothing in flight**. A rework enqueued mid-run would race the run already
+  working that branch, and a second comment would stack a third; deferring
+  loses nothing, because the watermark only advances on a pass that actually
+  polls. Reads comments since `work_repos[].comments_polled_at` and acts only
+  on
+  `/agent-hq request-changes <reason>` from a `projects.feedback_approvers`
+  member, enqueuing `projects.feedback_task`. Membership is checked before
+  the body is parsed, and the loop/budget guards run before the enqueue, so a
+  comment thread cannot spend past the ceilings a handoff respects.
+
+**Idempotency is causal, not positional.** A feedback run's id derives from
+the comment that requested it (`compute_run_id("pr-comment:<id>", ...)`), so
+re-reading the same comment resolves to the run that already exists.
+`comments_polled_at` only keeps the read small — it is a watermark, never the
+dedupe, because GitHub's `since` is inclusive at the boundary second.
+
+**Cost.** One comments call per ticket with an open PR, plus one PR-state call
+per recorded PR on an `AWAITING_MERGE` ticket, per sweep. Negligible at pilot
+scale. If ticket count ever makes this expensive, that is the restore trigger
+for the notification-inbox reader deferred in `docs/roadmap.md` — not a reason
+to hand-tune the cadence.
+
+**Operator notes.**
+
+- A ticket sitting in `AWAITING_MERGE` is waiting on a *human*, not on the
+  engine. `hq:awaiting-merge` makes those findable. It holds no
+  `in_flight_cap` slot (no run is exclusive), unlike `WAITING_GATE`.
+- `work PR closed unmerged` blocks are recovered the same way as any other
+  block, once the guarded-reopen transition lands.
+- Turning the feedback path off is a config edit, not a deploy: drop
+  `feedback_task` or `feedback_approvers` from `projects.yml`.

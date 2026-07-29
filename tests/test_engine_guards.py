@@ -13,7 +13,9 @@ from engine.engine import (
     intake_repo,
     kill_switch_active,
     resolve_target_repo,
+    set_status_label,
 )
+from engine.engine import STATUS_LABELS
 from engine.models import Handoff, TicketDetails
 from engine.state import GitJsonStateStore
 
@@ -384,3 +386,51 @@ def test_dispatch_unscoped_call_scans_every_ticket(tmp_path):
     triggered = dispatch(config, taskdefs, store, wf, now_iso="2026-07-18T00:00:00Z")
 
     assert set(triggered) == {"run-ticket-1", "run-ticket-2"}
+
+
+class _LabelTracker:
+    """Records what `set_status_label` asks for, and answers the next
+    `fetch_ticket` with it -- so a sequence of transitions exercises the
+    read-modify-write the real adapter performs."""
+
+    def __init__(self, labels):
+        self.labels = list(labels)
+        self.calls: list[list[str]] = []
+
+    def fetch_ticket(self, ref):
+        return TicketDetails(ticket_id="7", title="t", body="b", labels=list(self.labels))
+
+    def set_status_labels(self, ticket_id, status, labels):
+        self.labels = sorted(labels)
+        self.calls.append(self.labels)
+
+
+def _label_config():
+    return Config(
+        projects={"engine_repo": "org/engine"},
+        repos={}, components={"tracker": {"adapter": "fake"}}, approvers={}, budgets={},
+    )
+
+
+def test_status_label_transitions_keep_exactly_one_and_preserve_config_labels():
+    """The adapter replaces the WHOLE `hq:`-prefixed set, so a status label
+    that filtered on the prefix would strip `hq:intake`/`hq:public-safe`/
+    `hq:executor=` off the issue. Only STATUS_LABELS values may be dropped,
+    and only one of them may ever be applied at a time."""
+    tracker = _LabelTracker(["hq:intake", "hq:public-safe", "hq:executor=copilot-cli", "bug"])
+    config = _label_config()
+
+    for status in ("ACTIVE", "WAITING_GATE", "ACTIVE", "AWAITING_MERGE", "BLOCKED", "DONE"):
+        set_status_label(config, lambda *a, **k: tracker, "7", status)
+        owned = [name for name in tracker.labels if name in STATUS_LABELS.values()]
+        assert owned == [STATUS_LABELS[status]], f"{status} -> {tracker.labels}"
+        # Nothing the engine does not own is ever dropped.
+        assert {"hq:intake", "hq:public-safe", "hq:executor=copilot-cli", "bug"} <= set(
+            tracker.labels
+        )
+
+
+def test_status_label_for_unknown_status_clears_without_adding():
+    tracker = _LabelTracker(["hq:intake", "hq:blocked"])
+    set_status_label(_label_config(), lambda *a, **k: tracker, "7", "NOT_A_STATUS")
+    assert tracker.labels == ["hq:intake"]

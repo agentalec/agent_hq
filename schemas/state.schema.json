@@ -8,7 +8,7 @@
   "properties": {
     "ticket_id": { "type": "string" },
     "pinned_comment_id": { "type": ["string", "integer", "null"] },
-    "status": { "type": "string", "enum": ["ACTIVE", "BLOCKED", "DONE"] },
+    "status": { "type": "string", "enum": ["ACTIVE", "AWAITING_MERGE", "BLOCKED", "DONE"] },
     "block_reason": { "type": ["string", "null"] },
     "block_source": { "type": ["string", "null"] },
     "interrupted_run_id": { "type": ["string", "null"] },
@@ -31,7 +31,11 @@
         "branch": { "type": ["string", "null"] },
         "pr_ref": { "type": ["string", "null"] },
         "recorded_head": { "type": ["string", "null"] },
-        "base_branch": { "type": ["string", "null"] }
+        "base_branch": { "type": ["string", "null"] },
+        "comments_polled_at": {
+          "type": ["string", "null"],
+          "description": "Watermark for the sweep's PR-comment poll: only comments created at or after this are considered. A watermark, not the dedupe -- comment ids are deduped through the event log."
+        }
       }
     },
     "handoff": {

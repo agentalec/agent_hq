@@ -84,6 +84,27 @@ def test_write_lands_as_one_commit_touching_three_files(tmp_path):
     assert state["runs"][0]["run_id"] == "run-1"
 
 
+def test_write_of_unchanged_values_is_a_no_op_not_an_error(tmp_path):
+    """Dirtiness is declared by the mutators, not computed -- rewriting a
+    field its current value still marks the ticket dirty. `git commit` fails
+    outright on an empty tree, so without the staged-diff check any caller
+    that re-writes an unchanged value (the sweep's PR-comment watermark, on a
+    pass that found nothing new) would raise every time."""
+    origin = _make_origin(tmp_path)
+    worktree = _clone_worktree(tmp_path, origin, "wt-noop")
+    store = GitJsonStateStore(worktree)
+
+    def fn(txn: Txn) -> None:
+        txn.set_ticket("ticket-1", status="ACTIVE", pinned_comment_id=None)
+
+    store.write(fn)
+    before = _git("log", "--oneline", BRANCH, cwd=worktree).strip().splitlines()
+
+    store.write(fn)  # identical values -- must not raise
+
+    assert _git("log", "--oneline", BRANCH, cwd=worktree).strip().splitlines() == before
+
+
 def test_write_conflict_reapplies_and_keeps_both_changes(tmp_path):
     origin = _make_origin(tmp_path)
     wt1 = _clone_worktree(tmp_path, origin, "wt1")
@@ -388,6 +409,54 @@ def test_replay_gives_up_loudly_after_the_bounded_attempts(tmp_path, monkeypatch
         store.write(lambda txn: txn.set_ticket("ticket-1", status="ACTIVE", pinned_comment_id=None))
 
     assert calls["n"] == state._MAX_WRITE_ATTEMPTS
+
+
+def test_replay_reruns_fn_so_a_losing_attempt_leaves_no_trace(tmp_path, monkeypatch):
+    """The replay re-runs `fn` from scratch against fresh state, so anything
+    `fn` records in an enclosing scope ACCUMULATES across attempts unless it
+    clears first. Only the attempt that actually lands may decide anything.
+
+    `claim_run` resets its `claimed` flag for exactly this reason, and so does
+    `engine.engine.poll_pr_feedback`'s `result`. This is the contract for the
+    next caller that closes over one: state written by an attempt that lost
+    the push race must not outlive it."""
+    origin = _make_origin(tmp_path)
+    store = GitJsonStateStore(_clone_worktree(tmp_path, origin, "wt-replay"))
+    real_push = store._push
+    pushes = {"n": 0}
+
+    def reject_first_push():
+        pushes["n"] += 1
+        if pushes["n"] > 1:
+            return real_push()
+        return subprocess.CompletedProcess(
+            args=["git", "push", "--porcelain"],
+            returncode=1,
+            stdout=(
+                "To origin\n"
+                "!\trefs/heads/agent-hq-state:refs/heads/agent-hq-state\t"
+                "[rejected] (non-fast-forward)\n"
+                "Done\n"
+            ),
+            stderr="contended",
+        )
+
+    monkeypatch.setattr(store, "_push", reject_first_push)
+    monkeypatch.setattr(state, "_retry_backoff_seconds", lambda attempt: 0)
+
+    result: dict = {}
+    attempts = {"n": 0}
+
+    def fn(txn: Txn) -> None:
+        result.clear()  # the discipline under test
+        attempts["n"] += 1
+        result[f"attempt-{attempts['n']}"] = True
+        txn.set_ticket("ticket-1", status="ACTIVE", pinned_comment_id=None)
+
+    store.write(fn)
+
+    assert attempts["n"] == 2, "the rejected push must have replayed fn"
+    assert result == {"attempt-2": True}, "the losing attempt left state behind"
 
 
 def test_push_failure_that_is_not_a_rejection_fails_fast(tmp_path, monkeypatch):

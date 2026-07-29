@@ -168,6 +168,24 @@ def test_mark_pr_ready_uses_graphql_mutation(monkeypatch):
     assert fake.calls[1]["json"]["variables"] == {"id": "PR_node"}
 
 
+def test_pr_state_reports_merged_separately_from_closed(monkeypatch):
+    """`state` is "closed" for both a merge and an abandonment, and the sweep
+    routes those to opposite ends (DONE vs BLOCKED) -- so `merged` has to be
+    read off `merged_at`, not inferred."""
+    cases = [
+        ({"state": "open", "merged_at": None}, {"state": "open", "merged": False}),
+        (
+            {"state": "closed", "merged_at": "2026-07-29T10:00:00Z"},
+            {"state": "closed", "merged": True},
+        ),
+        ({"state": "closed", "merged_at": None}, {"state": "closed", "merged": False}),
+    ]
+    for payload, expected in cases:
+        fake = _install(monkeypatch, [FakeResponse(200, payload)])
+        assert ClaudeCodeHeadless({}).pr_state("o/r#12") == expected
+        assert fake.calls[0]["url"].endswith("/repos/o/r/pulls/12")
+
+
 # -- GithubIssuesTracker ------------------------------------------------------
 
 

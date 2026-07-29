@@ -16,7 +16,6 @@ Everything intentionally not in P0, with its restore trigger. Sources: the P0 sc
 | Full dashboard | Kanban, per-ticket timelines, spend by task-type/adapter/month, effective-config view (P0 ships a single state-table page) | Someone actually asks for a view the minimal page lacks |
 | Monthly budget tracking (CFG-5) | Monthly API-$ and Actions-minutes budgets, threshold alerts, cap-driven intake stop | First month-end surprise, or pilot exit |
 | CI-green auto-undraft | Sweep polls PR checks, undrafts + requests reviewers when green | Human undrafting becomes a bottleneck |
-| pr-merged closing summary | `pull_request: closed` path posting the closing summary + terminal status on human merge (P0: finalize posts it at ready-time) | Merge-time status fidelity matters to the tracker |
 | Gate half-timeout alerts | Warning ping at 50% of a gate's working-hours timeout | Gates routinely expiring without warning |
 
 ## B. P1 (requirements §13)
@@ -40,7 +39,8 @@ Everything intentionally not in P0, with its restore trigger. Sources: the P0 sc
 ## D. Hardening backlog
 
 - Split prepare/execute/collect into separate jobs so the agent job has no engine secret and no repository write token; use GitHub Agentic Workflows or reproduce its safe-output boundary directly.
-- Cross-repository intake webhook/forwarder plus canonical repo-qualified ticket identity; current engine-repo `issues` trigger cannot observe product-repo events.
+- Cross-repository intake webhook/forwarder plus canonical repo-qualified ticket identity; current engine-repo `issues` trigger cannot observe product-repo events. Work-repo PR state and PR comments no longer need it — the sweep polls them (`engine.engine.resolve_awaiting_merge`/`poll_pr_feedback`); what still does is *intake* from a product repo, e.g. an `@agent-hq` mention in a repo no ticket references.
+- Notification-inbox reader (`GET /notifications`) as an alternative to per-ticket PR polling. Rejected for now on three counts: read-state is mutable and shared, so a human opening the inbox silently consumes the engine's queue; `/notifications` is user-scoped, which would block the GitHub App migration above; and the ledger already holds the subscription list (`work_repos[*].pr_ref`). Restore trigger: ticket count grows until per-ticket polling is measurably expensive.
 - Egress-restricted agent execution using the GitHub Agentic Workflows firewall or an equivalent enforced proxy.
 - Claude CLI sandbox network-allowlist enforcement (verify per pinned CLI version).
 - SHA-pinned Actions references (currently major-version tags).

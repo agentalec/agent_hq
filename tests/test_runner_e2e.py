@@ -37,6 +37,7 @@ from engine.models import GateDecision, GateRequest, GateStatus, TicketDetails
 from engine.runner import (
     _expand_declared,
     _latest_review_round,
+    _rework_comments,
     _ledger_image_urls,
     _run_setup,
     execute_dir_for,
@@ -88,7 +89,7 @@ class FakeTracker:
 
 class FakeAgent:
     def __init__(self, workdir, outcome="success", usage_known=True, cost_usd=1.5, tokens=100,
-                 control=None, apply_patch_error=None, land_result=None):
+                 control=None, apply_patch_error=None, land_result=None, pr_states=None):
         self.workdir = workdir
         self.outcome = outcome
         self.usage_known = usage_known
@@ -97,6 +98,8 @@ class FakeAgent:
         self.control = control if control is not None else {"outcome": "complete"}
         self.apply_patch_error = apply_patch_error
         self.land_result = land_result
+        # pr_ref -> {"state": ..., "merged": ...}; unlisted refs read as open.
+        self.pr_states = pr_states or {}
         self.opened_prs: list[tuple] = []
         self.requested_reviewers: list[tuple] = []
         self.ready_prs: list[str] = []
@@ -156,6 +159,9 @@ class FakeAgent:
     def mark_pr_ready(self, pr_ref):
         self.ready_prs.append(pr_ref)
 
+    def pr_state(self, pr_ref):
+        return self.pr_states.get(pr_ref, {"state": "open", "merged": False})
+
 
 class FakeGate:
     def __init__(self, request_id="42", decision=None):
@@ -173,11 +179,18 @@ class FakeGate:
 
 
 class FakeMessaging:
-    def __init__(self):
+    def __init__(self, comments=None):
         self.calls = []
+        # [{"id", "body", "author", "created_at"}], as the adapter returns them.
+        self.comments = list(comments or [])
+        self.listed: list[tuple] = []
 
     def notify(self, audience, message, links, event_id):
         self.calls.append((audience, message, event_id))
+
+    def list_comments(self, subject_id, since=None):
+        self.listed.append((subject_id, since))
+        return [c for c in self.comments if since is None or c["created_at"] >= since]
 
 
 class FakeWorkflowApi:
@@ -737,11 +750,16 @@ def test_collect_patch_apply_failure_fails_run_never_lands(config, taskdefs, sto
     assert "work_repos" not in store.read_state("7") or not store.read_state("7")["work_repos"]
 
 
-def test_collect_finalize_completes_ticket_and_marks_pr_ready(config, taskdefs, store, tmp_path):
+def test_collect_finalize_marks_pr_ready_and_waits_for_the_merge(config, taskdefs, store, tmp_path):
     """Queue-empty completion (not a `finalize`-name special-case): once the
     terminal run's own recorded artifacts include the declared summary and
-    nothing else is in flight, every recorded work-repo PR is marked ready,
-    the closing summary posts, the issue closes, and the ticket goes DONE."""
+    nothing else is in flight, every recorded work-repo PR is marked ready
+    and the closing summary posts.
+
+    The issue does NOT close here. Engine-complete is not ticket-complete
+    while a human still has to merge -- closing at ready-time told the
+    tracker "done" over unreviewed code. The ticket parks at AWAITING_MERGE
+    and `resolve_awaiting_merge` closes it once the PR actually resolves."""
     store.write(
         lambda txn: (
             txn.set_ticket(
@@ -769,6 +787,34 @@ def test_collect_finalize_completes_ticket_and_marks_pr_ready(config, taskdefs, 
     assert ticket_id == "7"
     assert event_id == "7:finalrun:done:closing-summary"
     assert body == "Ticket 7 shipped: PR ready, QA green."  # the declared summary artifact
+    assert tracker.closed == []  # still open -- the PR has not been merged
+    assert store.read_state("7")["status"] == "AWAITING_MERGE"
+    assert tracker.label_sets[-1] == (
+        "7", "AWAITING_MERGE", ["hq:awaiting-merge", "hq:intake", "hq:public-safe"]
+    )
+
+
+def test_collect_completion_without_a_pr_closes_the_issue_immediately(
+    config, taskdefs, store, tmp_path
+):
+    """A ticket that recorded no work PR (nothing touched code) has nothing
+    to wait on -- it must not strand in AWAITING_MERGE forever."""
+    store.write(
+        lambda txn: (
+            txn.set_ticket("7", status="ACTIVE", pinned_comment_id=None, work_repos=[]),
+            txn.put_run(
+                "7", _run_dict("finalrun", "finalize", state="RUNNING")
+            ),
+        )
+    )
+    _stage(config, "finalrun", "specs/7/summary.md", "No code changes were needed.")
+    _write_execute_result(config, "finalrun", cost_usd=0.5, tokens=5)
+    _write_control(config, "finalrun", {"outcome": "complete"})
+    tracker = FakeTracker(_details())
+    adapters = _adapters(tracker=tracker, agent=FakeAgent(tmp_path / "work"))
+    run_task("finalrun", "collect", config, taskdefs, store,
+             now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
+
     assert tracker.closed == ["7"]
     assert store.read_state("7")["status"] == "DONE"
 
@@ -1072,7 +1118,7 @@ def test_collect_failure_exhausted_blocks_and_escalates(config, taskdefs, store,
     _write_execute_result(
         config, "buildrun", outcome="failure", cost_usd=3.0, tokens=20, usage_known=True,
     )
-    adapters = _adapters(agent=FakeAgent(tmp_path / "work"))
+    adapters = _adapters(tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"))
     run_task("buildrun", "collect", config, taskdefs, store, adapter_fn=adapters)
 
     assert store.read_state("7")["status"] == "BLOCKED"
@@ -1089,7 +1135,7 @@ def test_collect_unknown_usage_blocks_never_retries(config, taskdefs, store, tmp
     _write_execute_result(
         config, "buildrun", outcome="failure", cost_usd=None, tokens=None, usage_known=False,
     )
-    adapters = _adapters(agent=FakeAgent(tmp_path / "work"))
+    adapters = _adapters(tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"))
     run_task("buildrun", "collect", config, taskdefs, store, adapter_fn=adapters)
     state = store.read_state("7")
     assert state["status"] == "BLOCKED"
@@ -1185,7 +1231,9 @@ def test_sweep_gate_approved_applies_pending_handoff_and_completes(config, taskd
     runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
     assert runs["specrun"]["state"] == "SUCCEEDED"
     # The gate is resolved, so the waiting-gate label comes back off.
-    assert tracker.label_sets[-1] == ("7", "ACTIVE", ["hq:intake", "hq:public-safe"])
+    assert tracker.label_sets[-1] == (
+        "7", "ACTIVE", ["hq:active", "hq:intake", "hq:public-safe"]
+    )
     assert runs["specrun"]["pending_handoffs"] == []
     downstream = [r for r in runs.values() if r["task_id"] == "build"]
     assert len(downstream) == 1
@@ -1228,7 +1276,9 @@ def test_sweep_auto_approved_gate_resolves_a_run_already_waiting(config, taskdef
     assert decided[0]["event_id"] == "specrun:auto_approval"
     assert "auto-approved by task config" in decided[0]["detail"]
     # and the waiting-gate label comes off, same as any other decision
-    assert tracker.label_sets[-1] == ("7", "ACTIVE", ["hq:intake", "hq:public-safe"])
+    assert tracker.label_sets[-1] == (
+        "7", "ACTIVE", ["hq:active", "hq:intake", "hq:public-safe"]
+    )
 
 
 def test_sweep_gate_changes_requested_reworks_and_clears_pending_handoffs(config, taskdefs, store):
@@ -1247,7 +1297,9 @@ def test_sweep_gate_changes_requested_reworks_and_clears_pending_handoffs(config
     rework = [r for r in runs.values() if r["task_id"] == "spec" and r["attempt"] == 1]
     assert len(rework) == 1
     # Not just the approve path: any decision takes the label back off.
-    assert tracker.label_sets[-1] == ("7", "ACTIVE", ["hq:intake", "hq:public-safe"])
+    assert tracker.label_sets[-1] == (
+        "7", "ACTIVE", ["hq:active", "hq:intake", "hq:public-safe"]
+    )
     new_id = rework[0]["run_id"]
     rework_event = [e for e in store.read_events("7")
                     if e["kind"] == "run.rework" and e["run_id"] == new_id]
@@ -1318,3 +1370,303 @@ def test_sweep_runner_lost_fails_and_retries(config, taskdefs, store):
     assert len(retries) == 1
     events = {e["kind"] for e in store.read_events("7")}
     assert "run.runner_lost" in events
+
+
+# -- AWAITING_MERGE resolution (sweep) ----------------------------------------
+
+
+def _awaiting_merge(store, work_repos):
+    store.write(
+        lambda txn: (
+            txn.set_ticket(
+                "7", status="AWAITING_MERGE", pinned_comment_id=None, work_repos=work_repos
+            ),
+            txn.put_run("7", _run_dict("finalrun", "finalize", state="SUCCEEDED")),
+        )
+    )
+
+
+def test_sweep_closes_the_ticket_once_every_pr_is_merged(config, taskdefs, store, tmp_path):
+    _awaiting_merge(store, [{"repo": "agentalec/care", "pr_ref": "agentalec/care#11"}])
+    tracker = FakeTracker(_details())
+    agent = FakeAgent(
+        tmp_path / "work",
+        pr_states={"agentalec/care#11": {"state": "closed", "merged": True}},
+    )
+    adapters = _adapters(tracker=tracker, agent=agent)
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    assert store.read_state("7")["status"] == "DONE"
+    assert tracker.closed == ["7"]
+    assert tracker.label_sets[-1] == ("7", "DONE", ["hq:done", "hq:intake", "hq:public-safe"])
+
+
+def test_sweep_leaves_the_ticket_awaiting_while_a_pr_is_still_open(
+    config, taskdefs, store, tmp_path
+):
+    _awaiting_merge(
+        store,
+        [
+            {"repo": "agentalec/care", "pr_ref": "agentalec/care#11"},
+            {"repo": "agentalec/care_fe", "pr_ref": "agentalec/care_fe#4"},
+        ],
+    )
+    tracker = FakeTracker(_details())
+    agent = FakeAgent(
+        tmp_path / "work",
+        pr_states={"agentalec/care#11": {"state": "closed", "merged": True}},
+    )  # care_fe#4 defaults to open
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(),
+           _adapters(tracker=tracker, agent=agent))
+
+    assert store.read_state("7")["status"] == "AWAITING_MERGE"
+    assert tracker.closed == []
+
+
+def test_sweep_blocks_and_escalates_when_a_pr_is_closed_unmerged(
+    config, taskdefs, store, tmp_path
+):
+    """Closed-unmerged is a human declining the work -- it must reach a
+    person, not complete silently."""
+    _awaiting_merge(store, [{"repo": "agentalec/care", "pr_ref": "agentalec/care#11"}])
+    tracker = FakeTracker(_details())
+    agent = FakeAgent(
+        tmp_path / "work",
+        pr_states={"agentalec/care#11": {"state": "closed", "merged": False}},
+    )
+    adapters = _adapters(tracker=tracker, agent=agent)
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    state = store.read_state("7")
+    assert state["status"] == "BLOCKED"
+    assert tracker.closed == []
+    assert adapters.messaging.calls, "an abandoned PR has to escalate"
+    assert "closed unmerged" in adapters.messaging.calls[0][1]
+    assert tracker.label_sets[-1] == (
+        "7", "BLOCKED", ["hq:blocked", "hq:intake", "hq:public-safe"]
+    )
+
+
+def test_sweep_abandoned_pr_outweighs_a_merged_sibling(config, taskdefs, store, tmp_path):
+    _awaiting_merge(
+        store,
+        [
+            {"repo": "agentalec/care", "pr_ref": "agentalec/care#11"},
+            {"repo": "agentalec/care_fe", "pr_ref": "agentalec/care_fe#4"},
+        ],
+    )
+    agent = FakeAgent(
+        tmp_path / "work",
+        pr_states={
+            "agentalec/care#11": {"state": "closed", "merged": True},
+            "agentalec/care_fe#4": {"state": "closed", "merged": False},
+        },
+    )
+    tracker = FakeTracker(_details())
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(),
+           _adapters(tracker=tracker, agent=agent))
+
+    assert store.read_state("7")["status"] == "BLOCKED"
+    assert tracker.closed == []
+
+
+def test_sweep_merge_close_is_idempotent_across_passes(config, taskdefs, store, tmp_path):
+    """A second sweep must not re-close or re-comment: the DONE status is the
+    key, exactly as ACTIVE keys the first half."""
+    _awaiting_merge(store, [{"repo": "agentalec/care", "pr_ref": "agentalec/care#11"}])
+    tracker = FakeTracker(_details())
+    agent = FakeAgent(
+        tmp_path / "work",
+        pr_states={"agentalec/care#11": {"state": "closed", "merged": True}},
+    )
+    adapters = _adapters(tracker=tracker, agent=agent)
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    assert tracker.closed == ["7"]
+    assert len(adapters.messaging.calls) == 1
+
+
+# -- PR-comment feedback (sweep) ----------------------------------------------
+
+
+_WORK_REPO = [{"repo": "agentalec/care", "pr_ref": "agentalec/care#11"}]
+
+
+def _feedback_config(config, task_id="build", group="product-owners"):
+    """The fixture task library has no `implement`, so point feedback_task at
+    a task it does have -- the engine never special-cases the name."""
+    config.projects["feedback_task"] = task_id
+    config.projects["feedback_approvers"] = group
+    config.approvers["groups"] = {group: {"members": ["example-alice"]}}
+    return config
+
+
+def _comment(cid, body, author="example-alice", created_at="2026-07-18T08:00:00Z"):
+    return {"id": cid, "body": body, "author": author, "created_at": created_at}
+
+
+def _with_pr(store, status="AWAITING_MERGE"):
+    store.write(
+        lambda txn: (
+            txn.set_ticket("7", status=status, pinned_comment_id=None, work_repos=_WORK_REPO),
+            txn.put_run("7", _run_dict("finalrun", "finalize", state="SUCCEEDED")),
+        )
+    )
+
+
+def test_sweep_pr_request_changes_from_an_approver_queues_rework(config, taskdefs, store, tmp_path):
+    """The whole point: feedback arriving when NO run is gated still reaches
+    the engine, and its text reaches the rework prompt."""
+    _feedback_config(config)
+    _with_pr(store)
+    messaging = FakeMessaging([_comment(101, "/agent-hq request-changes fix the N+1")])
+    adapters = _adapters(
+        tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    state = store.read_state("7")
+    assert state["status"] == "ACTIVE"  # back off the merge watch
+    queued = [r for r in state["runs"] if r["state"] == "QUEUED"]
+    assert len(queued) == 1
+    assert queued[0]["task_id"] == "build"
+    assert queued[0]["repo"] == "agentalec/care"
+    # The reason reaches the prompt through the same event the gate's own
+    # CHANGES_REQUESTED path writes.
+    assert _rework_comments(store, "7", queued[0]["run_id"]) == "@example-alice: fix the N+1"
+    assert state["work_repos"][0]["comments_polled_at"] == "2026-07-18T08:00:00Z"
+
+
+def test_sweep_pr_command_from_a_non_approver_is_ignored(config, taskdefs, store, tmp_path):
+    """A PR is a wider audience than the engine issue -- membership is
+    checked before the body is even parsed."""
+    _feedback_config(config)
+    _with_pr(store)
+    messaging = FakeMessaging(
+        [_comment(101, "/agent-hq request-changes ship it", author="random-drive-by")]
+    )
+    adapters = _adapters(
+        tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    state = store.read_state("7")
+    assert [r for r in state["runs"] if r["state"] == "QUEUED"] == []
+    assert state["status"] == "AWAITING_MERGE"
+    # Still watermarked: an ignored comment must not be re-read forever.
+    assert state["work_repos"][0]["comments_polled_at"] == "2026-07-18T08:00:00Z"
+
+
+def test_sweep_pr_ordinary_conversation_queues_nothing(config, taskdefs, store, tmp_path):
+    _feedback_config(config)
+    _with_pr(store)
+    messaging = FakeMessaging([_comment(101, "nice, wonder if this handles nulls")])
+    adapters = _adapters(
+        tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    assert [r for r in store.read_state("7")["runs"] if r["state"] == "QUEUED"] == []
+
+
+def test_sweep_pr_feedback_is_idempotent_across_passes(config, taskdefs, store, tmp_path):
+    """The run id derives from the comment id, so re-reading the same comment
+    (the watermark is inclusive at the boundary second) resolves to the run
+    that already exists."""
+    _feedback_config(config)
+    _with_pr(store)
+    messaging = FakeMessaging([_comment(101, "/agent-hq request-changes fix it")])
+    adapters = _adapters(
+        tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+    queued = [r for r in store.read_state("7")["runs"] if r["state"] == "QUEUED"]
+    assert len(queued) == 1
+    rework_id = queued[0]["run_id"]
+
+    # Drain the rework so the next sweep polls again (it skips while work is
+    # in flight), then re-poll: `since` is inclusive at the boundary second,
+    # so the SAME comment comes back and must resolve to the run that exists.
+    store.write(lambda txn: txn.update_run("7", rework_id, state="SUCCEEDED"))
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    assert messaging.listed[1][1] == "2026-07-18T08:00:00Z"  # narrowed by the watermark
+    assert [c["id"] for c in messaging.list_comments("11", "2026-07-18T08:00:00Z")] == [101]
+    assert [r["run_id"] for r in store.read_state("7")["runs"]] == ["finalrun", rework_id]
+
+
+def test_sweep_pr_multiple_requests_fold_into_one_run(config, taskdefs, store, tmp_path):
+    """Three asks are one rework, not three runs racing for the same branch --
+    and no reason is dropped on the floor."""
+    _feedback_config(config)
+    _with_pr(store)
+    messaging = FakeMessaging([
+        _comment(101, "/agent-hq request-changes fix the N+1", created_at="2026-07-18T08:00:00Z"),
+        _comment(102, "/agent-hq request-changes add a test", created_at="2026-07-18T08:05:00Z"),
+    ])
+    adapters = _adapters(
+        tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    state = store.read_state("7")
+    queued = [r for r in state["runs"] if r["state"] == "QUEUED"]
+    assert len(queued) == 1
+    reason = _rework_comments(store, "7", queued[0]["run_id"])
+    assert "fix the N+1" in reason and "add a test" in reason
+    assert state["work_repos"][0]["comments_polled_at"] == "2026-07-18T08:05:00Z"
+
+
+def test_sweep_pr_feedback_respects_the_loop_guard(config, taskdefs, store, tmp_path):
+    """A comment thread must not spend past the ceilings a handoff respects."""
+    _feedback_config(config)
+    _with_pr(store)
+    config.budgets["loop_guard"] = {"max_runs": 1, "max_depth": 12}
+    messaging = FakeMessaging([_comment(101, "/agent-hq request-changes again")])
+    adapters = _adapters(
+        tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    state = store.read_state("7")
+    assert [r for r in state["runs"] if r["state"] == "QUEUED"] == []
+    assert state["status"] == "BLOCKED"
+    assert adapters.messaging.calls, "a refused rework has to escalate"
+
+
+def test_sweep_pr_feedback_waits_while_a_run_is_in_flight(config, taskdefs, store, tmp_path):
+    """A rework enqueued mid-flight would race the run already working the
+    same branch. Deferring loses nothing: the watermark only advances on a
+    pass that actually polls, so the comment is still unread next sweep."""
+    _feedback_config(config)
+    store.write(
+        lambda txn: (
+            txn.set_ticket("7", status="ACTIVE", pinned_comment_id=None, work_repos=_WORK_REPO),
+            txn.put_run("7", _run_dict("buildrun", "build", state="RUNNING")),
+        )
+    )
+    messaging = FakeMessaging([_comment(101, "/agent-hq request-changes fix it")])
+    adapters = _adapters(
+        tracker=FakeTracker(_details()),
+        agent=FakeAgent(tmp_path / "work"),
+        messaging=messaging,
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(active=["agent-hq/buildrun"]), adapters)
+
+    state = store.read_state("7")
+    assert [r for r in state["runs"] if r["state"] == "QUEUED"] == []
+    assert messaging.listed == []  # not even read
+    assert state["work_repos"][0].get("comments_polled_at") is None
