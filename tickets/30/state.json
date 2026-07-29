@@ -382,7 +382,7 @@
       "task_id": "qa",
       "task_version": 1,
       "ticket_id": "30",
-      "state": "RUNNING",
+      "state": "SUCCEEDED",
       "attempt": 4,
       "bindings": {
         "tracker": "github-issues",
@@ -392,7 +392,19 @@
       "cost_usd": 0.0,
       "tokens": null,
       "usage_known": true,
-      "artifacts": [],
+      "artifacts": [
+        "specs/30/qa.md",
+        "specs/30/screenshots/age-tooltip.png",
+        "specs/30/screenshots/encounters-list.png",
+        "specs/30/screenshots/encounters-with-test-patients.png",
+        "specs/30/screenshots/facility-page.png",
+        "specs/30/screenshots/homepage.png",
+        "specs/30/screenshots/patient-adult-42-years.png",
+        "specs/30/screenshots/patient-child-5-years.png",
+        "specs/30/screenshots/patient-infant-8-weeks.png",
+        "specs/30/screenshots/patient-newborn-15-days.png",
+        "specs/30/screenshots/patient-toddler-15-months.png"
+      ],
       "chain_depth": 7,
       "parent_run_id": "8c13c392def32f14",
       "handoff_key": "qa-1",
@@ -403,7 +415,35 @@
       ],
       "deadline": "2026-07-29T02:44:15Z",
       "attempt_started_at": "2026-07-29T01:44:15Z",
-      "base_commit": "3ce3813d3abfc882a54456182b93fe7e369283b3"
+      "base_commit": "3ce3813d3abfc882a54456182b93fe7e369283b3",
+      "output_commit": "3ce3813d3abfc882a54456182b93fe7e369283b3",
+      "pr_ref": "agentalec/care_fe#6"
+    },
+    {
+      "run_id": "9bc78a11efe79de9",
+      "task_id": "finalize",
+      "task_version": 1,
+      "ticket_id": "30",
+      "state": "QUEUED",
+      "attempt": 0,
+      "bindings": {
+        "tracker": "github-issues",
+        "agent-session": "copilot-cli",
+        "messaging": "github-comment"
+      },
+      "cost_usd": null,
+      "tokens": null,
+      "usage_known": false,
+      "artifacts": [],
+      "chain_depth": 8,
+      "parent_run_id": "a742dbc4decf1495",
+      "handoff_key": "finalize-30",
+      "repo": "agentalec/care_fe",
+      "input_artifacts": [
+        "specs/30/spec.md",
+        "specs/30/review.md",
+        "specs/30/qa.md"
+      ]
     }
   ],
   "work_repos": [
