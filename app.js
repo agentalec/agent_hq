@@ -33,7 +33,10 @@
     BLOCKED: 'var(--destructive)', FAILED: 'var(--destructive)',
     WAITING_GATE: 'var(--status-moderate)', AWAITING_MERGE: 'var(--status-moderate)',
     ACTIVE: 'var(--status-info)', RUNNING: 'var(--status-info)',
-    QUEUED: 'var(--muted-foreground)'
+    QUEUED: 'var(--muted-foreground)',
+    /* Withdrawn work, not failed work: an entry removed from the queue before
+       it ran. Deliberately not `--destructive` — nothing went wrong. */
+    CANCELLED: 'var(--muted-foreground)'
   };
   function tone(s) { return TONE[s] || 'var(--muted-foreground)'; }
 
@@ -182,33 +185,51 @@
     return run.usage_known === true && typeof run.cost_usd === 'number';
   }
 
+  /* Effective queue position: `queue_seq` where a run carries one, else its
+     array index — the same fallback the engine uses (`queue_positions`), so a
+     ticket written before the field keeps exactly the order dispatch gave it. */
+  function queuePos(run, index) {
+    return typeof run.queue_seq === 'number' ? run.queue_seq : index;
+  }
+
   /* One step per (parent_run_id, handoff_key); `attempt` is the retry axis
-     inside it. Ordered by chain depth, then by first appearance in the runs
-     array — enqueue order alone puts a depth-8 run before a depth-7 retry
-     (see the ticket-30 table in the requirements). */
+     inside it — a retry reuses the key at a higher attempt.
+
+     Ordered by QUEUE POSITION, not chain depth and not array order. Depth
+     stopped being an ordering axis once one run could declare several entries:
+     they all sit at the declaring run's depth + 1, so depth ties and the
+     tiebreak decided everything. Array order is wrong for a different reason —
+     a retry inherits the position of the attempt it replaces, so it can belong
+     EARLIER in the queue than a run appended after that attempt failed. */
   function steps(ticket) {
     var groups = {}, order = [];
     runsOf(ticket).forEach(function (run, index) {
       var key = (run.parent_run_id || '') + ' ' + (run.handoff_key || '');
+      var pos = queuePos(run, index);
       if (!groups[key]) {
         groups[key] = {
           key: key, task: run.task_id, parent: run.parent_run_id || null,
           handoffKey: run.handoff_key || null,
           depth: typeof run.chain_depth === 'number' ? run.chain_depth : 0,
-          firstIndex: index, attempts: []
+          pos: pos, attempts: []
         };
         order.push(groups[key]);
       }
       var g = groups[key];
       g.depth = Math.min(g.depth, typeof run.chain_depth === 'number' ? run.chain_depth : g.depth);
+      g.pos = Math.min(g.pos, pos);
       g.attempts.push(run);
     });
     order.forEach(function (g) {
       g.attempts.sort(function (a, b) { return (a.attempt || 0) - (b.attempt || 0); });
       g.last = g.attempts[g.attempts.length - 1];
       g.state = g.last ? g.last.state : 'QUEUED';
+      /* Which run this one READ from is not who enqueued it — one run can
+         declare several entries, so the enqueuer of `review` need not be the
+         producer of what `review` consumed. */
+      g.inputFrom = g.last && g.last.input_from_run_id ? g.last.input_from_run_id : null;
     });
-    order.sort(function (a, b) { return a.depth - b.depth || a.firstIndex - b.firstIndex; });
+    order.sort(function (a, b) { return a.pos - b.pos; });
     return order;
   }
 
@@ -590,7 +611,8 @@
     var chainHead = el('div', 'card-head');
     chainHead.appendChild(el('span', 'stack-label', 'Run chain'));
     chainHead.appendChild(el('span', 'section-note pretty',
-      'One step per (parent_run_id, handoff_key); attempts nested inside. Chain order, not runs-array order.'));
+      'One step per (parent_run_id, handoff_key); attempts nested inside. '
+      + 'Queue order (queue_seq) — neither runs-array order nor chain depth.'));
     chain.appendChild(chainHead);
     stepList.forEach(function (s) { chain.appendChild(stepNode(ticket, s)); });
     host.appendChild(chain);
@@ -612,10 +634,21 @@
     body.appendChild(title);
 
     var ids = el('div', 'step-ids');
-    ids.appendChild(el('span', 'anywhere', 'handoff_key ' + (s.handoffKey || '—')));
     ids.appendChild(el('span', 'anywhere',
-      'parent_run_id ' + (s.parent || 'root run, no parent') + ' · chain_depth ' + s.depth));
+      'queue_seq ' + s.pos + ' · handoff_key ' + (s.handoffKey || '—')));
+    ids.appendChild(el('span', 'anywhere',
+      'enqueued by ' + (s.parent || 'intake, no parent run') + ' · chain_depth ' + s.depth));
+    if (s.inputFrom) {
+      ids.appendChild(el('span', 'anywhere', 'read output of ' + s.inputFrom));
+    }
     body.appendChild(ids);
+
+    /* A cancelled entry is planned-then-dropped work. Saying so is the
+       interesting part of a revised route — the only place the ledger shows a
+       plan changing rather than progressing. */
+    if (s.state === 'CANCELLED') {
+      body.appendChild(el('div', 'step-note', 'cancelled before it ran'));
+    }
 
     s.attempts.forEach(function (run) { body.appendChild(attemptNode(ticket, run)); });
     wrap.appendChild(body);

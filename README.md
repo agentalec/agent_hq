@@ -112,11 +112,34 @@ every relative label keeps the exact ISO value in its `title`.
 ## Deriving the run chain
 
 The one model easy to get wrong. A logical step is `(parent_run_id, handoff_key)`;
-`attempt` is the retry axis inside it. Steps are ordered by `chain_depth` then
-first appearance — enqueue order alone puts a depth-8 run *before* a depth-7
-retry (ticket 30 does exactly this). `chain_depth` is neither unique nor a row
-index, and the same task appears many times, so nothing here assumes a fixed
-task sequence.
+`attempt` is the retry axis inside it (a retry reuses the key at a higher
+attempt).
+
+Steps are ordered by **`queue_seq`** — the ticket's stored queue position —
+falling back to array index for runs written before that field, which is exactly
+the order dispatch used then (mirrors `engine.engine.queue_positions`).
+
+Neither of the two obvious alternatives works:
+
+- **Not `chain_depth`.** One run can declare several queue entries at once, and
+  they all sit at the declaring run's depth + 1. Depth ties across the whole
+  declaration, so the tiebreak would decide the order.
+- **Not array order.** A retry inherits the `queue_seq` of the attempt it
+  replaces, so it can belong *earlier* in the queue than a run appended after
+  that attempt failed.
+
+`queue_seq` is not a row index and the same task appears many times, so nothing
+here assumes a fixed task sequence.
+
+A step in state `CANCELLED` is planned-then-dropped work: an entry a later run
+removed from the queue before it ran. It renders as a step with a note rather
+than being hidden — a route *changing* is the interesting part of the ledger,
+and hiding it would make the queue look like it had always been the current
+plan. Runs are never deleted.
+
+`enqueued by` is `parent_run_id`; `read output of` is `input_from_run_id`, which
+is a different run whenever one run declared several entries — the enqueuer of
+`review` need not be the producer of what `review` consumed.
 
 ## Known gaps
 
