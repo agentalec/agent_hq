@@ -4,13 +4,23 @@
   "title": "Budgets config",
   "type": "object",
   "additionalProperties": false,
-  "required": ["ticket_cap_usd", "in_flight_cap", "loop_guard"],
+  "required": [
+    "ticket_cap_usd",
+    "in_flight_cap",
+    "loop_guard"
+  ],
   "properties": {
-    "ticket_cap_usd": { "type": "number", "exclusiveMinimum": 0 },
+    "ticket_cap_usd": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
     "label_overrides": {
       "type": "object",
       "description": "Label -> ticket cost cap override in USD",
-      "additionalProperties": { "type": "number", "exclusiveMinimum": 0 }
+      "additionalProperties": {
+        "type": "number",
+        "exclusiveMinimum": 0
+      }
     },
     "in_flight_cap": {
       "type": "integer",
@@ -20,10 +30,14 @@
     "loop_guard": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["max_runs", "max_depth"],
+      "required": [
+        "max_runs"
+      ],
       "properties": {
-        "max_runs": { "type": "integer", "minimum": 1 },
-        "max_depth": { "type": "integer", "minimum": 1 }
+        "max_runs": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
     }
   }

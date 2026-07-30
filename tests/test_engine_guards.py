@@ -160,7 +160,7 @@ def test_check_concurrency_cap_ignores_queued_only_tickets():
 
 
 def test_check_loop_guard_within_limits_ok():
-    ok, trace = check_loop_guard(_doc([_run("r1", "SUCCEEDED")]), max_runs=25, max_depth=12)
+    ok, trace = check_loop_guard(_doc([_run("r1", "SUCCEEDED")]), max_runs=25)
     assert ok is True
     assert trace is None
 
@@ -170,17 +170,21 @@ def test_check_loop_guard_max_runs_breach_returns_trace():
         {"run_id": f"r{i}", "task_id": "t", "parent_run_id": None, "chain_depth": 0}
         for i in range(3)
     ]
-    ok, trace = check_loop_guard(_doc(runs), max_runs=2, max_depth=12)
+    ok, trace = check_loop_guard(_doc(runs), max_runs=2)
     assert ok is False
     assert len(trace) == 3
     assert trace[0] == {"run_id": "r0", "task_id": "t", "parent_run_id": None}
 
 
-def test_check_loop_guard_max_depth_breach():
-    doc = _doc([{"run_id": "r1", "task_id": "t", "parent_run_id": "r0", "chain_depth": 13}])
-    ok, trace = check_loop_guard(doc, max_runs=25, max_depth=12)
-    assert ok is False
-    assert trace[0]["run_id"] == "r1"
+def test_deep_chain_alone_no_longer_trips_the_loop_guard():
+    """`max_depth` is gone. Depth is provenance now, not a ceiling: with a
+    pre-declared queue every entry sits at the declaring run's depth + 1, so
+    depth stopped measuring anything a runaway could exhaust. `max_runs` is the
+    ceiling, and one deep run is still one run."""
+    doc = _doc([{"run_id": "r1", "task_id": "t", "parent_run_id": "r0", "chain_depth": 99}])
+    ok, trace = check_loop_guard(doc, max_runs=25)
+    assert ok is True
+    assert trace is None
 
 
 def test_apply_queue_rejects_batch_that_would_exceed_max_runs(tmp_path):
@@ -190,7 +194,7 @@ def test_apply_queue_rejects_batch_that_would_exceed_max_runs(tmp_path):
     store, _ = _store(tmp_path)
     config = Config(
         components={}, repos={}, projects={}, approvers={},
-        budgets={"loop_guard": {"max_runs": 2, "max_depth": 12}, "ticket_cap_usd": 1000.0},
+        budgets={"loop_guard": {"max_runs": 2}, "ticket_cap_usd": 1000.0},
     )
     taskdefs = {
         "task-a": {"id": "task-a", "version": 1, "budget": {"max_cost_usd": 100.0}},
@@ -239,7 +243,7 @@ def test_engine_side_block_records_its_reason_in_state(tmp_path):
         components={"tracker": {"adapter": "fake"}, "messaging": {"adapter": "fake"}},
         repos={}, projects={"engine_repo": "o/engine"},
         approvers={"groups": {"escalation": {"members": ["example-carol"]}}},
-        budgets={"loop_guard": {"max_runs": 25, "max_depth": 12}, "ticket_cap_usd": 1000.0},
+        budgets={"loop_guard": {"max_runs": 25}, "ticket_cap_usd": 1000.0},
     )
     taskdef = {"id": "build", "version": 1, "budget": {"retries": 0, "max_cost_usd": 100.0}}
     run = {
@@ -391,7 +395,7 @@ def _dispatch_fixture(tmp_path):
     config = Config(
         components={}, repos={}, projects={}, approvers={},
         budgets={
-            "loop_guard": {"max_runs": 25, "max_depth": 12},
+            "loop_guard": {"max_runs": 25},
             "ticket_cap_usd": 1000.0,
             "in_flight_cap": 3,
         },
@@ -446,7 +450,7 @@ def test_batch_enqueued_in_one_write_gets_increasing_positions(tmp_path):
     store, _ = _store(tmp_path)
     config = Config(
         components={}, repos={}, projects={}, approvers={},
-        budgets={"loop_guard": {"max_runs": 25, "max_depth": 12}, "ticket_cap_usd": 1000.0},
+        budgets={"loop_guard": {"max_runs": 25}, "ticket_cap_usd": 1000.0},
     )
     taskdefs = {
         "task-a": {"id": "task-a", "version": 1, "budget": {"max_cost_usd": 100.0}},
@@ -499,7 +503,7 @@ def _cancel_fixture(tmp_path):
     store, _ = _store(tmp_path)
     config = Config(
         components={}, repos={}, projects={}, approvers={},
-        budgets={"loop_guard": {"max_runs": 25, "max_depth": 12}, "ticket_cap_usd": 1000.0},
+        budgets={"loop_guard": {"max_runs": 25}, "ticket_cap_usd": 1000.0},
     )
     taskdefs = {"task-a": {"id": "task-a", "version": 1, "budget": {"max_cost_usd": 100.0}}}
     source = _queued_run("src", state="RUNNING", task_id="task-0", queue_seq=0)
@@ -605,7 +609,7 @@ def test_cancelled_runs_do_not_consume_the_run_ceiling(tmp_path):
         _queued_run("b", state="CANCELLED"),
         _queued_run("c", state="SUCCEEDED"),
     ]
-    ok, trace = check_loop_guard(_doc(runs), max_runs=2, max_depth=12)
+    ok, trace = check_loop_guard(_doc(runs), max_runs=2)
     assert ok is True and trace is None
 
 

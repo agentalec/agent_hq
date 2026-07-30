@@ -36,7 +36,7 @@ def test_invalid_config_reports_violations_from_every_file(tmp_path):
     )
     # budgets.yml: ticket_cap_usd must be a number, not a string
     (bad_config / "budgets.yml").write_text(
-        "ticket_cap_usd: nope\nin_flight_cap: 3\nloop_guard: {max_runs: 25, max_depth: 12}\n"
+        "ticket_cap_usd: nope\nin_flight_cap: 3\nloop_guard: {max_runs: 25}\n"
     )
 
     with pytest.raises(ConfigError) as excinfo:

@@ -1700,7 +1700,7 @@ def test_sweep_pr_feedback_respects_the_loop_guard(config, taskdefs, store, tmp_
     """A comment thread must not spend past the ceilings a handoff respects."""
     _feedback_config(config)
     _with_pr(store)
-    config.budgets["loop_guard"] = {"max_runs": 1, "max_depth": 12}
+    config.budgets["loop_guard"] = {"max_runs": 1}
     messaging = FakeMessaging([_comment(101, "/agent-hq request-changes again")])
     adapters = _adapters(
         tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging

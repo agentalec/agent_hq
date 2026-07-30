@@ -84,8 +84,10 @@ CI (`.github/workflows/ci.yml`) runs all five; a change isn't done until all pas
   Copilot bills tokens as AI credits, and the CLI prints a session's credits
   and token counts on stderr, so a run's `cost_usd` is the billed figure
   (`_parse_usage`, 1 credit = $0.01) and the USD caps in `budgets.yml` do
-  bind — alongside `budget.retries`, the loop guard, the in-flight cap, and
-  runtime deadlines (see `docs/architecture.md` deviation 9).
+  bind — alongside `budget.retries`, `loop_guard.max_runs` (the only
+  structural ceiling; there is no depth guard, and `CANCELLED` runs don't
+  count), the in-flight cap, and runtime deadlines (see
+  `docs/architecture.md` deviation 9).
 - `run_id` is causal (`compute_run_id`) for the intake root run; `enqueue`
   is idempotent by run_id. A handoff-spawned run instead derives its id via
   `compute_handoff_run_id` (see above).

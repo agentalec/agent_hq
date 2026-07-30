@@ -153,7 +153,7 @@ that actually constrain a task:
 - `budget.max_runtime_min` — size to the task's real work, not a default:
   `implement` gets 90, document-producing tasks get 30, `finalize` 15. Too
   small kills healthy runs; too large delays lost-run detection.
-- `loop_guard` (`max_runs`/`max_depth`) in `config/budgets.yml` is the
+- `loop_guard.max_runs` in `config/budgets.yml` is the
   ticket-level backstop, checked both before handoffs apply and at
   dispatch; `in_flight_cap` is a global concurrent-ticket cap, checked at
   dispatch/claim only. Leave them alone when adding a task unless
