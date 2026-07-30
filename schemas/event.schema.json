@@ -25,6 +25,14 @@
     },
     "run_url": { "type": "string" },
     "artifacts": { "type": "array", "items": { "type": "string" } },
-    "detail": { "type": "string" }
+    "detail": { "type": "string" },
+    "actor": {
+      "type": "string",
+      "description": "Who caused this event: a tracker login for a human decision, or the literal \"engine\" where the engine decided autonomously and that fact is itself the audit record (an auto-approved gate). ABSENT means the engine acted mechanically -- absence is the answer, not a gap, so \"every externally-caused event\" is `actor` present."
+    },
+    "source": {
+      "type": "string",
+      "description": "What carried the cause: a comment id, an intake event key, or a run id. Pairs with `actor` so a decision can be traced back to the artifact it arrived on without parsing `detail`."
+    }
   }
 }

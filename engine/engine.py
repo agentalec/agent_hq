@@ -362,9 +362,21 @@ def _escalate(store, config, adapter_fn, ticket_id, run_id, message: str) -> Non
     notify_ticket(config, adapter_fn, ticket_id, message, f"{run_id}:escalation", mentions=members)
 
 
-def _block_ticket(store, config, adapter_fn, ticket_id, run_id, reason: str) -> None:
+def _block_ticket(
+    store, config, adapter_fn, ticket_id, run_id, reason: str,
+    *, actor: str | None = None, source: str | None = None,
+) -> None:
+    """Block the ticket, recording WHY in state -- not only in the event.
+
+    `set_block` rather than a bare `set_ticket(status=...)`: this is the path
+    every engine-side block takes (gate rejected/expired, retries exhausted,
+    unknown spend, handoff-apply failure, PR feedback over budget), and it used
+    to drop the `reason` it was handed on the floor, leaving `block_reason`
+    null for all of them. The dashboard and `hq-ticket` then rendered "BLOCKED"
+    with no reason, and the only copy of it was prose in an event `detail`.
+    """
     def fn(txn: Txn) -> None:
-        txn.set_ticket(ticket_id, status="BLOCKED")
+        txn.set_block(ticket_id, reason=reason, source="engine", interrupted_run=run_id)
         txn.append_event(
             ticket_id,
             Event(
@@ -373,6 +385,8 @@ def _block_ticket(store, config, adapter_fn, ticket_id, run_id, reason: str) -> 
                 ticket_id=ticket_id,
                 run_id=run_id,
                 detail=reason,
+                actor=actor,
+                source=source,
             ).to_dict(),
         )
 
@@ -658,6 +672,7 @@ def sweep(
                             event_id=f"{decision.comment_id}:approval", kind="gate.decided",
                             ticket_id=ticket_id, run_id=run_id,
                             detail=f"approved by {decision.actor} at {decision.decided_at}",
+                            actor=decision.actor, source=str(decision.comment_id),
                         ).to_dict(),
                     )
                 elif gate_entry.get("auto_approve"):
@@ -666,6 +681,9 @@ def sweep(
                         Event(
                             event_id=f"{run_id}:auto_approval", kind="gate.decided",
                             ticket_id=ticket_id, run_id=run_id, detail=decision.comments,
+                            # No human decided this one; that is the audit fact,
+                            # so it is stated rather than left absent.
+                            actor="engine",
                         ).to_dict(),
                     )
 
@@ -676,11 +694,21 @@ def sweep(
                 return
             _complete_if_queue_empty(store, config, adapter_fn, ticket_id, {**run, "state": "SUCCEEDED"})
         elif status == "CHANGES_REQUESTED":
+            src = str(decision.comment_id) if decision.comment_id is not None else None
             if run["attempt"] >= 2:
-                _mark_gate_terminal(store, ticket_id, run, "run.rework", "rework_final")
-                _block_ticket(store, config, adapter_fn, ticket_id, run_id, "max rework cycles reached")
+                _mark_gate_terminal(
+                    store, ticket_id, run, "run.rework", "rework_final",
+                    actor=decision.actor, source=src,
+                )
+                _block_ticket(
+                    store, config, adapter_fn, ticket_id, run_id, "max rework cycles reached",
+                    actor=decision.actor, source=src,
+                )
                 return
-            _mark_gate_terminal(store, ticket_id, run, "run.changes_requested", "changes_requested")
+            _mark_gate_terminal(
+                store, ticket_id, run, "run.changes_requested", "changes_requested",
+                actor=decision.actor, source=src,
+            )
             new_run_id = reenqueue_same(store, run, taskdef, run["attempt"] + 1)
             store.write(
                 lambda txn: txn.append_event(
@@ -691,15 +719,30 @@ def sweep(
                         ticket_id=ticket_id,
                         run_id=new_run_id,
                         detail=decision.comments,
+                        actor=decision.actor, source=src,
                     ).to_dict(),
                 )
             )
         elif status == "REJECTED":
-            _mark_gate_terminal(store, ticket_id, run, "run.rejected", "rejected")
-            _block_ticket(store, config, adapter_fn, ticket_id, run_id, decision.comments or "gate rejected")
+            src = str(decision.comment_id) if decision.comment_id is not None else None
+            _mark_gate_terminal(
+                store, ticket_id, run, "run.rejected", "rejected",
+                actor=decision.actor, source=src,
+            )
+            _block_ticket(
+                store, config, adapter_fn, ticket_id, run_id,
+                decision.comments or "gate rejected",
+                actor=decision.actor, source=src,
+            )
         elif status == "EXPIRED":
-            _mark_gate_terminal(store, ticket_id, run, "run.gate_expired", "gate_expired")
-            _block_ticket(store, config, adapter_fn, ticket_id, run_id, "gate timed out")
+            # Nobody decided -- the clock did. `actor="engine"` states that
+            # rather than leaving a reader to wonder who rejected it.
+            _mark_gate_terminal(
+                store, ticket_id, run, "run.gate_expired", "gate_expired", actor="engine",
+            )
+            _block_ticket(
+                store, config, adapter_fn, ticket_id, run_id, "gate timed out", actor="engine",
+            )
             _escalate(
                 store, config, adapter_fn, ticket_id, run_id,
                 "Review gate expired without a decision; blocked pending escalation.",
@@ -739,11 +782,18 @@ def sweep(
                 handle_gate(taskdef, ticket_id, run)
 
 
-def _mark_gate_terminal(store, ticket_id, run: dict, kind: str, event_suffix: str) -> None:
+def _mark_gate_terminal(
+    store, ticket_id, run: dict, kind: str, event_suffix: str,
+    *, actor: str | None = None, source: str | None = None,
+) -> None:
     """Terminalize a WAITING_GATE run FAILED, clearing any `pending_handoffs`
     and emitting `handoff.rejected` (each carrying that handoff's own
     `reason`) for every one of them, all in the SAME write -- else
-    completion's "no pending handoffs" check never passes."""
+    completion's "no pending handoffs" check never passes.
+
+    `actor`/`source` land on the terminalizing event only: the per-handoff
+    `handoff.rejected` events are mechanical consequences, so leaving their
+    actor absent is the honest reading."""
     run_id = run["run_id"]
     pending = run.get("pending_handoffs") or []
 
@@ -757,6 +807,8 @@ def _mark_gate_terminal(store, ticket_id, run: dict, kind: str, event_suffix: st
                 ticket_id=ticket_id,
                 run_id=run_id,
                 state=RunState.FAILED,
+                actor=actor,
+                source=source,
             ).to_dict(),
         )
         for h in pending:
@@ -928,6 +980,10 @@ def poll_pr_feedback(store, config, taskdefs, adapter_fn, ticket_id: str, state:
         latest_id = requests[-1][0]["id"]
         reason = "\n\n".join(f"@{c['author']}: {text}" for c, text in requests if text)
         run_id = compute_run_id(f"pr-comment:{latest_id}", 0, task_id, 0)
+        # The run's identity derives from the LATEST qualifying comment, so
+        # that comment's author is who triggered it. A window can carry several
+        # authors; every one of them stays in `detail`.
+        latest_author = requests[-1][0]["author"]
         result: dict = {}
 
         # `res=result` for the same reason as every other binding here: the
@@ -936,7 +992,8 @@ def poll_pr_feedback(store, config, taskdefs, adapter_fn, ticket_id: str, state:
         # binding it is what the rest of the signature already does, and it
         # is what stops ruff's B023 from being permanently red.
         def apply(
-            txn: Txn, r=repo, w=watermark, rid=run_id, why=reason, cid=latest_id, res=result
+            txn: Txn, r=repo, w=watermark, rid=run_id, why=reason, cid=latest_id,
+            who=latest_author, res=result,
         ) -> None:
             # Cleared per attempt, like `claim_run`'s own flag: a write that
             # loses the push race re-runs this against fresh state, and only
@@ -970,7 +1027,7 @@ def poll_pr_feedback(store, config, taskdefs, adapter_fn, ticket_id: str, state:
                 ticket_id,
                 Event(
                     event_id=f"{rid}:rework", kind="run.rework", ticket_id=ticket_id,
-                    run_id=rid, detail=why,
+                    run_id=rid, detail=why, actor=who, source=f"pr-comment:{cid}",
                 ).to_dict(),
             )
             if doc.get("status") == "AWAITING_MERGE":

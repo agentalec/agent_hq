@@ -212,6 +212,14 @@ class Event:
     run_url: str | None = None
     artifacts: list[str] | None = None
     detail: str | None = None
+    # Audit provenance. `actor` is a tracker login for a human decision, or
+    # "engine" where the engine decided autonomously and that IS the audit
+    # fact (auto-approved gate); omitted for mechanical engine bookkeeping,
+    # so absence is the answer rather than a gap. `source` names what carried
+    # the cause -- comment id, intake event key, run id -- so a decision is
+    # traceable without parsing `detail`.
+    actor: str | None = None
+    source: str | None = None
 
     def to_dict(self) -> dict:
         d = _to_dict_omit_none_optionals(self)
