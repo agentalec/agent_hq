@@ -72,6 +72,10 @@
     "final_task": {
       "type": "string",
       "description": "Task id whose completion means the route reached its designed end. Queue-empty completion finishes the ticket only off a terminal run of this task; a queue draining anywhere else blocks the ticket. Mirror of initial_task."
+    },
+    "comment_default_task": {
+      "type": "string",
+      "description": "Task queued by a bare (command-less) comment from a feedback_approvers member on the engine issue. Absent means every subject requires an explicit /agent-hq command. Never honoured on a work PR, which is a wider audience."
     }
   },
   "if": {

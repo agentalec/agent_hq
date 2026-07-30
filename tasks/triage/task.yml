@@ -1,0 +1,20 @@
+# The issue thread's own task. Queued at the FRONT of the ticket's queue by a
+# bare comment from a `feedback_approvers` member
+# (`config/projects.yml: comment_default_task`), or explicitly by
+# `/agent-hq do triage <reason>`. Nothing else queues it.
+id: triage
+version: 1
+description: Read a human's comment and re-plan what the ticket should do next.
+trigger: enqueued_by
+context:
+  - specs/{ticket}/*
+skills:
+  - prompts/triage.md
+tools:
+  - Read
+  - Grep
+  - Glob
+budget:
+  max_cost_usd: 2
+  max_runtime_min: 15
+  retries: 1

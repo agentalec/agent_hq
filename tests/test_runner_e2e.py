@@ -179,10 +179,20 @@ class FakeGate:
 
 
 class FakeMessaging:
-    def __init__(self, comments=None):
+    """`comments` are the default thread; `by_subject` overrides per subject id.
+
+    The engine polls MORE than one comment thread per ticket now (the engine
+    issue and each work PR), so a fake that answered every subject with the same
+    list would have one comment queue two runs. `by_subject` is how a test says
+    which thread a comment is on; `comments` remains the default for the
+    subjects it does not name.
+    """
+
+    def __init__(self, comments=None, by_subject=None):
         self.calls = []
         # [{"id", "body", "author", "created_at"}], as the adapter returns them.
         self.comments = list(comments or [])
+        self.by_subject = {str(k): list(v) for k, v in (by_subject or {}).items()}
         self.listed: list[tuple] = []
 
     def notify(self, audience, message, links, event_id):
@@ -190,7 +200,8 @@ class FakeMessaging:
 
     def list_comments(self, subject_id, since=None):
         self.listed.append((subject_id, since))
-        return [c for c in self.comments if since is None or c["created_at"] >= since]
+        thread = self.by_subject.get(str(subject_id), self.comments)
+        return [c for c in thread if since is None or c["created_at"] >= since]
 
 
 class FakeWorkflowApi:
@@ -1592,7 +1603,7 @@ def test_sweep_pr_request_changes_from_an_approver_queues_rework(config, taskdef
     the engine, and its text reaches the rework prompt."""
     _feedback_config(config)
     _with_pr(store)
-    messaging = FakeMessaging([_comment(101, "/agent-hq request-changes fix the N+1")])
+    messaging = FakeMessaging(by_subject={"11": [_comment(101, "/agent-hq request-changes fix the N+1")]})
     adapters = _adapters(
         tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
     )
@@ -1623,7 +1634,7 @@ def test_sweep_pr_command_from_a_non_approver_is_ignored(config, taskdefs, store
     _feedback_config(config)
     _with_pr(store)
     messaging = FakeMessaging(
-        [_comment(101, "/agent-hq request-changes ship it", author="random-drive-by")]
+        by_subject={"11": [_comment(101, "/agent-hq request-changes ship it", author="random-drive-by")]}
     )
     adapters = _adapters(
         tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
@@ -1641,7 +1652,7 @@ def test_sweep_pr_command_from_a_non_approver_is_ignored(config, taskdefs, store
 def test_sweep_pr_ordinary_conversation_queues_nothing(config, taskdefs, store, tmp_path):
     _feedback_config(config)
     _with_pr(store)
-    messaging = FakeMessaging([_comment(101, "nice, wonder if this handles nulls")])
+    messaging = FakeMessaging(by_subject={"11": [_comment(101, "nice, wonder if this handles nulls")]})
     adapters = _adapters(
         tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
     )
@@ -1657,7 +1668,7 @@ def test_sweep_pr_feedback_is_idempotent_across_passes(config, taskdefs, store, 
     that already exists."""
     _feedback_config(config)
     _with_pr(store)
-    messaging = FakeMessaging([_comment(101, "/agent-hq request-changes fix it")])
+    messaging = FakeMessaging(by_subject={"11": [_comment(101, "/agent-hq request-changes fix it")]})
     adapters = _adapters(
         tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
     )
@@ -1673,9 +1684,214 @@ def test_sweep_pr_feedback_is_idempotent_across_passes(config, taskdefs, store, 
     store.write(lambda txn: txn.update_run("7", rework_id, state="SUCCEEDED"))
     _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
 
-    assert messaging.listed[1][1] == "2026-07-18T08:00:00Z"  # narrowed by the watermark
+    # Indexed by subject, not by call order: the sweep polls the engine issue
+    # as well as each work PR, so position in `listed` is not the PR's poll
+    # count. The second PR poll is narrowed by the watermark the first stored.
+    pr_polls = [since for subject, since in messaging.listed if subject == "11"]
+    assert pr_polls == [None, "2026-07-18T08:00:00Z"]
     assert [c["id"] for c in messaging.list_comments("11", "2026-07-18T08:00:00Z")] == [101]
     assert [r["run_id"] for r in store.read_state("7")["runs"]] == ["finalrun", rework_id]
+
+
+def _issue_comments(*comments):
+    """Comments on the ENGINE ISSUE thread (subject id = the ticket number)."""
+    return {"7": list(comments)}
+
+
+def test_engine_never_acts_on_its_own_comment(config, taskdefs, store, tmp_path):
+    """THE guard. Escalations, pins and gate requests all land on the engine
+    issue, so the moment that thread became a polled subject the engine could
+    answer itself: block -> escalate posts a comment -> run -> block, forever,
+    spending real money each lap.
+
+    Every engine-authored comment carries an `<!--hq:...-->` marker (the
+    messaging adapter's event-id dedupe marker, or the pinned marker), and that
+    is checked before anything else. The comment below is otherwise perfectly
+    qualifying -- authored by an approver, on the right thread -- so only the
+    marker can be stopping it."""
+    _feedback_config(config)
+    config.projects["comment_default_task"] = "build"
+    _with_pr(store, status="BLOCKED")
+    messaging = FakeMessaging(by_subject=_issue_comments(
+        _comment(201, "<!--hq:evt:7:somerun:escalation-->\n@example-alice run failed"),
+    ))
+    adapters = _adapters(
+        tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    state = store.read_state("7")
+    assert [r for r in state["runs"] if r["state"] == "QUEUED"] == []
+    assert state["status"] == "BLOCKED"  # not revived by its own escalation
+    # Still watermarked: the engine's own comment must not be re-read forever.
+    assert state["comments_polled_at"] == "2026-07-18T08:00:00Z"
+
+
+def test_comment_run_budget_refuses_and_blocks(config, taskdefs, store, tmp_path):
+    """A ceiling separate from `loop_guard.max_runs`. Without it a chatty thread
+    exhausts the ticket's run budget, blocks the ticket, and the next comment
+    unblocks it -- an oscillation that spends money on every lap."""
+    _feedback_config(config)
+    config.budgets["max_comment_runs_per_ticket"] = 1
+    _with_pr(store, status="ACTIVE")
+    # One comment-sourced run already on the ticket.
+    store.write(lambda txn: txn.put_run("7", _run_dict(
+        "spent", "build", state="SUCCEEDED", source_event_id="issue-comment:1",
+    )))
+    messaging = FakeMessaging(by_subject=_issue_comments(
+        _comment(202, "/agent-hq do build please retry"),
+    ))
+    adapters = _adapters(
+        tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    state = store.read_state("7")
+    assert [r for r in state["runs"] if r["state"] == "QUEUED"] == []
+    assert state["status"] == "BLOCKED"
+    assert "comment-triggered runs" in state["block_reason"]
+
+
+def test_comment_unblocks_a_blocked_ticket(config, taskdefs, store, tmp_path):
+    """Nothing in the engine clears BLOCKED, so before this the only ways out
+    were a full restart via re-label or hand-editing the state branch. A comment
+    is now the exit -- and the block fields are cleared with it, so the ticket
+    does not run ACTIVE still reporting an old reason."""
+    _feedback_config(config)
+    config.projects["comment_default_task"] = "build"
+    _with_pr(store, status="ACTIVE")
+    store.write(lambda txn: txn.set_block(
+        "7", reason="queue ran dry after `build`", source="engine", interrupted_run="finalrun",
+    ))
+    messaging = FakeMessaging(by_subject=_issue_comments(
+        _comment(203, "carry on, the spec was fine"),
+    ))
+    adapters = _adapters(
+        tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    state = store.read_state("7")
+    assert state["status"] == "ACTIVE"
+    assert state["block_reason"] is None
+    assert state["block_source"] is None
+    assert state["interrupted_run_id"] is None
+    queued = [r for r in state["runs"] if r["state"] == "QUEUED"]
+    assert len(queued) == 1 and queued[0]["task_id"] == "build"
+    # The blocked reason rides along so the task can see why it stopped.
+    rework = [e for e in store.read_events("7") if e["kind"] == "run.rework"]
+    assert "ran dry" in rework[-1]["detail"]
+    assert rework[-1]["actor"] == "example-alice"
+    assert rework[-1]["source"] == "issue-comment:203"
+
+
+def test_a_blocked_ticket_with_queued_work_is_still_polled(config, taskdefs, store, tmp_path):
+    """Regression: dispatch skips BLOCKED tickets, so a QUEUED run on one is not
+    going anywhere and must not veto the poll that would release it. Gating the
+    poll on "nothing in flight" (which counts QUEUED) made BLOCKED unexitable
+    exactly when work was waiting behind it."""
+    _feedback_config(config)
+    config.projects["comment_default_task"] = "build"
+    _with_pr(store, status="ACTIVE")
+    store.write(lambda txn: (
+        txn.put_run("7", _run_dict("stuck", "build", state="QUEUED")),
+        txn.set_block("7", reason="retries exhausted", source="engine"),
+    ))
+    messaging = FakeMessaging(by_subject=_issue_comments(_comment(204, "try again")))
+    adapters = _adapters(
+        tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    assert store.read_state("7")["status"] == "ACTIVE"
+
+
+def test_comment_runs_at_the_front_of_the_queue(config, taskdefs, store, tmp_path):
+    """A comment is an interjection: it runs BEFORE work already planned, or it
+    could not re-plan it. Pending entries keep their relative order and stay
+    non-negative."""
+    _feedback_config(config)
+    config.projects["comment_default_task"] = "build"
+    _with_pr(store, status="ACTIVE")
+    store.write(lambda txn: (
+        txn.put_run("7", _run_dict("planned-a", "build", state="QUEUED", queue_seq=3)),
+        txn.put_run("7", _run_dict("planned-b", "build", state="QUEUED", queue_seq=4)),
+    ))
+    messaging = FakeMessaging(by_subject=_issue_comments(_comment(205, "hold on")))
+    adapters = _adapters(
+        tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
+    inserted = next(r for r in runs.values() if r.get("source_event_id") == "issue-comment:205")
+    assert inserted["queue_seq"] == 3
+    assert runs["planned-a"]["queue_seq"] == 4
+    assert runs["planned-b"]["queue_seq"] == 5
+
+
+def test_do_command_naming_an_unknown_task_answers_instead_of_ignoring(
+    config, taskdefs, store, tmp_path
+):
+    """A typo should not read as "the engine ignored me"."""
+    _feedback_config(config)
+    _with_pr(store, status="ACTIVE")
+    messaging = FakeMessaging(by_subject=_issue_comments(
+        _comment(206, "/agent-hq do implememt fix it"),
+    ))
+    adapters = _adapters(
+        tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    assert [r for r in store.read_state("7")["runs"] if r["state"] == "QUEUED"] == []
+    assert any("implememt" in msg for _, msg, _ in adapters.messaging.calls)
+
+
+def test_bare_comment_on_a_work_pr_queues_nothing(config, taskdefs, store, tmp_path):
+    """A PR is a wider, lower-trust audience than the engine issue, so
+    `comment_default_task` is never honoured there -- an explicit command stays
+    required. Same comment, same author; only the thread differs."""
+    _feedback_config(config)
+    config.projects["comment_default_task"] = "build"
+    _with_pr(store, status="ACTIVE")
+    messaging = FakeMessaging(by_subject={"11": [_comment(207, "looks good to me")]})
+    adapters = _adapters(
+        tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    assert [r for r in store.read_state("7")["runs"] if r["state"] == "QUEUED"] == []
+
+
+def test_issue_and_pr_comment_ids_do_not_collide(config, taskdefs, store, tmp_path):
+    """Comment ids are unique per repository, not globally. The two subjects use
+    different source prefixes, so the same id on both threads is two runs rather
+    than one silently deduped away."""
+    _feedback_config(config)
+    _with_pr(store, status="ACTIVE")
+    messaging = FakeMessaging(by_subject={
+        "7": [_comment(300, "/agent-hq do build from the issue")],
+        "11": [_comment(300, "/agent-hq request-changes from the PR")],
+    })
+    adapters = _adapters(
+        tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    sources = {
+        r.get("source_event_id") for r in store.read_state("7")["runs"]
+        if r["state"] == "QUEUED"
+    }
+    assert sources == {"issue-comment:300", "pr-comment:300"}
 
 
 def test_sweep_pr_multiple_requests_fold_into_one_run(config, taskdefs, store, tmp_path):
@@ -1683,10 +1899,10 @@ def test_sweep_pr_multiple_requests_fold_into_one_run(config, taskdefs, store, t
     and no reason is dropped on the floor."""
     _feedback_config(config)
     _with_pr(store)
-    messaging = FakeMessaging([
+    messaging = FakeMessaging(by_subject={"11": [
         _comment(101, "/agent-hq request-changes fix the N+1", created_at="2026-07-18T08:00:00Z"),
         _comment(102, "/agent-hq request-changes add a test", created_at="2026-07-18T08:05:00Z"),
-    ])
+    ]})
     adapters = _adapters(
         tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
     )
@@ -1706,7 +1922,7 @@ def test_sweep_pr_feedback_respects_the_loop_guard(config, taskdefs, store, tmp_
     _feedback_config(config)
     _with_pr(store)
     config.budgets["loop_guard"] = {"max_runs": 1}
-    messaging = FakeMessaging([_comment(101, "/agent-hq request-changes again")])
+    messaging = FakeMessaging(by_subject={"11": [_comment(101, "/agent-hq request-changes again")]})
     adapters = _adapters(
         tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
     )
@@ -1730,7 +1946,7 @@ def test_sweep_pr_feedback_waits_while_a_run_is_in_flight(config, taskdefs, stor
             txn.put_run("7", _run_dict("buildrun", "build", state="RUNNING")),
         )
     )
-    messaging = FakeMessaging([_comment(101, "/agent-hq request-changes fix it")])
+    messaging = FakeMessaging(by_subject={"11": [_comment(101, "/agent-hq request-changes fix it")]})
     adapters = _adapters(
         tracker=FakeTracker(_details()),
         agent=FakeAgent(tmp_path / "work"),

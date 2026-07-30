@@ -212,7 +212,7 @@ have bitten:
 - `fn` may run **more than once**. Anything it records in an enclosing scope
   accumulates unless `fn` clears it first, so only the attempt that lands
   decides anything (`claim_run`'s `claimed` flag,
-  `poll_pr_feedback`'s `result`).
+  `_poll_comment_subject`'s `result`).
 - Dirtiness is **declared** by the mutators, not computed: writing a field
   its current value still marks the ticket dirty. `write` therefore checks
   the staged diff and returns without committing when nothing actually
@@ -272,35 +272,39 @@ only ever watches PRs it opened:
   close the issue, ticket `DONE`. Any closed-unmerged: ticket `BLOCKED` +
   escalation, checked first so one abandoned PR outweighs merged siblings.
   Anything still open: leave it.
-- **`poll_pr_feedback`** — for `ACTIVE` and `AWAITING_MERGE` tickets with
-  **nothing in flight**. A rework enqueued mid-run would race the run already
-  working that branch, and a second comment would stack a third; deferring
-  loses nothing, because the watermark only advances on a pass that actually
-  polls. Reads comments since `work_repos[].comments_polled_at` and acts only
-  on
-  `/agent-hq request-changes <reason>` from a `projects.feedback_approvers`
-  member, enqueuing `projects.feedback_task`. Membership is checked before
-  the body is parsed, and the loop/budget guards run before the enqueue, so a
-  comment thread cannot spend past the ceilings a handoff respects.
+- **`poll_comments`** — for `ACTIVE`, `AWAITING_MERGE` and `BLOCKED` tickets
+  with **no run actively working** (RUNNING/WAITING_GATE). A run enqueued
+  mid-flight would race the run already working that branch; a merely QUEUED
+  sibling is not that hazard, because per-ticket exclusivity means two runs
+  never execute at once. Deferring loses nothing — the watermark only advances
+  on a pass that actually polls.
 
-**Idempotency is causal, not positional.** A feedback run's id derives from
-the comment that requested it (`compute_run_id("pr-comment:<id>", ...)`), so
-re-reading the same comment resolves to the run that already exists.
-`comments_polled_at` only keeps the read small — it is a watermark, never the
-dedupe, because GitHub's `since` is inclusive at the boundary second.
+  Polls two kinds of subject:
 
-**Cost.** One comments call per ticket with an open PR, plus one PR-state call
-per recorded PR on an `AWAITING_MERGE` ticket, per sweep. Negligible at pilot
-scale. If ticket count ever makes this expensive, that is the restore trigger
-for the notification-inbox reader deferred in `docs/roadmap.md` — not a reason
-to hand-tune the cadence.
+  - **the engine issue** (ticket-level watermark `comments_polled_at` on the
+    ticket document). Acts on `/agent-hq request-changes <reason>` →
+    `projects.feedback_task`, on `/agent-hq do <task> [reason]` → that task,
+    and — only here — on a bare comment with no command →
+    `projects.comment_default_task` if configured.
+  - **each recorded work PR** (per-`work_repos` watermark of the same name).
+    Command required; `comment_default_task` is deliberately *not* honoured,
+    because a PR is a wider, lower-trust audience than the engine issue.
 
-**Operator notes.**
+  Both use the approver allowlist (`projects.feedback_approvers`), checked
+  before the body is read, and both skip any comment carrying an `<!--hq:`
+  marker — every engine-authored comment has one, and without that check
+  `block → escalate → run → block` is an unbounded spend loop now that the
+  engine issue is a polled subject.
 
-- A ticket sitting in `AWAITING_MERGE` is waiting on a *human*, not on the
-  engine. `hq:awaiting-merge` makes those findable. It holds no
-  `in_flight_cap` slot (no run is exclusive), unlike `WAITING_GATE`.
-- `work PR closed unmerged` blocks are recovered the same way as any other
-  block, once the guarded-reopen transition lands.
-- Turning the feedback path off is a config edit, not a deploy: drop
-  `feedback_task` or `feedback_approvers` from `projects.yml`.
+  The queued run is inserted at the **front** of the ticket's queue: a comment
+  is an interjection, so it runs before work already planned. It also clears
+  `BLOCKED` — nothing else in the engine does, so a comment is the only exit.
+
+  Two ceilings apply: `budgets.max_comment_runs_per_ticket` (separate from
+  `loop_guard.max_runs`, because a chatty thread would otherwise exhaust the run
+  budget, block the ticket, and have the next comment unblock it) and the
+  ordinary loop/budget guards. Breaching either blocks the ticket and escalates.
+
+  Idempotency is the derived run id (`issue-comment:<id>` or
+  `pr-comment:<id>`), not the watermark. The two prefixes differ because comment
+  ids are unique per repository, not globally.

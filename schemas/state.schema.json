@@ -12,6 +12,10 @@
     "block_reason": { "type": ["string", "null"] },
     "block_source": { "type": ["string", "null"] },
     "interrupted_run_id": { "type": ["string", "null"] },
+    "comments_polled_at": {
+      "type": ["string", "null"],
+      "description": "Watermark for the sweep's poll of the ENGINE ISSUE thread (the ticket-level control surface). Distinct from the per-work_repo watermark of the same name: comment ids are unique per repository, so each subject tracks its own. A watermark, not the dedupe -- a comment-sourced run's id derives from the comment id."
+    },
     "work_repos": {
       "type": "array",
       "items": { "$ref": "#/$defs/work_repo" }

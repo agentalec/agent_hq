@@ -5,6 +5,11 @@ in_flight_cap: 3
 # declaration, not a route: which task may follow which is the agent's call,
 # recorded in the queue and revisable by any later run.
 max_queue_length: 8
+# Comment-triggered runs get their own ceiling, separate from
+# loop_guard.max_runs: a chatty thread would otherwise exhaust the ticket's run
+# budget, block it, and have the next comment unblock it -- an oscillation that
+# spends real money. Reaching this blocks the ticket for a human instead.
+max_comment_runs_per_ticket: 10
 loop_guard:
   # The only structural runaway ceiling. CANCELLED runs are excluded (they
   # never executed), and there is deliberately no depth ceiling -- see

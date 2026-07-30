@@ -16,6 +16,11 @@ final_task: finalize
 # special case -- point it wherever rework belongs in your route. Drop
 # either key to switch PR-comment feedback off entirely.
 feedback_task: implement
+# What a bare comment from a `feedback_approvers` member on the ENGINE ISSUE
+# queues, with no `/agent-hq` command. Only the issue thread honours this --
+# a work PR is a wider audience, so it still requires an explicit command.
+# Drop the key to require a command everywhere.
+comment_default_task: triage
 # Who may spend engine budget from a work-repo PR. A PR is a wider audience
 # than the engine issue, so this is an explicit allowlist, never "anyone who
 # can comment".

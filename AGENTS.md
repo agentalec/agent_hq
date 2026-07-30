@@ -48,8 +48,21 @@ CI (`.github/workflows/ci.yml`) runs all five; a change isn't done until all pas
   but nothing queues them yet. `intake` is engine entry logic
   (`engine/runner.py:intake_ticket`), not a task file —
   `config.projects["initial_task"]` names what a newly accepted ticket
-  enqueues, and `final_task` names the run whose completion finishes the
-  ticket — a queue draining on any other task stopped early and BLOCKs.
+  enqueues, `final_task` names the run whose completion finishes the ticket — a
+  queue draining on any other task stopped early and BLOCKs — and
+  `comment_default_task` names what a bare approver comment on the engine issue
+  queues.
+- The engine issue is a control surface, not just an output channel
+  (`engine.engine.poll_comments`): an authorized comment queues a task at the
+  **front** of the ticket's queue and clears `BLOCKED`, which nothing else in
+  the engine does. Two guards are load-bearing, not optional — every
+  engine-authored comment carries an `<!--hq:` marker and is skipped (without
+  it `block → _escalate → run → block` is an unbounded spend loop, since
+  escalations land on that same issue), and `budgets.max_comment_runs_per_ticket`
+  caps comment-triggered runs separately from `loop_guard.max_runs` so a chatty
+  thread cannot oscillate a ticket between blocked and active. A work PR is a
+  wider audience: it requires an explicit `/agent-hq` command and never honours
+  `comment_default_task`.
 - `config/` — pilot config; ships `example-*` placeholders (see
   `docs/operations.md` §4). `projects.yml`'s `engine_repo` is the engine's
   own issue tracker (intake, pinned comments, escalations, gate comments) —

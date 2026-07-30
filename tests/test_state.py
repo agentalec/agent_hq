@@ -449,7 +449,7 @@ def test_replay_reruns_fn_so_a_losing_attempt_leaves_no_trace(tmp_path, monkeypa
     clears first. Only the attempt that actually lands may decide anything.
 
     `claim_run` resets its `claimed` flag for exactly this reason, and so does
-    `engine.engine.poll_pr_feedback`'s `result`. This is the contract for the
+    `engine.engine._poll_comment_subject`'s `result`. This is the contract for the
     next caller that closes over one: state written by an attempt that lost
     the push race must not outlive it."""
     origin = _make_origin(tmp_path)
