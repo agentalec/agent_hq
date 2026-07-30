@@ -14,6 +14,8 @@ from engine.engine import (
     enqueue,
     intake_repo,
     kill_switch_active,
+    queue_positions,
+    reenqueue_same,
     resolve_target_repo,
     set_status_label,
 )
@@ -417,6 +419,99 @@ def _dispatch_fixture(tmp_path):
 
     store.write(setup)
     return store, config, taskdefs
+
+
+def _queued_run(run_id, ticket_id="ticket-1", **over):
+    run = {
+        "run_id": run_id, "task_id": "task-1", "task_version": 1, "ticket_id": ticket_id,
+        "state": "QUEUED", "attempt": 0, "bindings": {}, "cost_usd": None, "tokens": None,
+        "usage_known": False, "artifacts": [], "chain_depth": 0,
+    }
+    run.update(over)
+    return run
+
+
+def test_queue_positions_falls_back_to_array_index_for_legacy_runs():
+    """No state migration: a ticket written before `queue_seq` existed keeps
+    exactly the order dispatch gave it, and new runs continue past the end."""
+    runs = [_queued_run("old-a"), _queued_run("old-b"), _queued_run("new", queue_seq=7)]
+    assert queue_positions(runs) == {"old-a": 0, "old-b": 1, "new": 7}
+
+
+def test_batch_enqueued_in_one_write_gets_increasing_positions(tmp_path):
+    """`_next_queue_seq` reads the in-transaction doc, so two runs inserted in
+    the SAME write must not both land on the same position."""
+    store, _ = _store(tmp_path)
+    config = Config(
+        components={}, repos={}, projects={}, approvers={},
+        budgets={"loop_guard": {"max_runs": 25, "max_depth": 12}, "ticket_cap_usd": 1000.0},
+    )
+    taskdefs = {
+        "task-a": {"id": "task-a", "version": 1, "budget": {"max_cost_usd": 100.0}},
+        "task-b": {"id": "task-b", "version": 1, "budget": {"max_cost_usd": 100.0}},
+    }
+    source = _queued_run("src", state="RUNNING", task_id="task-0")
+    store.write(lambda txn: (
+        txn.set_ticket("ticket-1", status="ACTIVE", pinned_comment_id=None),
+        txn.put_run("ticket-1", source),
+    ))
+    store.write(lambda txn: apply_handoffs(
+        txn, config, taskdefs, "ticket-1", source,
+        [Handoff(key="a", target_task="task-a", reason="r"),
+         Handoff(key="b", target_task="task-b", reason="r")],
+    ))
+
+    runs = store.read_state("ticket-1")["runs"]
+    positions = queue_positions(runs)
+    # The source run predates queue_seq here (put_run directly), so it falls
+    # back to index 0; the two handoffs must take distinct later positions.
+    assert sorted(positions.values()) == [0, 1, 2]
+    handoffs = [r for r in runs if r["run_id"] != "src"]
+    assert sorted(r["queue_seq"] for r in handoffs) == [1, 2]
+
+
+def test_retry_inherits_its_predecessor_queue_position(tmp_path):
+    """A retry must resume the failed attempt's place in the queue. Appending
+    it would let a run enqueued AFTER the failure jump ahead of the rework."""
+    store, _ = _store(tmp_path)
+    taskdef = {"id": "task-1", "version": 1, "budget": {"retries": 2, "max_cost_usd": 100.0}}
+    failed = _queued_run(
+        "r1", state="FAILED", queue_seq=0, parent_run_id="src", handoff_key="impl",
+    )
+    store.write(lambda txn: (
+        txn.set_ticket("ticket-1", status="ACTIVE", pinned_comment_id=None),
+        txn.put_run("ticket-1", failed),
+        # Enqueued after the failure, so it sits later in the queue.
+        txn.put_run("ticket-1", _queued_run("later", queue_seq=1)),
+    ))
+
+    retry_id = reenqueue_same(store, failed, taskdef, attempt=1)
+
+    runs = {r["run_id"]: r for r in store.read_state("ticket-1")["runs"]}
+    assert runs[retry_id]["queue_seq"] == 0
+    positions = queue_positions(list(runs.values()))
+    assert positions[retry_id] < positions["later"]
+
+
+def test_dispatch_takes_the_lowest_queue_position_first(tmp_path):
+    """Ordering is by `queue_seq`, not array position -- the retry inserted
+    last in `runs` but holding position 0 goes first."""
+    store, config, taskdefs = _dispatch_fixture(tmp_path)
+    store.write(lambda txn: (
+        txn.update_run("ticket-1", "run-ticket-1", state="SUCCEEDED"),
+        txn.put_run("ticket-1", _queued_run("appended-later", queue_seq=5)),
+        txn.put_run("ticket-1", _queued_run("holds-position-1", queue_seq=1)),
+    ))
+    api = _FakeWorkflowApi()
+
+    dispatch(config, taskdefs, store, api, now_iso="2026-07-18T09:00:00Z", issue="ticket-1")
+
+    # Both get triggered -- `check_concurrency` is an advisory pre-filter over a
+    # state snapshot, and `claim_run` is the CAS that actually serializes them.
+    # What this pins is the ORDER they are offered in: the earlier queue
+    # position first, even though it sits last in the `runs` array.
+    assert api.triggered[0] == "holds-position-1"
+    assert set(api.triggered) == {"holds-position-1", "appended-later"}
 
 
 def test_dispatch_issue_scope_triggers_only_the_named_ticket(tmp_path):

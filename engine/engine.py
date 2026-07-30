@@ -56,15 +56,42 @@ STATUS_LABELS = {
 _OWNED_LABELS = frozenset(STATUS_LABELS.values())
 
 
+def queue_positions(runs: list[dict]) -> dict[str, int]:
+    """Effective queue position per run_id.
+
+    `queue_seq` where the run carries one, else the run's array index -- which
+    is exactly the ordering dispatch used before `queue_seq` existed, so a
+    ticket written by an older engine keeps its order with no state migration.
+    """
+    return {r["run_id"]: r.get("queue_seq", i) for i, r in enumerate(runs)}
+
+
+def _next_queue_seq(txn: Txn, ticket_id: str) -> int:
+    """One past the ticket's highest occupied position. Read from the
+    in-transaction doc, so a batch inserting several runs in one write sees
+    each preceding insert and assigns increasing positions."""
+    runs = txn.ticket_doc(ticket_id).get("runs", [])
+    return max(queue_positions(runs).values(), default=-1) + 1
+
+
 def _put_queued_run(txn: Txn, run_id: str, *, ticket_id: str, task_id: str, task_version: int,
-                    bindings: dict[str, str], **fields) -> bool:
+                    bindings: dict[str, str], queue_seq: int | None = None, **fields) -> bool:
     """Insert a QUEUED run (idempotent by run_id) plus its run.queued event.
     Returns True if newly inserted, False if it already existed (no-op) --
     shared by every run-creation path (`enqueue`, `apply_handoffs`,
     `reenqueue_same`'s handoff branch) so identity/idempotency is enforced
-    in exactly one place."""
+    in exactly one place.
+
+    `queue_seq` is appended to the end of the ticket's queue unless the caller
+    passes one. A retry passes the position of the attempt it replaces: a
+    failed run's retry has to resume that run's place in the queue, not move
+    behind everything enqueued after it.
+    """
     if txn.get_run(ticket_id, run_id) is not None:
         return False
+    if queue_seq is None:
+        queue_seq = _next_queue_seq(txn, ticket_id)
+    fields["queue_seq"] = queue_seq
     run = TaskRun(
         run_id=run_id,
         task_id=task_id,
@@ -107,6 +134,7 @@ def enqueue(
     attempt: int = 0,
     bindings: dict[str, str],
     chain_depth: int,
+    queue_seq: int | None = None,
 ) -> str:
     """Enqueue a QUEUED run for `task_id`, idempotent by run_id.
 
@@ -127,6 +155,7 @@ def enqueue(
             bindings=bindings, attempt=attempt, chain_depth=chain_depth,
             parent_run_id=parent_run["run_id"] if parent_run is not None else None,
             source_event_id=source_event_id, enqueue_index=enqueue_index,
+            queue_seq=queue_seq,
         )
 
     store.write(fn)
@@ -402,6 +431,11 @@ def reenqueue_same(store, run: dict, taskdef: dict, attempt: int) -> str:
     `input_artifacts` -- a retry must run against the same repo with the
     same inputs. Anything else (the intake root run) retries via the
     original causal (`source_event_id`/`enqueue_index`) identity.
+
+    Either way the retry inherits the replaced attempt's `queue_seq`, so it
+    resumes that run's place in the queue instead of moving behind everything
+    enqueued after it. A run written before `queue_seq` existed has none to
+    inherit, so its retry appends -- exactly what happened before.
     """
     if run.get("handoff_key"):
         run_id = compute_handoff_run_id(run["parent_run_id"], run["handoff_key"], attempt)
@@ -412,6 +446,7 @@ def reenqueue_same(store, run: dict, taskdef: dict, attempt: int) -> str:
                 attempt=attempt, chain_depth=run["chain_depth"],
                 parent_run_id=run.get("parent_run_id"), handoff_key=run["handoff_key"],
                 repo=run.get("repo"), input_artifacts=list(run.get("input_artifacts") or []),
+                queue_seq=run.get("queue_seq"),
             )
         )
         return run_id
@@ -428,6 +463,7 @@ def reenqueue_same(store, run: dict, taskdef: dict, attempt: int) -> str:
         attempt=attempt,
         bindings=run.get("bindings", {}),
         chain_depth=run["chain_depth"],
+        queue_seq=run.get("queue_seq"),
     )
 
 
@@ -1173,7 +1209,12 @@ def dispatch(
             continue
         if state.get("status") == "BLOCKED":
             continue
-        for run in state.get("runs", []):
+        # Queue order, not array order: a retry inherits the position of the
+        # attempt it replaces, so it can sit earlier in the queue than runs
+        # appended after that attempt failed. Stable, so equal positions keep
+        # insertion order.
+        positions = queue_positions(state.get("runs", []))
+        for run in sorted(state.get("runs", []), key=lambda r: positions[r["run_id"]]):
             if run["state"] != "QUEUED":
                 continue
             taskdef = taskdefs.get(run["task_id"])

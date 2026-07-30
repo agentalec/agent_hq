@@ -26,8 +26,8 @@ Inspect one ticket (or all tickets) from the `agent-hq-state` branch, read-only,
    ```
    git show origin/agent-hq-state:tickets/<n>/state.json
    ```
-   `runs` is the single source of truth — there is no stored queue/current/history. Derive:
-   - **queue**: runs with `state: QUEUED`, in array (insertion) order.
+   `runs` is the single source of truth — there is no separate stored queue/current/history. Derive:
+   - **queue**: runs with `state: QUEUED`, ordered by `queue_seq` — the stored queue position dispatch uses. A run written before `queue_seq` existed has none; fall back to its array index for those, which is the order dispatch used then. A retry inherits the position of the attempt it replaced, so it can sort *earlier* than a run appended after that attempt failed — array order alone will mislead you here.
    - **current**: the one run in `RUNNING` or `WAITING_GATE`.
    - **history**: terminal runs — `SUCCEEDED` / `FAILED` / `BLOCKED`.
 
