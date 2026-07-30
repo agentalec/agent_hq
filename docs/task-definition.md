@@ -83,7 +83,7 @@ is uniqueness — two directories declaring the same `id` fail
 ### `version` (integer >= 1, required)
 
 Recorded on every run as `task_version` (`engine/engine.py` — `enqueue`,
-`apply_handoffs`, `reenqueue_same`), so state history shows which revision
+`apply_queue`, `reenqueue_same`), so state history shows which revision
 of the task a run executed. Bump it when the task's behavior changes.
 
 ### `description` (string, required)
@@ -198,7 +198,7 @@ boundary, persists them under `tickets/<id>/artifacts/<run_id>/` on the
 state branch (`engine/state.py:write_artifact`), and excludes them from the
 work patch that lands on the branch. Together with the run's inherited
 `input_artifacts` they form the **provenance set** — the only paths a
-handoff may forward (`engine/handoff.py:validate_handoffs`).
+handoff may forward (`engine/handoff.py:validate_queue`).
 
 ### `opens_pr` (boolean, optional)
 
@@ -219,7 +219,7 @@ this.
   hand off at all.
 
 A proposed set violating either — or any other check — is rejected
-whole (`engine/handoff.py:validate_handoffs`); see
+whole (`engine/handoff.py:validate_queue`); see
 [task-authoring.md](task-authoring.md) "Handoffs" for the full validation
 pipeline and the handoff-spawned run's identity rules.
 
@@ -237,7 +237,7 @@ empty meaning `--allow-all-tools`.
 ### `budget` (object, required — all three keys required)
 
 - `max_cost_usd` (number > 0) — per-run cost cap, enforced as headroom:
-  the dispatcher and `apply_handoffs` refuse a run when the ticket's known
+  the dispatcher and `apply_queue` refuse a run when the ticket's known
   spend plus this cap would exceed `config/budgets.yml`'s
   `ticket_cap_usd` (`engine/engine.py:check_budget`). Under the default
   `copilot-cli` executor, per-run cost is not metered (runs record
@@ -256,7 +256,7 @@ empty meaning `--allow-all-tools`.
 Every completed run writes exactly one `.agent-hq/control.json` — a single
 JSON object validated against `schemas/control.schema.json`
 (`additionalProperties: false`, including inside each handoff item) by
-`engine/handoff.py:validate_handoffs` before anything in it is trusted. A
+`engine/handoff.py:validate_queue` before anything in it is trusted. A
 schema-invalid document **fails the run** (retrying per its own
 `budget.retries`); it is never silently ignored.
 

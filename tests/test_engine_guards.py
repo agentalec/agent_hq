@@ -6,7 +6,8 @@ from engine.config import Config
 from engine.engine import (
     STATUS_LABELS,
     _handle_failure,
-    apply_handoffs,
+    _inputs_ready,
+    apply_queue,
     check_budget,
     check_concurrency,
     check_loop_guard,
@@ -16,6 +17,7 @@ from engine.engine import (
     kill_switch_active,
     queue_positions,
     reenqueue_same,
+    resolve_input_source,
     resolve_target_repo,
     set_status_label,
 )
@@ -181,7 +183,7 @@ def test_check_loop_guard_max_depth_breach():
     assert trace[0]["run_id"] == "r1"
 
 
-def test_apply_handoffs_rejects_batch_that_would_exceed_max_runs(tmp_path):
+def test_apply_queue_rejects_batch_that_would_exceed_max_runs(tmp_path):
     """Regression: capacity must be checked against the WHOLE accepted batch
     (`len(runs) + len(accepted)`), not just the pre-insertion run count --
     else a two-handoff batch can land both runs even past max_runs."""
@@ -211,7 +213,7 @@ def test_apply_handoffs_rejects_batch_that_would_exceed_max_runs(tmp_path):
     result = {}
 
     def try_apply(txn):
-        applied, reason = apply_handoffs(txn, config, taskdefs, "ticket-1", source_run, accepted)
+        applied, reason = apply_queue(txn, config, taskdefs, "ticket-1", source_run, accepted)
         result["applied"], result["reason"] = applied, reason
 
     store.write(try_apply)
@@ -455,7 +457,7 @@ def test_batch_enqueued_in_one_write_gets_increasing_positions(tmp_path):
         txn.set_ticket("ticket-1", status="ACTIVE", pinned_comment_id=None),
         txn.put_run("ticket-1", source),
     ))
-    store.write(lambda txn: apply_handoffs(
+    store.write(lambda txn: apply_queue(
         txn, config, taskdefs, "ticket-1", source,
         [Handoff(key="a", target_task="task-a", reason="r"),
          Handoff(key="b", target_task="task-b", reason="r")],
@@ -491,6 +493,154 @@ def test_retry_inherits_its_predecessor_queue_position(tmp_path):
     assert runs[retry_id]["queue_seq"] == 0
     positions = queue_positions(list(runs.values()))
     assert positions[retry_id] < positions["later"]
+
+
+def _cancel_fixture(tmp_path):
+    store, _ = _store(tmp_path)
+    config = Config(
+        components={}, repos={}, projects={}, approvers={},
+        budgets={"loop_guard": {"max_runs": 25, "max_depth": 12}, "ticket_cap_usd": 1000.0},
+    )
+    taskdefs = {"task-a": {"id": "task-a", "version": 1, "budget": {"max_cost_usd": 100.0}}}
+    source = _queued_run("src", state="RUNNING", task_id="task-0", queue_seq=0)
+    store.write(lambda txn: (
+        txn.set_ticket("ticket-1", status="ACTIVE", pinned_comment_id=None),
+        txn.put_run("ticket-1", source),
+        txn.put_run("ticket-1", _queued_run("pending-a", queue_seq=1, handoff_key="qa")),
+        txn.put_run("ticket-1", _queued_run("pending-b", queue_seq=2, handoff_key="docs")),
+    ))
+    return store, config, taskdefs, source
+
+
+def _apply(store, config, taskdefs, source, accepted=(), **kw):
+    result = {}
+
+    def run(txn):
+        applied, reason = apply_queue(
+            txn, config, taskdefs, "ticket-1", source, list(accepted), **kw
+        )
+        result["applied"], result["reason"] = applied, reason
+
+    store.write(run)
+    return result
+
+
+def test_omission_never_cancels_a_pending_entry(tmp_path):
+    """The safety property: a run that declares its own entry and says nothing
+    about a sibling must leave the sibling alone. Otherwise one branch of a
+    fan-out silently drops the other by finishing first."""
+    store, config, taskdefs, source = _cancel_fixture(tmp_path)
+
+    result = _apply(
+        store, config, taskdefs, source,
+        [Handoff(key="mine", target_task="task-a", reason="r")],
+    )
+
+    assert result["reason"] is None
+    states = {r["run_id"]: r["state"] for r in store.read_state("ticket-1")["runs"]}
+    assert states["pending-a"] == "QUEUED"
+    assert states["pending-b"] == "QUEUED"
+
+
+def test_cancel_by_key_cancels_only_that_entry_and_records_it(tmp_path):
+    store, config, taskdefs, source = _cancel_fixture(tmp_path)
+
+    result = _apply(store, config, taskdefs, source, cancel_keys=["qa"])
+
+    assert result["reason"] is None
+    states = {r["run_id"]: r["state"] for r in store.read_state("ticket-1")["runs"]}
+    assert states["pending-a"] == "CANCELLED"
+    assert states["pending-b"] == "QUEUED"
+    cancelled = [e for e in store.read_events("ticket-1") if e["kind"] == "run.cancelled"]
+    assert [e["run_id"] for e in cancelled] == ["pending-a"]
+    # Who cancelled it is a structured field, not prose.
+    assert cancelled[0]["source"] == "src"
+
+
+def test_cancel_pending_clears_the_queue_but_not_the_new_entries(tmp_path):
+    """The re-route move: drop the plan, state a new one. Cancellation runs
+    before insertion and only over pre-existing QUEUED runs, so a declaration
+    can never cancel what it is adding."""
+    store, config, taskdefs, source = _cancel_fixture(tmp_path)
+
+    result = _apply(
+        store, config, taskdefs, source,
+        [Handoff(key="replacement", target_task="task-a", reason="r")],
+        cancel_pending=True,
+    )
+
+    assert result["reason"] is None
+    runs = {r["run_id"]: r for r in store.read_state("ticket-1")["runs"]}
+    assert runs["pending-a"]["state"] == "CANCELLED"
+    assert runs["pending-b"]["state"] == "CANCELLED"
+    assert runs[result["applied"][0]]["state"] == "QUEUED"
+
+
+def test_cancel_key_matching_two_entries_is_rejected_whole(tmp_path):
+    """Keys are unique per source run, not per ticket, so an ambiguous key is
+    an error rather than a guess -- and it rejects the WHOLE declaration."""
+    store, config, taskdefs, source = _cancel_fixture(tmp_path)
+    store.write(lambda txn: txn.put_run(
+        "ticket-1", _queued_run("pending-c", queue_seq=3, handoff_key="qa")
+    ))
+
+    result = _apply(
+        store, config, taskdefs, source,
+        [Handoff(key="mine", target_task="task-a", reason="r")],
+        cancel_keys=["qa"],
+    )
+
+    assert result["applied"] == []
+    assert "ambiguous" in result["reason"]
+    states = {r["run_id"]: r["state"] for r in store.read_state("ticket-1")["runs"]}
+    assert states["pending-a"] == "QUEUED"  # nothing cancelled
+    assert "mine" not in [r.get("handoff_key") for r in store.read_state("ticket-1")["runs"]]
+
+
+def test_cancelled_runs_do_not_consume_the_run_ceiling(tmp_path):
+    """A route revised a few times must not exhaust `max_runs` with work that
+    never executed and spent nothing."""
+    runs = [
+        _queued_run("a", state="CANCELLED"),
+        _queued_run("b", state="CANCELLED"),
+        _queued_run("c", state="SUCCEEDED"),
+    ]
+    ok, trace = check_loop_guard(_doc(runs), max_runs=2, max_depth=12)
+    assert ok is True and trace is None
+
+
+def test_input_source_is_the_queue_predecessor_not_the_enqueuer(tmp_path):
+    """`spec` declaring [implement, review] enqueues both, but `review` reads
+    `implement`'s output. Keyed on the enqueuer this resolves to `spec`."""
+    runs = [
+        _queued_run("spec", state="SUCCEEDED", queue_seq=0),
+        _queued_run("implement", state="SUCCEEDED", queue_seq=1, parent_run_id="spec"),
+        _queued_run("review", state="QUEUED", queue_seq=2, parent_run_id="spec"),
+    ]
+    assert resolve_input_source(runs, runs[2]) == "implement"
+    # Before implement succeeds, review falls back to the run that enqueued it.
+    runs[1]["state"] = "RUNNING"
+    assert resolve_input_source(runs, runs[2]) == "spec"
+
+
+def test_inputs_ready_gates_on_the_predecessor_not_the_enqueuer(tmp_path):
+    """Regression for the same conflation at the dispatch gate: `review` must
+    wait for `implement`'s artifacts, and must not be admitted merely because
+    `spec` (its enqueuer) recorded something."""
+    taskdef = {"inputs": {"artifacts": ["specs/{ticket}/review-input.md"]}}
+    review = _queued_run("review", state="QUEUED", queue_seq=2, parent_run_id="spec")
+    state = {"runs": [
+        _queued_run("spec", state="SUCCEEDED", queue_seq=0, artifacts=["specs/7/spec.md"]),
+        _queued_run("implement", state="SUCCEEDED", queue_seq=1, parent_run_id="spec",
+                    artifacts=[]),
+        review,
+    ]}
+    state["runs"][2]["ticket_id"] = "7"
+
+    assert _inputs_ready(taskdef, review, state) is False
+
+    state["runs"][1]["artifacts"] = ["specs/7/review-input.md"]
+    assert _inputs_ready(taskdef, review, state) is True
 
 
 def test_dispatch_takes_the_lowest_queue_position_first(tmp_path):

@@ -2,18 +2,28 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-hq.dev/schemas/control.schema.json",
   "title": "Agent control output (.agent-hq/control.json)",
-  "description": "Handoff identity = <source-run-id>:<handoff-key>.",
+  "description": "A run's one outcome. `queue` declares what the ticket should do next (identity of each spawned run = <source-run-id>:<key>); `blocked` stops the ticket for a human. An empty `queue` is how a run says 'nothing further from me' -- there is no separate 'complete' outcome.",
   "type": "object",
   "additionalProperties": false,
   "required": ["outcome"],
   "properties": {
     "outcome": {
       "type": "string",
-      "enum": ["handoff", "complete", "blocked"]
+      "enum": ["queue", "blocked"]
     },
-    "handoffs": {
+    "queue": {
       "type": "array",
-      "items": { "$ref": "#/$defs/handoff" }
+      "description": "Entries to add to the ticket's queue, in the order they should run. Empty means add nothing.",
+      "items": { "$ref": "#/$defs/entry" }
+    },
+    "cancel": {
+      "type": "array",
+      "description": "Keys of QUEUED entries to cancel. Omission never cancels: a run that simply does not mention a pending entry leaves it alone, so one branch of a fan-out cannot drop its sibling by saying nothing. A key matching no QUEUED entry is ignored; a key matching more than one is an error, since which was meant is unknowable.",
+      "items": { "type": "string" }
+    },
+    "cancel_pending": {
+      "type": "boolean",
+      "description": "Cancel every QUEUED entry on the ticket before adding this document's own. The deliberate 'drop the plan and re-route' move -- recorded as one run.cancelled event per entry, so replacing a route is always visible in the ledger."
     },
     "reason": {
       "type": "string"
@@ -26,24 +36,10 @@
   "allOf": [
     {
       "if": {
-        "properties": { "outcome": { "const": "handoff" } },
+        "properties": { "outcome": { "const": "queue" } },
         "required": ["outcome"]
       },
-      "then": {
-        "required": ["handoffs"],
-        "properties": {
-          "handoffs": { "minItems": 1 }
-        }
-      }
-    },
-    {
-      "if": {
-        "properties": { "outcome": { "enum": ["complete", "blocked"] } },
-        "required": ["outcome"]
-      },
-      "then": {
-        "not": { "required": ["handoffs"] }
-      }
+      "then": { "required": ["queue"] }
     },
     {
       "if": {
@@ -51,12 +47,19 @@
         "required": ["outcome"]
       },
       "then": {
-        "required": ["reason"]
+        "required": ["reason"],
+        "not": {
+          "anyOf": [
+            { "required": ["queue"] },
+            { "required": ["cancel"] },
+            { "required": ["cancel_pending"] }
+          ]
+        }
       }
     }
   ],
   "$defs": {
-    "handoff": {
+    "entry": {
       "type": "object",
       "additionalProperties": false,
       "required": ["key", "task", "reason"],

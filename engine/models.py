@@ -34,6 +34,11 @@ class RunState(str, Enum):
     SUCCEEDED = "SUCCEEDED"
     FAILED = "FAILED"
     BLOCKED = "BLOCKED"
+    # A QUEUED entry removed from the queue before it ran. Terminal, and in
+    # neither NON_TERMINAL nor EXCLUSIVE_STATES: it holds no in_flight slot and
+    # does not keep a ticket from completing. Runs are never deleted -- `runs`
+    # is the audit trail -- so removal is a state, not an erasure.
+    CANCELLED = "CANCELLED"
 
 
 class GateStatus(str, Enum):
@@ -175,6 +180,11 @@ class TaskRun:
     parent_run_id: str | None = None
     source_event_id: str | None = None
     enqueue_index: int | None = None
+    # The run whose recorded artifacts this run consumed -- resolved and
+    # recorded at claim (nearest SUCCEEDED run ahead of it in the queue, else
+    # the enqueuer). NOT parent_run_id: a run may declare several queue entries
+    # at once, so whoever enqueued `review` need not be who produced its input.
+    input_from_run_id: str | None = None
     # Queue position (schemas/state.schema.json queue_seq). Dispatch orders
     # QUEUED runs by it; absent on runs written before it existed, where
     # readers fall back to array index -- the order dispatch used then.

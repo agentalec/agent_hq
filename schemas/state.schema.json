@@ -75,7 +75,7 @@
         "ticket_id": { "type": "string" },
         "state": {
           "type": "string",
-          "enum": ["QUEUED", "RUNNING", "WAITING_GATE", "SUCCEEDED", "FAILED", "BLOCKED"]
+          "enum": ["QUEUED", "RUNNING", "WAITING_GATE", "SUCCEEDED", "FAILED", "BLOCKED", "CANCELLED"]
         },
         "deadline": { "type": ["string", "null"] },
         "attempt_started_at": { "type": ["string", "null"] },
@@ -88,6 +88,10 @@
         "parent_run_id": { "type": ["string", "null"] },
         "source_event_id": { "type": ["string", "null"] },
         "enqueue_index": { "type": ["integer", "null"] },
+        "input_from_run_id": {
+          "type": ["string", "null"],
+          "description": "The run whose recorded artifacts this run consumed. Resolved and recorded when the run is claimed -- the nearest SUCCEEDED run ahead of it in the queue, else the run that enqueued it. Distinct from parent_run_id: one run may declare several queue entries at once, so the run that enqueued `review` need not be the run whose output `review` reads. Recorded rather than recomputed so the ledger says what a run actually read."
+        },
         "queue_seq": {
           "type": "integer",
           "minimum": 0,

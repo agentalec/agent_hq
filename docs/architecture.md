@@ -138,7 +138,7 @@ A ticket carries one of three lifecycle states (`engine.models.TicketStatus`):
 
 A ticket also reaches `BLOCKED` **today** whenever a run's own accounting
 says it must stop: a `blocked` control outcome, a rejected/expired gate, a
-failed `apply_handoffs` guard, retries exhausted, or a tripped loop guard/
+failed `apply_queue` guard, retries exhausted, or a tripped loop guard/
 budget cap (`engine.engine._block_ticket` and its callers). The edges below
 are the hardening plan's dedicated close/reopen machinery layered on top of
 that:
