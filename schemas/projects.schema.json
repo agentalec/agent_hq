@@ -4,14 +4,26 @@
   "title": "Projects config",
   "type": "object",
   "additionalProperties": false,
-  "required": ["repos", "intake_label", "engine_repo", "initial_task", "intake", "public"],
+  "required": [
+    "engine_repo",
+    "final_task",
+    "initial_task",
+    "intake",
+    "intake_label",
+    "public",
+    "repos"
+  ],
   "properties": {
     "repos": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "minItems": 1
     },
-    "intake_label": { "type": "string" },
+    "intake_label": {
+      "type": "string"
+    },
     "engine_repo": {
       "type": "string",
       "description": "org/repo hosting the engine's own issue tracker (intake, pinned comments, escalations) -- distinct from the work repos in repos.yml"
@@ -32,12 +44,20 @@
       "type": "object",
       "description": "Eligibility filter applied before the first state/artifact write",
       "additionalProperties": false,
-      "required": ["min_body_words", "excluded_labels"],
+      "required": [
+        "min_body_words",
+        "excluded_labels"
+      ],
       "properties": {
-        "min_body_words": { "type": "integer", "minimum": 0 },
+        "min_body_words": {
+          "type": "integer",
+          "minimum": 0
+        },
         "excluded_labels": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         }
       }
     },
@@ -48,13 +68,25 @@
     "public_safe_label": {
       "type": "string",
       "description": "Label a ticket must carry before intake accepts it when public is true"
+    },
+    "final_task": {
+      "type": "string",
+      "description": "Task id whose completion means the route reached its designed end. Queue-empty completion finishes the ticket only off a terminal run of this task; a queue draining anywhere else blocks the ticket. Mirror of initial_task."
     }
   },
   "if": {
-    "properties": { "public": { "const": true } },
-    "required": ["public"]
+    "properties": {
+      "public": {
+        "const": true
+      }
+    },
+    "required": [
+      "public"
+    ]
   },
   "then": {
-    "required": ["public_safe_label"]
+    "required": [
+      "public_safe_label"
+    ]
   }
 }

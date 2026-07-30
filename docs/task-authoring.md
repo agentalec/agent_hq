@@ -118,7 +118,7 @@ schema-invalid means the run *fails* per its own retry budget, never
 
   An **empty** `queue` is how a run says "nothing further from me" — there is
   no separate `complete` outcome. This is what feeds queue-empty completion
-  (see "Terminal-summary convention" below), and a task with no
+  (see "Where the route ends" below), and a task with no
   prompt that queues anything (e.g. `finalize`) always emits it.
 
   A `queue` outcome may also remove pending work: `"cancel": ["<key>"]` drops
@@ -302,20 +302,37 @@ metered (`cost_usd: 0.0`, `usage_known: true`), so `max_cost_usd`/
 guard, the in-flight cap, and runtime deadlines still do (see
 `docs/architecture.md` deviation 9).
 
-## Terminal-summary convention
+## Where the route ends
 
-Queue-empty completion (`engine.engine._complete_if_queue_empty`) fires once
-a ticket has no `QUEUED`/`RUNNING`/`WAITING_GATE` run and no
-`pending_handoffs` left anywhere, but only actually closes the ticket if the
-**terminal run's own recorded artifacts** include the declared summary path
-`specs/{ticket}/summary.md` -- a reopened ticket can't complete off a prior
-lifecycle's stale summary. `finalize` is exactly this: its prompt queues nothing,
-one declared output (`specs/{ticket}/summary.md`), always emits
-`{"outcome": "queue", "queue": []}`. Any task chain that wants queue-empty completion
-to land on a real "done" message should end the same way: declare the
-summary artifact, emit `complete`, propose no further handoffs. Without a
-matching summary, completion instead pins "awaiting human input" and takes
-no terminal action.
+Queue-empty completion (`engine.engine._complete_if_queue_empty`) fires once a
+ticket has no `QUEUED`/`RUNNING`/`WAITING_GATE` run and no pending entries left
+anywhere. What it does then depends on **which task** the terminal run was:
+
+- **It is `config.projects.final_task`** (`finalize` in the pilot): the route
+  reached its designed end. The closing summary posts from that run's ledger
+  copy of `specs/{ticket}/summary.md`, every recorded work PR is marked ready,
+  and the ticket goes `AWAITING_MERGE` (or `DONE` when no PR exists).
+- **It is anything else**: the queue ran dry early. The ticket goes `BLOCKED`
+  with that reason and escalates. "I am done" and "I stopped" are different
+  facts, and only one of them should close a ticket.
+
+This used to key off whether the terminal run happened to produce
+`specs/{ticket}/summary.md` -- a filename the engine had to know about, sitting
+oddly beside "the engine special-cases no task name". `final_task` is config,
+the mirror of `initial_task` and `feedback_task`, so "the route finished" and
+"someone wrote a file with the right name" stop being the same question.
+
+`final_task` still needs to declare `specs/{ticket}/summary.md` as an output so
+there is something to post; a required declared output means a run that didn't
+write it fails rather than completing silently. A **reopened** ticket cannot
+complete off a prior lifecycle's stale summary, because the summary is read from
+the terminal run's own ledger namespace.
+
+A task that gives up rather than finishes should emit
+`{"outcome": "blocked", "reason": "..."}` -- `review` does exactly this when its
+round cap is reached. That is what labels the issue for a human, escalates, and
+records the reason; queueing nothing would instead look like the route ending
+somewhere unexpected.
 
 ## Validation
 
@@ -343,7 +360,7 @@ no terminal action.
 | breakdown | Defined; **no prompt queues it**. Would queue one `implement` entry per affected repo. |
 | implement | Routed through. `opens_pr: true`; its prompt queues `review`. |
 | review | Routed through. Its prompt loops back to `implement` while blockers remain (prompt-capped at 3 rounds; on the cap it queues nothing and the engine posts the accumulated `review.md` findings to the thread, parking awaiting-human with the PR left in draft), else queues `qa`. Round memory is `review.md` forwarded around the loop as an input artifact. Every review round also reflects its latest-round findings onto the work-repo PR as a comment (`engine.engine.post_pr_comment`, in the credentialed collect phase -- the read-only agent can't, PD-5). |
-| finalize | Converted (wired). Terminal task: writes `summary.md`, always `complete`, feeds queue-empty completion (see above). No task-name special case; any task ending this way completes the same way. |
+| finalize | Routed through, and named by `config.projects.final_task`: writes `summary.md`, queues nothing, and its completion is what finishes the ticket (see "Where the route ends"). Still no task-name special case in the engine -- the name lives in config, and pointing `final_task` elsewhere moves the endpoint. |
 | clinical | Defined; **no prompt queues it**. Gated (`clinical-reviewers`, `default` adapter). |
 | poll | Converted, defined, **unwired** -- needs the P1 reaction-based `poll` adapter (`docs/roadmap.md`); no task currently hands off to it. |
 | docs | Defined; **no prompt queues it** -- it belongs between `qa` and `finalize`, so `qa`'s prompt would name it. |

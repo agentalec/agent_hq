@@ -6,6 +6,11 @@ repos:
 intake_label: hq:intake
 engine_repo: agentalec/agent_hq
 initial_task: spec
+# The route's designed end. Queue-empty completion posts the closing summary
+# and finishes the ticket only when the last run was THIS task; a queue that
+# drains anywhere else stopped early, which blocks the ticket for a human.
+# Config rather than a filename convention, and the mirror of initial_task.
+final_task: finalize
 # Enqueued when an approver sends work back with `/agent-hq request-changes`
 # on a work-repo PR. Names the task, so the engine keeps no task-name
 # special case -- point it wherever rework belongs in your route. Drop

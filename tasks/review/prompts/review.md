@@ -49,7 +49,10 @@ Never edit the implementation — your tools are read-only.
 - **Blockers remain and N < 3**: queue `implement`, forwarding
   `specs/{ticket}/spec.md` and `specs/{ticket}/review.md`; the entry's
   `reason` must name the blockers to fix.
-- **Blockers remain and N == 3** (the round cap): queue nothing — emit
-  `{"outcome": "queue", "queue": []}`. The engine posts your accumulated
-  findings to the ticket thread and leaves the PR in draft for a human — do
-  not loop a fourth implement round.
+- **Blockers remain and N == 3** (the round cap): emit
+  `{"outcome": "blocked", "reason": "..."}` with the unresolved blockers named
+  in the reason. Do not loop a fourth implement round, and do not queue
+  nothing — "I am done" and "I gave up" are different outcomes, and only
+  `blocked` labels the issue for a human and escalates. Your findings are
+  already on the PR (one comment per round) and in `review.md`; the PR stays in
+  draft.
