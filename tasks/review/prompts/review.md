@@ -42,14 +42,14 @@ Never edit the implementation — your tools are read-only.
 
 ## Decide the handoff (see Control output below)
 
-- **No blockers remain** (only should-fix / nits, or clean): hand off to
-  `qa`, forwarding `specs/{ticket}/spec.md` and `specs/{ticket}/review.md`.
-  QA exercises the change in a running app and screenshots it onto the PR
-  before `finalize` — you do not hand off to `finalize` yourself.
-- **Blockers remain and N < 3**: hand off to `implement`, forwarding
-  `specs/{ticket}/spec.md` and `specs/{ticket}/review.md`; the handoff
+- **No blockers remain** (only should-fix / nits, or clean): queue `qa`,
+  forwarding `specs/{ticket}/spec.md` and `specs/{ticket}/review.md`. QA
+  exercises the change in a running app and screenshots it onto the PR before
+  `finalize` — you do not queue `finalize` yourself.
+- **Blockers remain and N < 3**: queue `implement`, forwarding
+  `specs/{ticket}/spec.md` and `specs/{ticket}/review.md`; the entry's
   `reason` must name the blockers to fix.
-- **Blockers remain and N == 3** (the round cap): do **not** hand off. Emit
-  `{"outcome": "complete"}`. The engine posts your accumulated findings to
-  the ticket thread and leaves the PR in draft for a human — do not loop a
-  fourth implement round.
+- **Blockers remain and N == 3** (the round cap): queue nothing — emit
+  `{"outcome": "queue", "queue": []}`. The engine posts your accumulated
+  findings to the ticket thread and leaves the PR in draft for a human — do
+  not loop a fourth implement round.

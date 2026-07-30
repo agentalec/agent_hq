@@ -27,8 +27,13 @@ Don't write ticket artifacts anywhere else, and don't touch another ticket's
 ## Agent rules
 
 - **Structured control output** -- every task run ends by writing exactly
-  one control outcome to `.agent-hq/control.json` (`handoff`, `complete`, or
-  `blocked`); never end silently, and never invent a fourth outcome.
+  one control outcome to `.agent-hq/control.json` (`queue` or `blocked`);
+  never end silently, and never invent a third outcome. `queue` declares what
+  the ticket does next, in order; an empty `queue` is how a run says nothing
+  further is needed from it.
+- **Never drop work you did not mean to** -- not naming a queued entry leaves
+  it alone. Removing queued work is explicit (`cancel`, or `cancel_pending`
+  to clear the remaining queue) and is recorded in the ledger.
 - **Explicit repository targets** -- work only inside the repository the
   engine names for this run (the injected `run.repo`, resolved from
   configured `repos.yml` entries); never guess, infer, or touch a repository

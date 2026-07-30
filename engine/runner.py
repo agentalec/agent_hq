@@ -42,8 +42,8 @@ resolved repo on acceptance.
 A task's own transition is driven entirely by its `.agent-hq/control.json`
 outcome (`schemas/control.schema.json`) -- `handoff` (validate + apply/gate),
 `complete` (SUCCEEDED, feeds queue-empty completion), or `blocked` (ticket
-BLOCKED, escalate, no retry). See `engine.handoff.validate_handoffs` and
-`engine.engine.apply_handoffs`.
+BLOCKED, escalate, no retry). See `engine.handoff.validate_queue` and
+`engine.engine.apply_queue`.
 """
 
 from __future__ import annotations
@@ -64,14 +64,14 @@ from engine.engine import (
     _complete_if_queue_empty,
     _escalate,
     _handle_failure,
-    apply_handoffs,
+    apply_queue,
     check_claim_active,
     enqueue,
     intake_repo,
     resolve_target_repo,
     subst,
 )
-from engine.handoff import _check_containment, validate_handoffs
+from engine.handoff import _check_containment, validate_queue
 from engine.models import Event, RunState, TaskRun
 from engine.state import _now_iso, artifact_ledger_path
 
@@ -338,7 +338,10 @@ def _assemble_prompt(
         max_handoffs = handoff_cfg.get("max", 0)
         control_lines = [
             "Before finishing, write `.agent-hq/control.json` -- exactly one JSON object:",
-            '- `{"outcome": "complete"}` if this task is done with nothing further to hand off.',
+            (
+                '- `{"outcome": "queue", "queue": []}` if the ticket needs nothing '
+                "further from you. An empty queue is how a run says it is done."
+            ),
             '- `{"outcome": "blocked", "reason": "..."}` if you cannot proceed.',
             "",
             (
@@ -352,11 +355,18 @@ def _assemble_prompt(
         ]
         if allowed and max_handoffs:
             control_lines.append(
-                '- `{"outcome": "handoff", "handoffs": [{"key": "...", "task": "...", '
-                '"reason": "...", "repo": "...", "artifacts": [...]}]}` to hand off to up to '
-                f"{max_handoffs} of: {', '.join(allowed)}. Each `artifacts` entry must be a "
-                "file you produced (a required output above) or were given (see Available "
-                "inputs below) -- an unrelated worktree file is rejected."
+                '- `{"outcome": "queue", "queue": [{"key": "...", "task": "...", '
+                '"reason": "...", "repo": "...", "artifacts": [...]}]}` to queue up to '
+                f"{max_handoffs} of: {', '.join(allowed)}. Entries run in the order you "
+                "list them. Each `artifacts` entry must be a file you produced (a required "
+                "output above) or were given (see Available inputs below) -- an unrelated "
+                "worktree file is rejected."
+            )
+            control_lines.append(
+                'To drop work already queued on this ticket, add `"cancel": ["<key>"]`, or '
+                '`"cancel_pending": true` to clear the whole remaining queue before your own '
+                "entries are added. Not naming a queued entry never cancels it, so you cannot "
+                "drop work you did not mean to."
             )
         parts.append("## Control output\n" + "\n".join(control_lines))
 
@@ -408,17 +418,18 @@ def run_task(
 
 def _restore_input_artifacts(store, dest_dir: Path, ticket_id: str, run: dict) -> None:
     """Materialize `run.input_artifacts` into `dest_dir` (prepare's transport
-    dir, NOT a worktree -- Task 12: prepare has no clone), read from the
-    SOURCE (parent) run's ledger namespace -- the single input source a
+    dir, NOT a worktree -- Task 12: prepare has no clone), read from
+    `input_from_run_id`'s ledger namespace (the run whose output this one
+    consumes; falls back to the enqueuer for runs written before that field) -- the single input source a
     handoff-spawned run sees (PLAN.md "one artifact namespace, one input
     source"). Execute later materializes these into its own worktree.
     Best-effort: an artifact missing from the ledger (shouldn't happen --
-    apply_handoffs already checked) is skipped, not a hard failure here."""
-    parent_run_id = run.get("parent_run_id")
-    if not parent_run_id:
+    apply_queue already checked) is skipped, not a hard failure here."""
+    source_run_id = run.get("input_from_run_id") or run.get("parent_run_id")
+    if not source_run_id:
         return
     for rel_path in run.get("input_artifacts") or []:
-        content = store.read_artifact(ticket_id, parent_run_id, rel_path)
+        content = store.read_artifact(ticket_id, source_run_id, rel_path)
         if content is None:
             continue
         full = dest_dir / rel_path
@@ -544,15 +555,24 @@ def _prepare(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskd
         agent = adapter_fn("agent-session", bindings["agent-session"], repo=repo)
         base_commit = agent.resolve_ref(repo, config.repos[repo]["base_branch"])
 
+    # The run whose output this one reads -- NOT necessarily whoever enqueued
+    # it (`eng.resolve_input_source`). Recorded on the run so the ledger says
+    # what this run actually read, rather than leaving it to be re-derived from
+    # queue order later.
+    input_from = eng.resolve_input_source(ticket_doc.get("runs", []), run)
     parent = None
-    if run.get("parent_run_id"):
+    if input_from:
         parent = next(
-            (r for r in ticket_doc.get("runs", []) if r["run_id"] == run["parent_run_id"]), None,
+            (r for r in ticket_doc.get("runs", []) if r["run_id"] == input_from), None,
         )
 
     store.write(
-        lambda txn: txn.update_run(ticket_id, run_id, bindings=bindings, base_commit=base_commit)
+        lambda txn: txn.update_run(
+            ticket_id, run_id, bindings=bindings, base_commit=base_commit,
+            input_from_run_id=input_from,
+        )
     )
+    run = {**run, "input_from_run_id": input_from}
 
     rework = _rework_comments(store, ticket_id, run_id)
     declared = [subst(a, ticket_id) for a in taskdef.get("outputs", {}).get("artifacts", [])]
@@ -827,7 +847,7 @@ def _fail_execute_artifact(store, config, taskdefs, taskdef, ticket_id, run, ada
 
 
 def _fail_control_invalid(store, config, taskdefs, taskdef, ticket_id, run, adapter_fn, reason: str) -> None:
-    """A control.json that the pure validator (or apply_handoffs' state-
+    """A control.json that the pure validator (or apply_queue' state-
     dependent guards) rejected: same retry-per-budget/BLOCK policy as any
     other run failure, plus one generic handoff.rejected audit event (no
     handoff keys are trustworthy here -- the whole set was rejected)."""
@@ -891,7 +911,7 @@ def _collect_success(
     agent = adapter_fn("agent-session", run.get("bindings", {}).get("agent-session"), repo=repo)
 
     control = _read_control(out_dir / "control.json")
-    accepted, reason = validate_handoffs(
+    accepted, reason = validate_queue(
         control, taskdef=taskdef, taskdefs=taskdefs, config=config, worktree=staging_dir,
         run=TaskRun.from_dict(run),
     )
@@ -900,6 +920,8 @@ def _collect_success(
         return
 
     outcome = control.get("outcome")
+    cancel_keys = list(control.get("cancel") or [])
+    cancel_pending = bool(control.get("cancel_pending"))
     if outcome == "blocked":
         _block_from_control(
             store, config, adapter_fn, ticket_id, run_id, control.get("reason", "blocked by task")
@@ -1013,9 +1035,9 @@ def _collect_success(
         # WAITING_GATE, no in-flight slot held, handoffs apply straight away,
         # and the comment says so instead of asking for a decision.
         gate_entry = (taskdef.get("gates", {}).get("post") or [{}])[0]
-        auto_approved = outcome == "handoff" and bool(gate_entry.get("auto_approve"))
+        auto_approved = bool(accepted) and bool(gate_entry.get("auto_approve"))
 
-        if outcome == "handoff" and gate_entry:
+        if accepted and gate_entry:
             gate = adapter_fn("gate", run.get("bindings", {}).get("gate", "pr-review"), repo=repo)
             req = gate.request(
                 gate_entry["approvers"],
@@ -1045,7 +1067,19 @@ def _collect_success(
                 },
             )
 
-        if outcome == "handoff" and gate_entry and not auto_approved:
+        if accepted and gate_entry and not auto_approved and (cancel_keys or cancel_pending):
+            # `pending_handoffs` carries the entries a gated run proposed, but
+            # nothing carries its cancellations, so approving later would apply
+            # the additions and silently lose the removals. Rejected outright
+            # rather than half-applied; no wired task both gates and cancels,
+            # and when one does this becomes "persist the cancel intent too".
+            result["reject_reason"] = (
+                "a run that waits on a gate may not also cancel queued entries "
+                "(the cancellation would not survive the gate decision)"
+            )
+            return
+
+        if accepted and gate_entry and not auto_approved:
             txn.update_run(
                 ticket_id, run_id,
                 artifacts=declared,
@@ -1102,8 +1136,11 @@ def _collect_success(
                     ticket_id=ticket_id, run_id=run_id, detail=h.reason,
                 ).to_dict(),
             )
-        if accepted:
-            applied_ids, apply_reason = apply_handoffs(txn, config, taskdefs, ticket_id, run, accepted)
+        if accepted or cancel_keys or cancel_pending:
+            applied_ids, apply_reason = apply_queue(
+                txn, config, taskdefs, ticket_id, run, accepted,
+                cancel_keys=cancel_keys, cancel_pending=cancel_pending,
+            )
             result["applied_ids"] = applied_ids
             result["apply_reason"] = apply_reason
             if apply_reason is not None:
@@ -1128,6 +1165,16 @@ def _collect_success(
         )
 
     store.write(finalize)
+
+    if result.get("reject_reason"):
+        # Nothing was written -- the transaction returned before any mutation --
+        # so this takes the ordinary invalid-control path (retry per budget,
+        # then block), same as a schema violation.
+        _fail_control_invalid(
+            store, config, taskdefs, taskdef, ticket_id, run, adapter_fn,
+            result["reject_reason"],
+        )
+        return
 
     if result.get("gated"):
         # Post-write side effect, like the PR comment below: the label is a
@@ -1316,7 +1363,7 @@ def intake_ticket(issue_ref: str, event_key: str, config, taskdefs, store, adapt
         chain_depth=0,
     )
     # The root run's repo -- set from resolve_target_repo(details), not the
-    # handoff-copied `repo or source.repo` apply_handoffs uses -- so the
+    # handoff-copied `repo or source.repo` apply_queue uses -- so the
     # first task has a concrete clone target and every downstream child
     # inherits a repo (never null for a wired task).
     store.write(lambda txn: txn.update_run(ticket_id, run_id, repo=repo))

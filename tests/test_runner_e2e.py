@@ -3,7 +3,7 @@ against fake adapters and a real git-JSON state store.
 
 Every task's transition is driven by `.agent-hq/control.json` (the three
 outcomes: `handoff`/`complete`/`blocked`) validated through
-`engine.handoff.validate_handoffs` + `engine.engine.apply_handoffs` -- there
+`engine.handoff.validate_queue` + `engine.engine.apply_queue` -- there
 is no more static `on_success` chain, so fake agents emit `control.json`
 directly (either via `FakeAgent.run`, or written into the transported
 `execute_dir_for(...)` the same way tests write `execute-result.json`).
@@ -95,7 +95,7 @@ class FakeAgent:
         self.usage_known = usage_known
         self.cost_usd = cost_usd
         self.tokens = tokens
-        self.control = control if control is not None else {"outcome": "complete"}
+        self.control = control if control is not None else {"outcome": "queue", "queue": []}
         self.apply_patch_error = apply_patch_error
         self.land_result = land_result
         # pr_ref -> {"state": ..., "merged": ...}; unlisted refs read as open.
@@ -490,7 +490,7 @@ def test_prepare_base_commit_uses_recorded_head_and_survives_downstream_failure(
     _seed(store, _run_dict("buildrun", "build", state="RUNNING"))
     _stage(config, "buildrun", "impl/7.md", "the impl")
     _write_execute_result(config, "buildrun")
-    _write_control(config, "buildrun", {"outcome": "complete"})
+    _write_control(config, "buildrun", {"outcome": "queue", "queue": []})
     agent = FakeAgent(tmp_path / "work")
     adapters = _adapters(tracker=FakeTracker(_details()), agent=agent)
     run_task("buildrun", "collect", config, taskdefs, store,
@@ -545,8 +545,8 @@ def test_collect_gated_task_waits_gate(config, taskdefs, store, tmp_path):
     _stage(config, "specrun", "specs/7/spec.md", "the spec")
     _write_execute_result(config, "specrun", cost_usd=2.0, tokens=50)
     _write_control(config, "specrun", {
-        "outcome": "handoff",
-        "handoffs": [
+        "outcome": "queue",
+        "queue": [
             {"key": "build-1", "task": "build", "reason": "ready for build",
              "artifacts": ["specs/7/spec.md"]},
         ],
@@ -589,6 +589,38 @@ def test_collect_gated_task_waits_gate(config, taskdefs, store, tmp_path):
     assert work_repo["recorded_head"] == "commit-specrun"
 
 
+def test_collect_gated_run_may_not_also_cancel(config, taskdefs, store, tmp_path):
+    """`pending_handoffs` carries a gated run's additions but nothing carries
+    its removals, so approving later would apply half the declaration. Rejected
+    outright, down the ordinary invalid-control path, rather than half-applied."""
+    _seed(store, _run_dict("specrun", "spec", state="RUNNING",
+                           bindings={"agent-session": "claude-code-headless", "gate": "pr-review"}))
+    _stage(config, "specrun", "specs/7/spec.md", "the spec")
+    _write_execute_result(config, "specrun", cost_usd=2.0, tokens=50)
+    _write_control(config, "specrun", {
+        "outcome": "queue",
+        "queue": [
+            {"key": "build-1", "task": "build", "reason": "ready",
+             "artifacts": ["specs/7/spec.md"]},
+        ],
+        "cancel_pending": True,
+    })
+    adapters = _adapters(
+        tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"),
+        gate=FakeGate(request_id="42"),
+    )
+    run_task("specrun", "collect", config, taskdefs, store,
+             now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
+
+    runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
+    assert runs["specrun"]["state"] == "FAILED"
+    # Nothing was written by the rejected transaction: no gate wait, no children.
+    assert not any(r["state"] == "QUEUED" and r["run_id"] != "specrun" for r in runs.values())
+    assert "may not also cancel" in "".join(
+        e.get("detail") or "" for e in store.read_events("7")
+    )
+
+
 def test_collect_opens_pr_records_pr_ref(config, taskdefs, store, tmp_path):
     """`build` (fixture stand-in for `implement`) declares `opens_pr: true`:
     collect must open a draft PR via the injected agent-session adapter and
@@ -597,7 +629,7 @@ def test_collect_opens_pr_records_pr_ref(config, taskdefs, store, tmp_path):
     _seed(store, _run_dict("buildrun", "build", state="RUNNING"))
     _stage(config, "buildrun", "impl/7.md", "the impl")
     _write_execute_result(config, "buildrun")
-    _write_control(config, "buildrun", {"outcome": "complete"})
+    _write_control(config, "buildrun", {"outcome": "queue", "queue": []})
     agent = FakeAgent(tmp_path / "work")
     adapters = _adapters(tracker=FakeTracker(_details()), agent=agent)
     run_task("buildrun", "collect", config, taskdefs, store,
@@ -637,7 +669,7 @@ def test_landed_commit_message_is_the_run_s_own_summary(config, taskdefs, store,
     `materialize_work_patch`, so `control.summary` is the only description
     that survives to the work repo. Ticket and run id are trailers."""
     message = _landed_message(config, taskdefs, store, tmp_path, {
-        "outcome": "complete",
+        "outcome": "queue", "queue": [],
         "summary": "feat: add the patient-age formatter\n\nCovers the under-1y case.",
     })
     subject, _, rest = message.partition("\n")
@@ -652,13 +684,13 @@ def test_landed_commit_falls_back_to_the_ticket_when_no_summary(
     config, taskdefs, store, tmp_path
 ):
     """A run that declares no summary still beats a bare run id."""
-    message = _landed_message(config, taskdefs, store, tmp_path, {"outcome": "complete"})
+    message = _landed_message(config, taskdefs, store, tmp_path, {"outcome": "queue", "queue": []})
     assert message.partition("\n")[0] == "build: Add backend endpoint"
 
 
 def test_long_commit_subject_is_truncated(config, taskdefs, store, tmp_path):
     message = _landed_message(config, taskdefs, store, tmp_path, {
-        "outcome": "complete", "summary": "feat: " + "add the patient-age formatter " * 5,
+        "outcome": "queue", "queue": [], "summary": "feat: " + "add the patient-age formatter " * 5,
     })
     subject = message.partition("\n")[0]
     assert len(subject) <= 72
@@ -672,7 +704,7 @@ def test_collect_reuses_stable_branch_and_pr_across_tasks(config, taskdefs, stor
     _seed(store, _run_dict("buildrun", "build", state="RUNNING"))
     _stage(config, "buildrun", "impl/7.md", "the impl")
     _write_execute_result(config, "buildrun")
-    _write_control(config, "buildrun", {"outcome": "complete"})
+    _write_control(config, "buildrun", {"outcome": "queue", "queue": []})
     agent = FakeAgent(tmp_path / "work")
     adapters = _adapters(tracker=FakeTracker(_details()), agent=agent)
     run_task("buildrun", "collect", config, taskdefs, store,
@@ -683,7 +715,7 @@ def test_collect_reuses_stable_branch_and_pr_across_tasks(config, taskdefs, stor
     ))
     _stage(config, "buildrun2", "impl/7.md", "more impl")
     _write_execute_result(config, "buildrun2")
-    _write_control(config, "buildrun2", {"outcome": "complete"})
+    _write_control(config, "buildrun2", {"outcome": "queue", "queue": []})
     run_task("buildrun2", "collect", config, taskdefs, store,
              now_iso="2026-07-18T10:00:00Z", adapter_fn=adapters)
 
@@ -705,8 +737,8 @@ def test_collect_handoff_ungated_applies_immediately(config, taskdefs, store, tm
     _stage(config, "buildrun", "impl/7.md", "the impl")
     _write_execute_result(config, "buildrun")
     _write_control(config, "buildrun", {
-        "outcome": "handoff",
-        "handoffs": [{"key": "final-1", "task": "finalize", "reason": "done building"}],
+        "outcome": "queue",
+        "queue": [{"key": "final-1", "task": "finalize", "reason": "done building"}],
     })
     adapters = _adapters(tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"))
     run_task("buildrun", "collect", config, taskdefs, store,
@@ -762,7 +794,7 @@ def test_collect_patch_apply_failure_fails_run_never_lands(config, taskdefs, sto
                            source_event_id="evt", enqueue_index=0))
     _stage(config, "buildrun", "impl/7.md", "the impl")
     _write_execute_result(config, "buildrun")
-    _write_control(config, "buildrun", {"outcome": "complete"})
+    _write_control(config, "buildrun", {"outcome": "queue", "queue": []})
     agent = FakeAgent(tmp_path / "work", apply_patch_error="patch does not apply")
     adapters = _adapters(tracker=FakeTracker(_details()), agent=agent)
     run_task("buildrun", "collect", config, taskdefs, store,
@@ -801,7 +833,7 @@ def test_collect_finalize_marks_pr_ready_and_waits_for_the_merge(config, taskdef
     )
     _stage(config, "finalrun", "specs/7/summary.md", "Ticket 7 shipped: PR ready, QA green.")
     _write_execute_result(config, "finalrun", cost_usd=0.5, tokens=5)
-    _write_control(config, "finalrun", {"outcome": "complete"})
+    _write_control(config, "finalrun", {"outcome": "queue", "queue": []})
     agent = FakeAgent(tmp_path / "work")
     tracker = FakeTracker(_details())
     adapters = _adapters(tracker=tracker, agent=agent)
@@ -836,7 +868,7 @@ def test_collect_completion_without_a_pr_closes_the_issue_immediately(
     )
     _stage(config, "finalrun", "specs/7/summary.md", "No code changes were needed.")
     _write_execute_result(config, "finalrun", cost_usd=0.5, tokens=5)
-    _write_control(config, "finalrun", {"outcome": "complete"})
+    _write_control(config, "finalrun", {"outcome": "queue", "queue": []})
     tracker = FakeTracker(_details())
     adapters = _adapters(tracker=tracker, agent=FakeAgent(tmp_path / "work"))
     run_task("finalrun", "collect", config, taskdefs, store,
@@ -853,7 +885,7 @@ def test_collect_completion_pins_awaiting_human_input_without_summary(config, ta
     _seed(store, _run_dict("buildrun", "build", state="RUNNING"))
     _stage(config, "buildrun", "impl/7.md", "the impl")
     _write_execute_result(config, "buildrun")
-    _write_control(config, "buildrun", {"outcome": "complete"})
+    _write_control(config, "buildrun", {"outcome": "queue", "queue": []})
     tracker = FakeTracker(_details())
     adapters = _adapters(tracker=tracker, agent=FakeAgent(tmp_path / "work"))
     run_task("buildrun", "collect", config, taskdefs, store,
@@ -899,8 +931,8 @@ def test_collect_auto_approved_gate_never_waits(config, taskdefs, store, tmp_pat
     _stage(config, "specrun", "specs/7/spec.md", "the spec")
     _write_execute_result(config, "specrun", cost_usd=2.0, tokens=50)
     _write_control(config, "specrun", {
-        "outcome": "handoff",
-        "handoffs": [
+        "outcome": "queue",
+        "queue": [
             {"key": "build-1", "task": "build", "reason": "ready for build",
              "artifacts": ["specs/7/spec.md"]},
         ],
@@ -1062,7 +1094,7 @@ def test_collect_stores_a_directory_artifact_as_bytes(config, taskdefs, store, t
     _stage(config, "specrun", "specs/7/spec.md", "the spec")
     _stage(config, "specrun", "specs/7/shots/desktop.png", png)
     _write_execute_result(config, "specrun", cost_usd=1.0, tokens=10)
-    _write_control(config, "specrun", {"outcome": "complete"})
+    _write_control(config, "specrun", {"outcome": "queue", "queue": []})
 
     gate = FakeGate()
     run_task("specrun", "collect", config, taskdefs, store, now_iso="2026-07-18T09:00:00Z",
@@ -1184,7 +1216,7 @@ def test_collect_ticket_blocked_mid_collect_is_zombie_noop(config, taskdefs, sto
     _seed(store, _run_dict("buildrun", "build", state="RUNNING"))
     _stage(config, "buildrun", "impl/7.md", "the impl")
     _write_execute_result(config, "buildrun")
-    _write_control(config, "buildrun", {"outcome": "complete"})
+    _write_control(config, "buildrun", {"outcome": "queue", "queue": []})
     store.write(lambda txn: txn.set_ticket("7", status="BLOCKED"))
     agent = FakeAgent(tmp_path / "work")
     adapters = _adapters(tracker=FakeTracker(_details()), agent=agent)
@@ -1224,7 +1256,7 @@ def test_collect_redriven_lost_run_creates_no_duplicate_side_effects(
     # lands -- a zombie by now (its own run state is no longer RUNNING).
     _stage(config, "buildrun", "impl/7.md", "the impl")
     _write_execute_result(config, "buildrun")
-    _write_control(config, "buildrun", {"outcome": "complete"})
+    _write_control(config, "buildrun", {"outcome": "queue", "queue": []})
     agent = FakeAgent(tmp_path / "work")
     run_task("buildrun", "collect", config, taskdefs, store,
              now_iso="2026-07-18T09:05:00Z", adapter_fn=_adapters(tracker=tracker, agent=agent))

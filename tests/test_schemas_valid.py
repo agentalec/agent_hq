@@ -24,14 +24,28 @@ CONTROL_SCHEMA = _load_schema("control.schema.json")
 @pytest.mark.parametrize(
     "doc",
     [
-        {"outcome": "complete"},
+        # An empty queue is how a run says "nothing further from me" -- there is
+        # no separate `complete` outcome to say it with.
+        {"outcome": "queue", "queue": []},
         {"outcome": "blocked", "reason": "missing credentials"},
         {
-            "outcome": "handoff",
-            "handoffs": [{"key": "impl-1", "task": "implement", "reason": "fan out"}],
+            "outcome": "queue",
+            "queue": [{"key": "impl-1", "task": "implement", "reason": "fan out"}],
+        },
+        {"outcome": "queue", "queue": [], "cancel": ["stale-qa"]},
+        {
+            "outcome": "queue",
+            "cancel_pending": True,
+            "queue": [{"key": "respec", "task": "spec", "reason": "re-route"}],
         },
     ],
-    ids=["complete", "blocked-with-reason", "handoff-with-handoffs"],
+    ids=[
+        "queue-empty-means-done",
+        "blocked-with-reason",
+        "queue-with-entries",
+        "queue-cancelling-a-key",
+        "queue-replacing-the-route",
+    ],
 )
 def test_control_schema_accepts_valid_docs(doc):
     Draft202012Validator(CONTROL_SCHEMA).validate(doc)
@@ -40,24 +54,28 @@ def test_control_schema_accepts_valid_docs(doc):
 @pytest.mark.parametrize(
     "doc",
     [
-        {"outcome": "handoff", "handoffs": []},
-        {"outcome": "handoff"},
+        {"outcome": "queue"},
+        {"outcome": "complete"},
         {
-            "outcome": "complete",
+            "outcome": "handoff",
             "handoffs": [{"key": "impl-1", "task": "implement", "reason": "fan out"}],
         },
         {
             "outcome": "blocked",
             "reason": "stuck",
-            "handoffs": [{"key": "impl-1", "task": "implement", "reason": "fan out"}],
+            "queue": [{"key": "impl-1", "task": "implement", "reason": "fan out"}],
         },
+        {"outcome": "blocked", "reason": "stuck", "cancel": ["impl-1"]},
+        {"outcome": "blocked", "reason": "stuck", "cancel_pending": True},
         {"outcome": "blocked"},
     ],
     ids=[
-        "handoff-empty-handoffs",
-        "handoff-missing-handoffs",
-        "complete-with-handoffs",
-        "blocked-with-handoffs",
+        "queue-missing-queue",
+        "retired-complete-outcome",
+        "retired-handoff-outcome",
+        "blocked-with-queue",
+        "blocked-with-cancel",
+        "blocked-with-cancel-pending",
         "blocked-missing-reason",
     ],
 )

@@ -82,7 +82,7 @@ checkable ("every acceptance criterion is testable"); skip them otherwise.
   [task-authoring.md](task-authoring.md) "Artifact namespace".
 - In a handoff, pass exactly what the child needs in `artifacts[]` — the
   child's `input_artifacts` are its only input source. The provenance rule
-  (`engine.handoff.validate_handoffs`): a run may forward only artifacts it
+  (`engine.handoff.validate_queue`): a run may forward only artifacts it
   inherited as inputs or declared as its own outputs, never an arbitrary
   worktree file.
 - Never write outside the worktree. Every proposed artifact path is
@@ -117,7 +117,7 @@ the issue only when the terminal run's own recorded artifacts include
 `specs/{ticket}/summary.md`. So every route must end with a task that:
 
 - declares `specs/{ticket}/summary.md` in `outputs.artifacts`,
-- emits `{"outcome": "complete"}` — i.e. proposes no handoffs on the
+- emits `{"outcome": "queue", "queue": []}` — i.e. queues nothing on the
   terminal run.
 
 Leaving `handoff.allowed` off the terminal task entirely is the recommended
@@ -181,12 +181,12 @@ that actually constrain a task:
   `intake` and `finalize` are not special-cased
   (`test_no_intake_task_directory` pins it).
 - Handing off to a task not in your `handoff.allowed` — the entire handoff
-  set is rejected (`engine.handoff.validate_handoffs`).
+  set is rejected (`engine.handoff.validate_queue`).
 - Absolute or `..` artifact paths — containment check rejects the set
   (`engine.handoff._check_containment`).
 - Forwarding an artifact outside your provenance set (not inherited, not
-  your own declared output) — rejected by `validate_handoffs`.
-- Emitting `"outcome": "handoff"` with an empty `handoffs` list —
+  your own declared output) — rejected by `validate_queue`.
+- Emitting `"outcome": "queue"` with no `queue` key at all —
   schema-invalid (`control.schema.json` requires `minItems: 1`); an empty
   set of next steps is `"complete"`.
 - Relying on `max_cost_usd`/`ticket_cap_usd` for safety under the Copilot

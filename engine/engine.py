@@ -66,6 +66,29 @@ def queue_positions(runs: list[dict]) -> dict[str, int]:
     return {r["run_id"]: r.get("queue_seq", i) for i, r in enumerate(runs)}
 
 
+def resolve_input_source(runs: list[dict], run: dict) -> str | None:
+    """The run whose recorded artifacts `run` consumes.
+
+    The nearest SUCCEEDED run ahead of it in the queue, else the run that
+    enqueued it (`parent_run_id`). NOT `parent_run_id` on its own: one run may
+    declare several queue entries at once, so whoever enqueued `review` (say
+    `spec`) need not be who produced what `review` reads (`implement`).
+
+    Resolved at dispatch/claim rather than stored when the queue is declared,
+    because `attempt` is part of a run id -- any pointer baked at declaration
+    time goes stale the moment a predecessor retries.
+    """
+    positions = queue_positions(runs)
+    mine = positions.get(run["run_id"], 0)
+    earlier = [
+        r for r in runs
+        if positions[r["run_id"]] < mine and r["state"] == RunState.SUCCEEDED.value
+    ]
+    if earlier:
+        return max(earlier, key=lambda r: positions[r["run_id"]])["run_id"]
+    return run.get("parent_run_id")
+
+
 def _next_queue_seq(txn: Txn, ticket_id: str) -> int:
     """One past the ticket's highest occupied position. Read from the
     in-transaction doc, so a batch inserting several runs in one write sees
@@ -78,7 +101,7 @@ def _put_queued_run(txn: Txn, run_id: str, *, ticket_id: str, task_id: str, task
                     bindings: dict[str, str], queue_seq: int | None = None, **fields) -> bool:
     """Insert a QUEUED run (idempotent by run_id) plus its run.queued event.
     Returns True if newly inserted, False if it already existed (no-op) --
-    shared by every run-creation path (`enqueue`, `apply_handoffs`,
+    shared by every run-creation path (`enqueue`, `apply_queue`,
     `reenqueue_same`'s handoff branch) so identity/idempotency is enforced
     in exactly one place.
 
@@ -142,7 +165,7 @@ def enqueue(
     source event key for a root enqueue) plus enqueue_index/task_id/attempt,
     so a duplicate call with the same inputs is a no-op rather than a second
     run record. Used for the intake root run only -- a handoff-spawned run
-    uses `compute_handoff_run_id` via `apply_handoffs`/`reenqueue_same`.
+    uses `compute_handoff_run_id` via `apply_queue`/`reenqueue_same`.
     """
     parent_or_source = parent_run["run_id"] if parent_run is not None else source_event_id
     if parent_or_source is None:
@@ -230,8 +253,14 @@ def check_loop_guard(
 ) -> tuple[bool, list[dict] | None]:
     """True (ok, None) unless the ticket has too many runs or too deep a
     causal chain, in which case (False, trace) with trace being every run's
-    run_id/task_id/parent_run_id for the BLOCKED reason."""
-    runs = state_doc.get("runs", [])
+    run_id/task_id/parent_run_id for the BLOCKED reason.
+
+    CANCELLED runs are excluded from the count: they never executed and spent
+    nothing, so a route revised a few times must not exhaust the ticket's run
+    ceiling with work that never happened. They stay in `runs` as audit."""
+    runs = [
+        r for r in state_doc.get("runs", []) if r.get("state") != RunState.CANCELLED.value
+    ]
     max_chain_depth = max((r.get("chain_depth", 0) for r in runs), default=0)
     # Guard runs BEFORE an enqueue, so `<` makes max_runs the true ceiling.
     if len(runs) < max_runs and max_chain_depth < max_depth:
@@ -467,19 +496,58 @@ def reenqueue_same(store, run: dict, taskdef: dict, attempt: int) -> str:
     )
 
 
-def apply_handoffs(
+def _resolve_cancellations(
+    ticket_doc: dict, cancel_keys: list[str], cancel_pending: bool
+) -> tuple[list[dict], str | None]:
+    """The QUEUED runs a declaration removes, or a rejection reason.
+
+    `cancel_pending` takes every QUEUED run on the ticket. Named keys match on
+    `handoff_key`; a key matching nothing is ignored (the entry already ran, or
+    a re-delivery already cancelled it -- both are the intended end state), but
+    a key matching MORE than one QUEUED run is an error, because keys are only
+    unique per source run and which was meant is unknowable.
+
+    Only QUEUED runs are cancellable. A run that reached RUNNING between this
+    run's collect and this write landing survives -- `store.write` replays the
+    transaction against fresh state on a push rejection, so the check
+    re-evaluates rather than acting on a stale read.
+    """
+    queued = [r for r in ticket_doc.get("runs", []) if r["state"] == RunState.QUEUED.value]
+    if cancel_pending:
+        return queued, None
+    doomed: list[dict] = []
+    for key in cancel_keys:
+        matches = [r for r in queued if r.get("handoff_key") == key]
+        if len(matches) > 1:
+            return [], (
+                f"cancel key '{key}' matches {len(matches)} queued entries; "
+                "keys are unique per source run, so this is ambiguous"
+            )
+        doomed.extend(matches)
+    return doomed, None
+
+
+def apply_queue(
     txn: Txn, config: Config, taskdefs: dict, ticket_id: str, source_run: dict,
     accepted: list[Handoff], attempt: int = 0,
+    cancel_keys: list[str] | None = None, cancel_pending: bool = False,
 ) -> tuple[list[str], str | None]:
-    """Enforce the state-dependent guards the pure validator
-    (`engine.handoff.validate_handoffs`) can't see -- each artifact's ledger
-    entry actually exists, and loop/budget/depth still hold -- then append
-    `accepted` as QUEUED runs in emitted order, idempotent by derived id
-    (`compute_handoff_run_id`). Any guard failure rejects the WHOLE set
-    (nothing is appended), the same all-or-nothing contract as
-    `validate_handoffs`. Must run inside the caller's own `store.write`
-    transaction alongside the source run's own terminal-state update, so a
-    crash between "succeeded" and "children queued" cannot happen.
+    """Apply a run's queue declaration: cancel what it names, then append
+    `accepted` as QUEUED runs in declared order, idempotent by derived id
+    (`compute_handoff_run_id`).
+
+    Enforces the state-dependent guards the pure validator
+    (`engine.handoff.validate_queue`) can't see -- each artifact's ledger entry
+    actually exists, cancellations resolve unambiguously, and loop/budget still
+    hold. Any guard failure rejects the WHOLE declaration (nothing cancelled and
+    nothing appended), the same all-or-nothing contract as `validate_queue`.
+    Must run inside the caller's own `store.write` transaction alongside the
+    source run's own terminal-state update, so a crash between "succeeded" and
+    "queue updated" cannot happen.
+
+    Cancellation runs BEFORE insertion, and only over pre-existing QUEUED runs,
+    so a declaration that both clears the plan and states a new one never
+    cancels its own entries.
     """
     for h in accepted:
         for rel_path in h.artifacts or []:
@@ -487,6 +555,12 @@ def apply_handoffs(
                 return [], f"artifact '{rel_path}' missing from {source_run['run_id']}'s ledger"
 
     ticket_doc = txn.ticket_doc(ticket_id)
+    doomed, cancel_reason = _resolve_cancellations(
+        ticket_doc, cancel_keys or [], cancel_pending
+    )
+    if cancel_reason is not None:
+        return [], cancel_reason
+
     loop_cfg = config.budgets["loop_guard"]
     # Prospective: account for the WHOLE batch about to be inserted (not just
     # the current, pre-insertion state) -- a two-handoff batch checked only
@@ -506,6 +580,25 @@ def apply_handoffs(
         verdict = check_budget(ticket_doc, budget, config.budgets["ticket_cap_usd"])
         if verdict["over_ticket_cap"] or verdict["insufficient_headroom"]:
             return [], f"ticket budget exhausted for handoff target '{h.target_task}'"
+
+    for victim in doomed:
+        txn.update_run(ticket_id, victim["run_id"], state=RunState.CANCELLED.value)
+        txn.append_event(
+            ticket_id,
+            Event(
+                event_id=f"{victim['run_id']}:cancelled",
+                kind="run.cancelled",
+                ticket_id=ticket_id,
+                run_id=victim["run_id"],
+                task_id=victim.get("task_id"),
+                state=RunState.CANCELLED,
+                detail=(
+                    f"cancelled by {source_run['run_id']}"
+                    + (" (cancel_pending)" if cancel_pending else "")
+                ),
+                source=source_run["run_id"],
+            ).to_dict(),
+        )
 
     applied: list[str] = []
     for h in accepted:
@@ -686,7 +779,7 @@ def sweep(
             result: dict = {}
 
             def approve(txn: Txn) -> None:
-                applied_ids, apply_reason = apply_handoffs(
+                applied_ids, apply_reason = apply_queue(
                     txn, config, taskdefs, ticket_id, run, pending
                 )
                 result["applied_ids"] = applied_ids
@@ -1162,16 +1255,24 @@ def _target_repo(config, adapter_fn, ticket_id) -> str | None:
 
 
 def _inputs_ready(taskdef, run, state) -> bool:
-    """TE-3: a task declaring input artifacts may only start once its parent
-    run has recorded (a superset of) those artifacts. State-level check --
-    artifacts are recorded on the parent's collect, so no git access needed."""
+    """TE-3: a task declaring input artifacts may only start once the run it
+    reads from has recorded (a superset of) those artifacts. State-level check
+    -- artifacts are recorded on that run's collect, so no git access needed.
+
+    Gates on `resolve_input_source`, not `parent_run_id`: with a queue, `spec`
+    can declare `implement` and `review` at once, and `review`'s inputs come
+    from `implement`. Keyed on the enqueuer this would gate `review` on `spec`'s
+    outputs -- passing vacuously, or never at all."""
     declared = taskdef.get("inputs", {}).get("artifacts", [])
-    if not declared or not run.get("parent_run_id"):
+    if not declared:
         return True
-    parent = next((r for r in state["runs"] if r["run_id"] == run["parent_run_id"]), None)
-    if parent is None:
+    source_id = resolve_input_source(state.get("runs", []), run)
+    if not source_id:
+        return True
+    source = next((r for r in state["runs"] if r["run_id"] == source_id), None)
+    if source is None:
         return False
-    produced = set(parent.get("artifacts", []))
+    produced = set(source.get("artifacts", []))
     return all(subst(a, run["ticket_id"]) in produced for a in declared)
 
 

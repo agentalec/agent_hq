@@ -69,21 +69,21 @@ they can stay unbound in `components.yml` without breaking validation.
 ## Handoffs
 
 A task proposes its children by writing `.agent-hq/control.json` with
-outcome `"handoff"` (see "Control outcomes" below); the task definition only
+outcome `"queue"` (see "Control outcomes" below); the task definition only
 constrains what's *allowed*:
 
-- `handoff.allowed` -- the list of task ids this task may hand off to. A
-  proposed handoff naming any other target is rejected
-  (`engine.handoff.validate_handoffs`).
-- `handoff.max` -- the most handoffs one run may propose in a single
+- `handoff.allowed` -- the list of task ids this task may queue. A declared
+  entry naming any other target is rejected
+  (`engine.handoff.validate_queue`).
+- `handoff.max` -- the most entries one run may declare in a single
   `control.json`. Most tasks are `max: 1` (a linear next step); `breakdown`
-  is `max: 2` -- the pilot's fan-out point, emitting one `implement` handoff
+  is `max: 2` -- the pilot's fan-out point, queueing one `implement` entry
   per affected configured repo (`config/repos.yml`), each carrying that
-  repo in the handoff's `repo` field.
+  repo in the entry's `repo` field.
 
-Validation is pure and total-rejection: `engine.handoff.validate_handoffs`
-checks the whole proposed set against `schemas/control.schema.json`, then
-path containment on every artifact, then per-handoff semantics (target in
+Validation is pure and total-rejection: `engine.handoff.validate_queue`
+checks the whole declaration against `schemas/control.schema.json`, then
+path containment on every artifact, then per-entry semantics (target in
 `handoff.allowed` and in the loaded library, `repo` if given is a configured
 repo, key uniqueness, total count `<= handoff.max`, and each artifact is in
 the run's **provenance set** -- its inherited `input_artifacts` union its own
@@ -92,10 +92,10 @@ single violation rejects the *entire* set, not just the offending item.
 
 State-dependent guards that the pure validator can't see (each artifact's
 ledger entry actually exists, and the ticket's loop/budget/depth limits
-still hold) are enforced atomically in `engine.engine.apply_handoffs`, inside
+still hold) are enforced atomically in `engine.engine.apply_queue`, inside
 the same state-store transaction that marks the source run terminal --
 so a crash between "run succeeded" and "children queued" can't happen.
-Handoff-spawned run identity is `(source_run_id, handoff_key, attempt)` only
+A queued entry's run identity is `(source_run_id, key, attempt)` only
 -- the target task id is **not** part of it, so a re-delivered handoff key
 always resolves to the same run id regardless of payload content (the first
 accepted delivery wins; a duplicate is a no-op).
@@ -107,20 +107,37 @@ Every completed run writes exactly one `.agent-hq/control.json`
 schema-invalid means the run *fails* per its own retry budget, never
 "ignored"):
 
-- `{"outcome": "handoff", "handoffs": [...]}` -- `handoffs` required,
-  non-empty. With no `gates.post` on this task, accepted handoffs enqueue as
-  `QUEUED` runs immediately and this run finishes `SUCCEEDED`. With a
-  `gates.post` entry, the proposals are stored as `run.pending_handoffs` and
-  the run stops at `WAITING_GATE`; a gate `APPROVED` decision applies them
-  and completes the run — unless that gate sets `auto_approve`, in which case
-  they apply immediately as if there were no gate (see "Gates" below).
-- `{"outcome": "complete"}` -- `handoffs` forbidden; the run finishes
-  `SUCCEEDED` with no children. This is what feeds queue-empty completion
-  (see "Terminal-summary convention" below) -- a task with no
-  `handoff.allowed` at all (e.g. `finalize`) always emits this.
-- `{"outcome": "blocked", "reason": "..."}` -- `handoffs` forbidden, `reason`
-  required; the run is recorded blocked and the ticket moves to `BLOCKED`
-  with that reason, escalating to a human with no auto-retry.
+- `{"outcome": "queue", "queue": [...]}` -- `queue` required; entries run in
+  the order listed. With no `gates.post` on this task they enqueue as `QUEUED`
+  runs immediately and this run finishes `SUCCEEDED`. With a `gates.post`
+  entry, they are stored as `run.pending_handoffs` and the run stops at
+  `WAITING_GATE`; a gate `APPROVED` decision applies them and completes the
+  run — unless that gate sets `auto_approve`, in which case they apply
+  immediately as if there were no gate (see "Gates" below).
+
+  An **empty** `queue` is how a run says "nothing further from me" — there is
+  no separate `complete` outcome. This is what feeds queue-empty completion
+  (see "Terminal-summary convention" below), and a task with no
+  `handoff.allowed` at all (e.g. `finalize`) always emits it.
+
+  A `queue` outcome may also remove pending work: `"cancel": ["<key>"]` drops
+  named `QUEUED` entries, and `"cancel_pending": true` clears the whole
+  remaining queue before this document's own entries are added. **Omission
+  never cancels** — a run that simply does not mention a pending entry leaves
+  it alone, so one branch of a fan-out cannot drop its sibling by saying
+  nothing. Each removal is recorded as a `run.cancelled` event and the run
+  becomes `CANCELLED`; runs are never deleted, because `runs` is the audit
+  trail. A key matching no `QUEUED` entry is ignored; a key matching more than
+  one is an error, since keys are unique only per source run.
+
+  A run that stops at a gate may **not** also cancel: `pending_handoffs`
+  carries its additions but nothing carries its removals, so approving later
+  would apply half the declaration. The engine rejects that combination
+  outright rather than half-applying it.
+- `{"outcome": "blocked", "reason": "..."}` -- `queue`/`cancel`/
+  `cancel_pending` forbidden, `reason` required; the run is recorded blocked
+  and the ticket moves to `BLOCKED` with that reason, escalating to a human
+  with no auto-retry.
 
 Any outcome may also carry `summary` -- a Conventional Commits description of
 what the run changed in the work repo. Its first line becomes the subject of
@@ -276,7 +293,7 @@ Ticket-wide caps live in `config/budgets.yml`: `ticket_cap_usd` (total spend
 across every run on a ticket), `in_flight_cap` (global concurrent-ticket
 cap), and `loop_guard.max_runs`/`max_depth` (runaway-handoff protection --
 total run count and causal chain depth). All four are checked before a
-handoff set is applied (`engine.engine.apply_handoffs`) and before a queued
+handoff set is applied (`engine.engine.apply_queue`) and before a queued
 run is dispatched, so a task cannot out-run these limits by proposing more
 handoffs. Under the default Copilot-billed executor, run cost is not
 metered (`cost_usd: 0.0`, `usage_known: true`), so `max_cost_usd`/
@@ -293,7 +310,7 @@ a ticket has no `QUEUED`/`RUNNING`/`WAITING_GATE` run and no
 `specs/{ticket}/summary.md` -- a reopened ticket can't complete off a prior
 lifecycle's stale summary. `finalize` is exactly this: no `handoff.allowed`,
 one declared output (`specs/{ticket}/summary.md`), always emits
-`{"outcome": "complete"}`. Any task chain that wants queue-empty completion
+`{"outcome": "queue", "queue": []}`. Any task chain that wants queue-empty completion
 to land on a real "done" message should end the same way: declare the
 summary artifact, emit `complete`, propose no further handoffs. Without a
 matching summary, completion instead pins "awaiting human input" and takes

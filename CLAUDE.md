@@ -91,14 +91,30 @@ CI (`.github/workflows/ci.yml`) runs all five; a change isn't done until all pas
   `compute_handoff_run_id` (see above).
 - Every completed run emits exactly one control outcome
   (`schemas/control.schema.json`, `additionalProperties:false`) —
-  `handoff`/`complete`/`blocked` — schema-validated
-  (`engine/handoff.py:validate_handoffs`) before anything in it is trusted;
-  a schema-invalid document fails the run, it is never silently ignored.
-  Declared `outputs.artifacts` are ledger artifacts
+  `queue`/`blocked` — schema-validated
+  (`engine/handoff.py:validate_queue`) before anything in it is trusted;
+  a schema-invalid document fails the run, it is never silently ignored. An
+  empty `queue` is how a run says "nothing further"; there is no `complete`.
+- A ticket's queue is explicit: `QUEUED` runs ordered by `queue_seq`
+  (`engine.engine.queue_positions` falls back to array index for runs written
+  before the field). Any run may revise the remaining route at collect —
+  entries are added in declared order, and removal is explicit (`cancel` by
+  key, or `cancel_pending`). **Omission never cancels**, so a fan-out branch
+  cannot drop its sibling by saying nothing; a removed entry becomes a
+  `CANCELLED` run with a `run.cancelled` event, never a deletion, and
+  `CANCELLED` runs don't count against `loop_guard.max_runs`. A retry inherits
+  the `queue_seq` of the attempt it replaces.
+- `parent_run_id` is who *enqueued* a run (identity + provenance; immutable —
+  `reenqueue_same` recomputes retry ids from it). `input_from_run_id` is whose
+  output it *reads*, resolved and recorded at claim
+  (`engine.engine.resolve_input_source`: nearest `SUCCEEDED` run ahead of it in
+  the queue, else the enqueuer). Don't conflate them — with a multi-entry
+  queue, whoever enqueued `review` need not be who produced its input.
+- Declared `outputs.artifacts` are ledger artifacts
   (`tickets/<id>/artifacts/<run_id>/`, `engine/state.py`
   `write_artifact`/`read_artifact`) — persisted per producing run as **bytes**
-  (not all artifacts are text), restored into a child only from its source
-  (parent) run's namespace, and excluded from the work-repo patch/commit. An
+  (not all artifacts are text), restored into a run only from its
+  `input_from_run_id` namespace, and excluded from the work-repo patch/commit. An
   entry ending in `/` is a directory artifact: the engine collects whatever
   files it holds, zero or more, for output a task can't name in advance
   (`engine/runner.py:_expand_declared`); plain entries stay required. Every
