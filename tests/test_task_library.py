@@ -29,23 +29,6 @@ EXPECTED_TASK_IDS = {
     "finalize", "clinical", "poll", "qa", "docs",
 }
 
-# The wired handoff graph a fresh ticket walks (spec's fan-out is capacity,
-# not a fixed edge -- it emits 1..handoff.max `implement` handoffs depending
-# on how many repos a ticket touches).
-EXPECTED_HANDOFF_ALLOWED = {
-    "spec": (["implement"], 3),
-    "arch-plan": (["arch-approval", "breakdown"], 1),
-    "arch-approval": (["breakdown"], 1),
-    "breakdown": (["implement"], 2),
-    "implement": (["review"], 1),
-    "review": (["implement", "qa"], 1),
-    "finalize": ([], 0),
-    "clinical": (["arch-plan"], 1),
-    "poll": ([], 0),
-    "qa": (["finalize"], 1),
-    "docs": (["finalize"], 1),
-}
-
 CONCRETE_ADAPTER_NAMES = (
     "github-issues", "github-comment", "pr-review", "github-issue-comment",
     "claude-code-headless", "copilot-cli",
@@ -58,18 +41,17 @@ def test_task_library_loads_and_validates_clean():
     assert validate_library(taskdefs) == []
 
 
-def test_handoff_targets_resolve_within_the_library():
-    """Every handoff.allowed target of every task resolves to a loaded task
-    id (validate_library's own check), and the graph's specific
-    allowed-set/max matches the plan -- most tellingly spec's
-    handoff.max: 3, the minimal route's per-repo fan-out point."""
+def test_no_task_declares_a_route():
+    """The library encodes no graph. There used to be a hand-maintained
+    `handoff.allowed`/`max` table across every task.yml -- eleven files
+    describing one route -- and the queue replaced it: what runs next is
+    declared per run and revisable by any later run. A task.yml that still
+    carries a `handoff` block would fail schema load, so this asserts the
+    stronger property that none of them mention it at all."""
     taskdefs = load_all(TASKS_DIR, SCHEMAS_DIR)
-    for task_id, (allowed, max_handoffs) in EXPECTED_HANDOFF_ALLOWED.items():
-        handoff = taskdefs[task_id].get("handoff", {})
-        assert handoff.get("allowed", []) == allowed, f"{task_id}: handoff.allowed mismatch"
-        assert handoff.get("max", 0) == max_handoffs, f"{task_id}: handoff.max mismatch"
-        for target in allowed:
-            assert target in taskdefs, f"{task_id}: handoff target '{target}' not in library"
+    assert set(taskdefs) == EXPECTED_TASK_IDS
+    offenders = [tid for tid, td in taskdefs.items() if "handoff" in td]
+    assert offenders == []
 
 
 def test_gate_tasks_resolve_to_constructible_adapters():

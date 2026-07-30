@@ -27,10 +27,10 @@ verifies that every `skills` entry and every task-local `context` entry
 across directories.
 
 Nothing wires a task into the live graph except another task's
-`handoff.allowed` naming it (or `config/projects.yml`'s `initial_task`
+some run's `control.json` queueing it (or `config/projects.yml`'s `initial_task`
 naming it as the ticket's root task). There is no fixed chain and no
 task-name special case in the engine — a defined task that no
-`handoff.allowed` reaches is registered but unwired (see the dispositions
+no prompt queues is registered but unused (see the dispositions
 table in [task-authoring.md](task-authoring.md)).
 
 ## Annotated example
@@ -38,7 +38,7 @@ table in [task-authoring.md](task-authoring.md)).
 `tasks/spec/task.yml`, verbatim, with commentary:
 
 ```yaml
-id: spec                      # identity; what handoff.allowed targets name
+id: spec                      # identity; what a queue entry's `task` names
 version: 1                    # recorded on every run as task_version
 description: Author the specification for the ticket.
 trigger: enqueued_by          # required; currently always this value
@@ -75,7 +75,7 @@ Required top-level fields: `id`, `version`, `description`, `trigger`,
 ### `id` (string, required)
 
 The task's identity: the key it is loaded under, and the string other
-tasks' `handoff.allowed` (and `config/projects.yml`'s `initial_task`) use
+queue entries (and `config/projects.yml`'s `initial_task`) use
 to name it. By convention it matches the directory name; what is enforced
 is uniqueness — two directories declaring the same `id` fail
 `agent-hq tasks validate` (`engine/taskdefs.py:load_all`).
@@ -211,10 +211,6 @@ this.
 
 ### `handoff` (object, optional)
 
-- `handoff.allowed` (list of task ids) — the only targets this task's
-  `control.json` may propose; every entry must resolve to a loaded task
-  (`engine/taskdefs.py:validate_library`).
-- `handoff.max` (integer >= 0) — the most handoffs one run may propose in
   a single `control.json`. Default when omitted: 0, i.e. the task may not
   hand off at all.
 
@@ -274,7 +270,7 @@ run's provenance set and containment-safe).
 
 The contract is injected into every prompt automatically
 (`engine/runner.py:_assemble_prompt`): the outcome shapes, this task's own
-`handoff.allowed`/`max`, and its required output paths. A task never
+the queueable task list and `max_queue_length`, and its required output paths. A task never
 spells this out in its own prompts, and the injection does not depend on
 the task including `constitution` in `context`.
 
@@ -308,10 +304,11 @@ the task including `constitution` in `context`.
 `tasks validate` (`engine/cli.py:_tasks_validate`) loads every
 `tasks/*/task.yml` — schema validation, on-disk `skills`/task-local
 `context` existence, duplicate-id detection (`engine/taskdefs.py`) — then
-cross-checks the library (every `handoff.allowed` target resolves to a
-loaded task) and every task's declared `components` port against
-`components.yml` (`engine/config.py:validate_task_bindings`). It loads the
-config to do so, so a broken config fails this command too.
+validates each task in isolation (ids unique and self-consistent — there are
+no declared route edges left to cross-check) and every task's declared
+`components` port against `components.yml`
+(`engine/config.py:validate_task_bindings`). It loads the config to do so, so
+a broken config fails this command too.
 
 `config validate` loads the five registries (`components`, `repos`,
 `projects`, `approvers`, `budgets`) against their schemas

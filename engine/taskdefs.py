@@ -1,8 +1,11 @@
 """Task-definition loader (§5.1, TE-4).
 
-Parses per-task task.yml files, schema-validates them, verifies that
-task-local skill/context references exist on disk, and cross-checks
-handoff.allowed targets against the loaded task library.
+Parses per-task task.yml files, schema-validates them, and verifies that
+task-local skill/context references exist on disk.
+
+There is no route to cross-check: a task no longer declares which tasks may
+follow it (the queue is the route, declared per run), so the library validator
+checks each task in isolation plus id uniqueness.
 """
 
 from __future__ import annotations
@@ -104,16 +107,14 @@ def validate_library(taskdefs: dict[str, dict]) -> list[str]:
     """Cross-task checks against an already-loaded library.
 
     Ids are unique by construction (dict keys); this also flags a taskdef
-    whose declared `id` doesn't match the key it's stored under. Every
-    handoff.allowed target must resolve to a loaded task id.
+    whose declared `id` doesn't match the key it's stored under. There are no
+    declared route edges left to resolve -- a queue entry's target is checked
+    against the loaded library at validation time instead
+    (`engine.handoff.validate_queue`), which is where an actual declaration
+    exists to check.
     """
     errors: list[str] = []
     for task_id, taskdef in taskdefs.items():
         if taskdef.get("id") != task_id:
             errors.append(f"{task_id}: id: declared id '{taskdef.get('id')}' does not match")
-        for target in taskdef.get("handoff", {}).get("allowed", []):
-            if target not in taskdefs:
-                errors.append(
-                    f"{task_id}: handoff.allowed: task '{target}' is not in the loaded library"
-                )
     return errors

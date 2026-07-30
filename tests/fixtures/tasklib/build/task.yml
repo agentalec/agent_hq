@@ -10,7 +10,3 @@ budget:
 outputs:
   artifacts:
     - impl/{ticket}.md
-handoff:
-  allowed:
-    - finalize
-  max: 1

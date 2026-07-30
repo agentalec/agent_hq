@@ -25,10 +25,6 @@ outputs:
   artifacts:
     - specs/{ticket}/qa.md
     - specs/{ticket}/screenshots/
-handoff:
-  allowed:
-    - finalize
-  max: 1
 budget:
   max_cost_usd: 10
   max_runtime_min: 60

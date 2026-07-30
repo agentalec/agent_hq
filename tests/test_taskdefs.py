@@ -48,13 +48,26 @@ def test_prompt_inlines_task_instructions_context_and_required_outputs():
 
 
 def test_schema_violation_rejected_with_clear_error(tmp_path):
-    taskdef = _minimal_taskdef(handoff={"allowed": ["other"], "max": -1})
+    taskdef = _minimal_taskdef(budget={"max_cost_usd": -1})
     _write_task(tmp_path / "bad", taskdef)
 
     with pytest.raises(TaskDefError) as excinfo:
         load_task(tmp_path / "bad", SCHEMAS_DIR)
 
-    assert any("max" in e for e in excinfo.value.errors)
+    assert any("max_cost_usd" in e or "-1" in e for e in excinfo.value.errors)
+
+
+def test_a_task_declaring_a_route_is_rejected(tmp_path):
+    """`handoff` is gone from the task schema: a task no longer declares which
+    tasks may follow it. A leftover block is a hard load error rather than a
+    silently ignored key, so a stale task.yml can't look like it still
+    constrains the route."""
+    _write_task(tmp_path / "stale", _minimal_taskdef(handoff={"allowed": ["x"], "max": 1}))
+
+    with pytest.raises(TaskDefError) as excinfo:
+        load_task(tmp_path / "stale", SCHEMAS_DIR)
+
+    assert any("handoff" in e for e in excinfo.value.errors)
 
 
 def test_gate_auto_approve_loads_and_is_typed(tmp_path):
@@ -92,21 +105,13 @@ def test_symbolic_context_refs_are_not_checked_for_existence(tmp_path):
     assert loaded["context"][0] == "capability-index@latest"
 
 
-def test_library_rejects_handoff_target_not_in_library(tmp_path):
-    task_a = _minimal_taskdef("task-a", handoff={"allowed": ["task-b"], "max": 1})
-    _write_task(tmp_path / "task-a", task_a)
-
-    taskdefs = load_all(tmp_path, SCHEMAS_DIR)
-    errors = validate_library(taskdefs)
-
-    assert any("task-b" in e for e in errors)
-
-
-def test_library_accepts_resolvable_handoff_targets(tmp_path):
-    task_a = _minimal_taskdef("task-a", handoff={"allowed": ["task-b"], "max": 1})
-    task_b = _minimal_taskdef("task-b")
-    _write_task(tmp_path / "task-a", task_a)
-    _write_task(tmp_path / "task-b", task_b)
+def test_library_validates_each_task_in_isolation(tmp_path):
+    """There are no declared route edges left to cross-check. A queue entry's
+    target is checked against the loaded library when a run actually declares
+    one (`engine.handoff.validate_queue`), which is the only place a real
+    target exists."""
+    _write_task(tmp_path / "task-a", _minimal_taskdef("task-a"))
+    _write_task(tmp_path / "task-b", _minimal_taskdef("task-b"))
 
     taskdefs = load_all(tmp_path, SCHEMAS_DIR)
     assert validate_library(taskdefs) == []

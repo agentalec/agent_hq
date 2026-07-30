@@ -5,8 +5,9 @@ against `schemas/task.schema.json`, plus whatever `prompts/`/`checklists/`
 skill files it references. There is no fixed chain and no task-name special
 case in the engine (`intake` and `finalize` used to be special-cased; neither
 is anymore -- see "Dispositions" below). A task joins the live graph the
-moment some other task's `handoff.allowed` names it and an accepted run
-proposes a handoff to it; nothing else "wires it in".
+moment some run's accepted `control.json` queues it; nothing else "wires it
+in". Since any task in the library is queueable, that means editing a prompt --
+there is no declared edge to add.
 
 ## Generic fields
 
@@ -45,7 +46,6 @@ ignored):
   "Artifact namespace".
 - `opens_pr` -- open (or reuse) a draft PR on the task's work branch on
   success, independent of any gate (`implement` sets this).
-- `handoff.allowed` / `handoff.max` -- see "Handoffs" below.
 - `tools` -- allowed tool names passed to the agent adapter.
 - `budget.max_cost_usd` / `max_runtime_min` / `retries` -- per-run caps; see
   "Budgets".
@@ -72,20 +72,21 @@ A task proposes its children by writing `.agent-hq/control.json` with
 outcome `"queue"` (see "Control outcomes" below); the task definition only
 constrains what's *allowed*:
 
-- `handoff.allowed` -- the list of task ids this task may queue. A declared
-  entry naming any other target is rejected
+- There is **no** per-task allowlist. Any task in the loaded library may be
+  queued by any run; a target that isn't a loaded task id is rejected
   (`engine.handoff.validate_queue`).
-- `handoff.max` -- the most entries one run may declare in a single
-  `control.json`. Most tasks are `max: 1` (a linear next step); `breakdown`
-  is `max: 2` -- the pilot's fan-out point, queueing one `implement` entry
-  per affected configured repo (`config/repos.yml`), each carrying that
+- `budgets.max_queue_length` -- the most entries one run may declare in a
+  single `control.json`. One global sanity bound rather than a per-task table:
+  a run cannot queue 500 tasks, but which tasks it queues is its own call.
+  Fan-out is a prompt decision -- the pilot's `spec` queues one `implement`
+  entry per affected configured repo (`config/repos.yml`), each carrying that
   repo in the entry's `repo` field.
 
 Validation is pure and total-rejection: `engine.handoff.validate_queue`
 checks the whole declaration against `schemas/control.schema.json`, then
 path containment on every artifact, then per-entry semantics (target in
-`handoff.allowed` and in the loaded library, `repo` if given is a configured
-repo, key uniqueness, total count `<= handoff.max`, and each artifact is in
+the loaded library, `repo` if given is a configured repo, key uniqueness,
+total count `<= budgets.max_queue_length`, and each artifact is in
 the run's **provenance set** -- its inherited `input_artifacts` union its own
 substituted `outputs.artifacts`, never an arbitrary worktree file). Any
 single violation rejects the *entire* set, not just the offending item.
@@ -118,7 +119,7 @@ schema-invalid means the run *fails* per its own retry budget, never
   An **empty** `queue` is how a run says "nothing further from me" — there is
   no separate `complete` outcome. This is what feeds queue-empty completion
   (see "Terminal-summary convention" below), and a task with no
-  `handoff.allowed` at all (e.g. `finalize`) always emits it.
+  prompt that queues anything (e.g. `finalize`) always emits it.
 
   A `queue` outcome may also remove pending work: `"cancel": ["<key>"]` drops
   named `QUEUED` entries, and `"cancel_pending": true` clears the whole
@@ -149,7 +150,7 @@ back to the ticket title).
 
 `engine.runner._assemble_prompt` injects this contract into every prompt
 automatically (the required outcome shapes, the `summary` convention, this
-task's own `handoff.allowed`/`max`, and the output path) -- a task never needs
+the queueable task list and `max_queue_length`, and the output path) -- a task never needs
 to spell this out itself, and it does not depend on the task including
 `constitution.md` in `context`.
 
@@ -308,7 +309,7 @@ a ticket has no `QUEUED`/`RUNNING`/`WAITING_GATE` run and no
 `pending_handoffs` left anywhere, but only actually closes the ticket if the
 **terminal run's own recorded artifacts** include the declared summary path
 `specs/{ticket}/summary.md` -- a reopened ticket can't complete off a prior
-lifecycle's stale summary. `finalize` is exactly this: no `handoff.allowed`,
+lifecycle's stale summary. `finalize` is exactly this: its prompt queues nothing,
 one declared output (`specs/{ticket}/summary.md`), always emits
 `{"outcome": "queue", "queue": []}`. Any task chain that wants queue-empty completion
 to land on a real "done" message should end the same way: declare the
@@ -321,7 +322,7 @@ no terminal action.
 - `agent-hq tasks validate` loads every `tasks/*/task.yml`
   (`engine.taskdefs.load_all`, schema + on-disk skill/context checks),
   cross-checks the library (`engine.taskdefs.validate_library`: every
-  `handoff.allowed` target resolves to a loaded task id), and checks every
+  ids are unique and self-consistent), and checks every
   task's declared `components` port against `components.yml`
   (`engine.config.validate_task_bindings`).
 - `agent-hq config validate` validates `config/*.yml` against
@@ -336,17 +337,17 @@ no terminal action.
 | Task | Status |
 |---|---|
 | intake | **Not a task.** Engine entry logic (`engine.runner.intake_ticket`) reads eligibility from `config.projects["intake"]`/`["public"]`/`["public_safe_label"]` and enqueues `config.projects["initial_task"]` (`spec` in the pilot config) with the root run's resolved repo. There is no `tasks/intake/` directory and no task-name special case for it. |
-| spec | Converted (wired). `handoff.allowed: [implement]`, gated (`spec-approval`) but currently `auto_approve: true` -- the checkpoint is declared and evented, decided by the engine rather than a product owner; staffing it is deleting that one line. The fan-out point in the minimal route: `handoff.max: 3`, one `implement` handoff per affected configured repo. |
-| arch-plan | Converted, defined, **unwired** -- its header names the activation edit (point `spec`'s `handoff.allowed` back at it). `handoff.allowed: [arch-approval, breakdown]`. |
-| arch-approval | Converted, defined, **unwired** (activated with `arch-plan`, its only in-edge). Confirms the plan artifacts, no changes; gated (`default`); `handoff.allowed: [breakdown]`. |
-| breakdown | Converted, defined, **unwired** (activated with the `arch-plan` chain). `handoff.max: 2`, one `implement` handoff per affected repo when wired. |
-| implement | Converted (wired). `opens_pr: true`; `handoff.allowed: [review]`. |
-| review | Converted (wired). `handoff.allowed: [implement, qa]` -- loops back to `implement` while blockers remain (prompt-capped at 3 rounds; on the cap it emits `complete` and the engine posts the accumulated `review.md` findings to the thread, parking awaiting-human with the PR left in draft), else hands to `qa`. Round memory is `review.md` forwarded around the loop as an input artifact. Every review round also reflects its latest-round findings onto the work-repo PR as a comment (`engine.engine.post_pr_comment`, in the credentialed collect phase -- the read-only agent can't, PD-5). |
+| spec | Routed through by the pilot's prompts. Gated (`spec-approval`) but currently `auto_approve: true` -- the checkpoint is declared and evented, decided by the engine rather than a product owner; staffing it is deleting that one line. Its prompt queues one `implement` entry per affected configured repo (the fan-out point), or nothing when the ticket needs no change. |
+| arch-plan | Defined; **no prompt queues it**. Nothing to activate beyond a prompt that names it -- any task in the library is queueable. |
+| arch-approval | Defined; **no prompt queues it**. Confirms the plan artifacts, no changes; gated (`default`). |
+| breakdown | Defined; **no prompt queues it**. Would queue one `implement` entry per affected repo. |
+| implement | Routed through. `opens_pr: true`; its prompt queues `review`. |
+| review | Routed through. Its prompt loops back to `implement` while blockers remain (prompt-capped at 3 rounds; on the cap it queues nothing and the engine posts the accumulated `review.md` findings to the thread, parking awaiting-human with the PR left in draft), else queues `qa`. Round memory is `review.md` forwarded around the loop as an input artifact. Every review round also reflects its latest-round findings onto the work-repo PR as a comment (`engine.engine.post_pr_comment`, in the credentialed collect phase -- the read-only agent can't, PD-5). |
 | finalize | Converted (wired). Terminal task: writes `summary.md`, always `complete`, feeds queue-empty completion (see above). No task-name special case; any task ending this way completes the same way. |
-| clinical | Converted, defined, **unwired** until an accepted handoff selects it -- its own header names the one-line activation edit (point `spec`'s `handoff.allowed` at it). Gated (`clinical-reviewers`, `default` adapter). |
+| clinical | Defined; **no prompt queues it**. Gated (`clinical-reviewers`, `default` adapter). |
 | poll | Converted, defined, **unwired** -- needs the P1 reaction-based `poll` adapter (`docs/roadmap.md`); no task currently hands off to it. |
-| docs | Converted, defined, **unwired** until an accepted handoff selects it (its header names the activation edit: point `qa`'s `handoff.allowed` at it). |
-| qa | Converted (wired). `handoff.allowed: [finalize]`, always -- `qa` reports, it never gates. `writes_code: false`, so the engine discards its work patch outright: everything it leaves in the worktree is scratch, and an instruction to keep scratch under `.agent-hq/` is advisory where discarding is not. Stands the app up with the work repo's own tooling inside the devcontainer and screenshots each acceptance criterion; it declares **no** `components` port, so the deferred `qa-env` binding (`docs/ports/qa-env.md`) is still not required. Screenshots are ledger artifacts under the **directory artifact** `specs/{ticket}/screenshots/` -- kept out of the work repo, which is for product code -- and collect rewrites `qa.md`'s relative image links to their state-branch URLs before posting it to the PR (`engine.runner._ledger_image_urls`). |
+| docs | Defined; **no prompt queues it** -- it belongs between `qa` and `finalize`, so `qa`'s prompt would name it. |
+| qa | Routed through. Its prompt always queues `finalize` -- `qa` reports, it never gates. `writes_code: false`, so the engine discards its work patch outright: everything it leaves in the worktree is scratch, and an instruction to keep scratch under `.agent-hq/` is advisory where discarding is not. Stands the app up with the work repo's own tooling inside the devcontainer and screenshots each acceptance criterion; it declares **no** `components` port, so the deferred `qa-env` binding (`docs/ports/qa-env.md`) is still not required. Screenshots are ledger artifacts under the **directory artifact** `specs/{ticket}/screenshots/` -- kept out of the work repo, which is for product code -- and collect rewrites `qa.md`'s relative image links to their state-branch URLs before posting it to the PR (`engine.runner._ledger_image_urls`). |
 
 None of the above is a name the engine special-cases; every row describes a
 task-graph state (wired vs. defined-but-unwired), not an engine code path.

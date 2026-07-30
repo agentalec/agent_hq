@@ -78,11 +78,19 @@ def validate_queue(
                 return [], reason
 
     # Pass 2: per-entry semantic checks.
-    handoff_cfg = taskdef.get("handoff", {})
-    allowed = set(handoff_cfg.get("allowed", []))
-    max_handoffs = handoff_cfg.get("max", 0)
-    if len(proposed) > max_handoffs:
-        return [], f"{len(proposed)} queue entries exceeds this task's handoff.max ({max_handoffs})"
+    #
+    # There is no per-task allowlist. Which task may follow which is the agent's
+    # call, recorded in the queue and revisable by any later run -- a static
+    # adjacency table across every task.yml was a route maintained by hand in
+    # eleven files, and the queue is the route now. What survives is a global
+    # sanity bound on one declaration, so a single run cannot queue 500 tasks.
+    # The rails against a bad route are `loop_guard.max_runs`, the budget caps,
+    # and the fact that removing queued work is explicit and audited.
+    max_entries = config.budgets.get("max_queue_length", 8)
+    if len(proposed) > max_entries:
+        return [], (
+            f"{len(proposed)} queue entries exceeds max_queue_length ({max_entries})"
+        )
 
     provenance = set(run.input_artifacts or [])
     provenance |= {
@@ -103,8 +111,6 @@ def validate_queue(
 
         if target not in taskdefs:
             return [], f"queue entry target '{target}' is not a known task"
-        if target not in allowed:
-            return [], f"queue entry target '{target}' is not in this task's handoff.allowed"
         if repo is not None and repo not in config.repos:
             return [], f"queue entry repo '{repo}' is not a configured repo"
         for rel_path in artifacts:
