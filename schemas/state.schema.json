@@ -88,6 +88,11 @@
         "parent_run_id": { "type": ["string", "null"] },
         "source_event_id": { "type": ["string", "null"] },
         "enqueue_index": { "type": ["integer", "null"] },
+        "queue_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "This run's position in the ticket's queue. Dispatch orders QUEUED runs by it, so queue position is stored rather than inferred from array order. Absent on runs written before it existed: readers fall back to the run's array index, which is exactly the order dispatch used then. A retry inherits the position of the attempt it replaces, so it resumes where that attempt sat rather than moving behind everything queued after it."
+        },
         "handoff_key": { "type": ["string", "null"] },
         "repo": { "type": ["string", "null"] },
         "input_artifacts": { "type": "array", "items": { "type": "string" } },

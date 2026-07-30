@@ -175,6 +175,10 @@ class TaskRun:
     parent_run_id: str | None = None
     source_event_id: str | None = None
     enqueue_index: int | None = None
+    # Queue position (schemas/state.schema.json queue_seq). Dispatch orders
+    # QUEUED runs by it; absent on runs written before it existed, where
+    # readers fall back to array index -- the order dispatch used then.
+    queue_seq: int | None = None
     handoff_key: str | None = None
     repo: str | None = None
     input_artifacts: list[str] | None = None
