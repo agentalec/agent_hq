@@ -297,6 +297,11 @@ button { font: inherit; cursor: pointer; }
   display: flex; flex-direction: column; gap: 2px;
   font-family: var(--font-mono); font-size: 11px; color: var(--muted-foreground);
 }
+/* Planned-then-dropped work. Italic rather than a colour that reads as an
+   error: a cancelled entry is a route decision, not a failure. */
+.step-note {
+  font-size: 11px; font-style: italic; color: var(--muted-foreground);
+}
 .attempt { display: flex; flex-direction: column; gap: 6px; padding: 9px 0 0; border-top: 1px solid var(--border); }
 .attempt-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-family: var(--font-mono); font-size: 11px; }
 .attempt-line .state { color: var(--tone); }

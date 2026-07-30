@@ -192,6 +192,135 @@
       ]
     },
     {
+      "ticket_id": "51",
+      "pinned_comment_id": 5100000001,
+      "status": "ACTIVE",
+      "block_reason": null,
+      "block_source": null,
+      "interrupted_run_id": null,
+      "work_repos": [
+        {
+          "repo": "agentalec/care_fe",
+          "branch": "agent-hq/51",
+          "base_branch": "develop",
+          "recorded_head": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+          "pr_ref": "agentalec/care_fe#412"
+        }
+      ],
+      "runs": [
+        {
+          "run_id": "51aa000000000001",
+          "task_id": "spec",
+          "task_version": 1,
+          "ticket_id": "51",
+          "state": "SUCCEEDED",
+          "attempt": 0,
+          "bindings": {
+            "tracker": "github-issues",
+            "agent-session": "copilot-cli",
+            "messaging": "github-comment",
+            "gate": "github-issue-comment"
+          },
+          "cost_usd": 0.42,
+          "tokens": 51200,
+          "usage_known": true,
+          "artifacts": [
+            "specs/51/spec.md"
+          ],
+          "chain_depth": 0,
+          "queue_seq": 0,
+          "repo": "agentalec/care_fe",
+          "source_event_id": "51:labeled:2026-07-30T09:00:00Z",
+          "enqueue_index": 0,
+          "attempt_started_at": "2026-07-30T09:02:00Z"
+        },
+        {
+          "run_id": "51bb000000000002",
+          "task_id": "implement",
+          "task_version": 1,
+          "ticket_id": "51",
+          "state": "SUCCEEDED",
+          "attempt": 0,
+          "bindings": {
+            "tracker": "github-issues",
+            "agent-session": "copilot-cli",
+            "messaging": "github-comment",
+            "gate": "github-issue-comment"
+          },
+          "cost_usd": 1.18,
+          "tokens": 143000,
+          "usage_known": true,
+          "artifacts": [
+            "specs/51/impl-notes.md"
+          ],
+          "chain_depth": 1,
+          "queue_seq": 1,
+          "repo": "agentalec/care_fe",
+          "parent_run_id": "51aa000000000001",
+          "handoff_key": "implement",
+          "input_from_run_id": "51aa000000000001",
+          "input_artifacts": [
+            "specs/51/spec.md"
+          ],
+          "attempt_started_at": "2026-07-30T09:31:00Z",
+          "pr_ref": "agentalec/care_fe#412"
+        },
+        {
+          "run_id": "51cc000000000003",
+          "task_id": "review",
+          "task_version": 1,
+          "ticket_id": "51",
+          "state": "RUNNING",
+          "attempt": 0,
+          "bindings": {
+            "tracker": "github-issues",
+            "agent-session": "copilot-cli",
+            "messaging": "github-comment",
+            "gate": "github-issue-comment"
+          },
+          "cost_usd": null,
+          "tokens": null,
+          "usage_known": false,
+          "artifacts": [],
+          "chain_depth": 1,
+          "queue_seq": 2,
+          "repo": "agentalec/care_fe",
+          "parent_run_id": "51aa000000000001",
+          "handoff_key": "review",
+          "input_from_run_id": "51bb000000000002",
+          "input_artifacts": [
+            "specs/51/spec.md",
+            "specs/51/impl-notes.md"
+          ],
+          "attempt_started_at": "2026-07-30T10:05:00Z",
+          "deadline": "2026-07-30T10:35:00Z"
+        },
+        {
+          "run_id": "51dd000000000004",
+          "task_id": "qa",
+          "task_version": 1,
+          "ticket_id": "51",
+          "state": "CANCELLED",
+          "attempt": 0,
+          "bindings": {
+            "tracker": "github-issues",
+            "agent-session": "copilot-cli",
+            "messaging": "github-comment",
+            "gate": "github-issue-comment"
+          },
+          "cost_usd": null,
+          "tokens": null,
+          "usage_known": false,
+          "artifacts": [],
+          "chain_depth": 1,
+          "queue_seq": 3,
+          "repo": "agentalec/care_fe",
+          "parent_run_id": "51aa000000000001",
+          "handoff_key": "qa"
+        }
+      ]
+    },
+    {
       "ticket_id": "44",
       "status": "ACTIVE",
       "work_repos": [

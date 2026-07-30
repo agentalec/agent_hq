@@ -29,11 +29,16 @@ Inspect one ticket (or all tickets) from the `agent-hq-state` branch, read-only,
    `runs` is the single source of truth — there is no separate stored queue/current/history. Derive:
    - **queue**: runs with `state: QUEUED`, ordered by `queue_seq` — the stored queue position dispatch uses. A run written before `queue_seq` existed has none; fall back to its array index for those, which is the order dispatch used then. A retry inherits the position of the attempt it replaced, so it can sort *earlier* than a run appended after that attempt failed — array order alone will mislead you here.
    - **current**: the one run in `RUNNING` or `WAITING_GATE`.
+   - **cancelled**: runs in `CANCELLED` — queue entries a later run removed
+     before they ran. Report them; the `run.cancelled` event's `source` names
+     which run cancelled it, and a route being revised is usually the answer to
+     "why isn't this doing what I expected". Never deleted, so they stay in
+     `runs` as audit and don't count against `loop_guard.max_runs`.
    - **history**: terminal runs — `SUCCEEDED` / `FAILED` / `BLOCKED`.
 
 4. Report:
    - **Ticket status**: `ACTIVE` / `BLOCKED` / `DONE`; if `BLOCKED`, include `block_reason` and `block_source`.
-   - **Current run**: `task_id`, `attempt`, `deadline`, and gate fields (`gate_requested_at`, `gate_request_id`).
+   - **Current run**: `task_id`, `attempt`, `deadline`, and gate fields (`gate_requested_at`, `gate_request_id`). Also `input_from_run_id` when set — the run whose output this one read, which is NOT `parent_run_id` (who enqueued it) whenever one run declared several entries.
    - **If `WAITING_GATE`**: list the run's `pending_handoffs` (each `key`, `target_task`, `reason`), then give the exact unblock comment to post on the engine-repo issue:
      - `/agent-hq approve <run-id>`
      - `/agent-hq request-changes <run-id> <reason>`

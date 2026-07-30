@@ -140,9 +140,12 @@ Four properties the renderer must handle:
 
 1. **`chain_depth` is not unique and not a row index.** Five runs sit at
    depth 7 and two at depth 8.
-2. **Array order is enqueue order, not depth order.** Run 11 (depth 7) lands
-   after run 10 (depth 8). Sorting by array index and sorting by depth give
-   different pictures; both are legitimate and neither is a timeline.
+2. **Order comes from `queue_seq`, not array order and not depth.** The stored
+   queue position is authoritative. Array order misplaces a retry (it inherits
+   the position of the attempt it replaces, so it can precede runs appended
+   after that attempt failed), and depth ties across every entry one run
+   declared at once. Runs predating `queue_seq` fall back to array index, which
+   is the order dispatch gave them.
 3. **A logical step is `(parent_run_id, handoff_key)`; `attempt` is the retry
    axis within it.** Runs 7–9 and 11–12 are one qa step with five attempts,
    not five steps.
@@ -151,7 +154,11 @@ Four properties the renderer must handle:
    fixed pipeline — the route is whatever each agent's control document
    asked for, so the app must not assume a known task sequence.
 
-Edges come from `parent_run_id`. The root run has none.
+Edges come from `parent_run_id` (who *enqueued* the run); the root run has
+none. Which run's output a run *read* is `input_from_run_id`, and the two differ
+whenever one run declared several entries. A run in state `CANCELLED` was
+removed from the queue before it ran -- shown, never hidden, since a route
+changing is what the ledger is for.
 
 ### Artifacts
 
