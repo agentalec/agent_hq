@@ -341,6 +341,33 @@ def test_intake_ineligible_blocks_with_pinned_reasons(config, taskdefs, store):
     assert state["status"] == "BLOCKED"
     assert state["pinned_comment_id"] == 999
     assert tracker.pinned and "too short" in tracker.pinned[0][1]
+    # The block records WHY in state, not only in the pinned comment prose.
+    assert "too short" in state["block_reason"]
+    assert state["block_source"] == "intake"
+    blocked = [e for e in store.read_events("7") if e["kind"] == "intake.blocked"]
+    assert blocked and blocked[0]["source"] == "intake:evt-1"
+
+
+def test_re_admitting_a_blocked_ticket_clears_the_block_fields(config, taskdefs, store):
+    """Regression: `set_ticket` is a bare dict.update(), so intake's success
+    path had to null the lifecycle-block fields explicitly. Without it a
+    re-labelled ticket ran ACTIVE while still reporting the old reason."""
+    blocked_tracker = FakeTracker(_details(body="too short"))
+    assert intake_ticket(
+        "7", "evt-1", config, taskdefs, store, _adapters(tracker=blocked_tracker)
+    ) == "blocked"
+    assert store.read_state("7")["block_reason"]
+
+    # Same ticket, now eligible — re-admitted on a fresh intake event.
+    assert intake_ticket(
+        "7", "evt-2", config, taskdefs, store, _adapters(tracker=FakeTracker(_details()))
+    ) == "enqueued"
+
+    state = store.read_state("7")
+    assert state["status"] == "ACTIVE"
+    assert state["block_reason"] is None
+    assert state["block_source"] is None
+    assert state["interrupted_run_id"] is None
 
 
 def test_intake_no_product_area_blocks(config, taskdefs, store):
@@ -897,6 +924,9 @@ def test_collect_auto_approved_gate_never_waits(config, taskdefs, store, tmp_pat
     assert len(decided) == 1
     assert "auto-approved by task config" in decided[0]["detail"]
     assert "product-owners" in decided[0]["detail"]
+    # "No human approved this gate" is itself the audit fact, so it is stated
+    # rather than left absent -- absence means mechanical engine bookkeeping.
+    assert decided[0]["actor"] == "engine"
 
 
 def test_post_pr_comment_targets_the_work_repo_pr(config):
@@ -1542,6 +1572,12 @@ def test_sweep_pr_request_changes_from_an_approver_queues_rework(config, taskdef
     # CHANGES_REQUESTED path writes.
     assert _rework_comments(store, "7", queued[0]["run_id"]) == "@example-alice: fix the N+1"
     assert state["work_repos"][0]["comments_polled_at"] == "2026-07-18T08:00:00Z"
+    # Who caused this run, and what carried the cause, are structured fields --
+    # answerable without parsing the joined `detail` prose.
+    rework = [e for e in store.read_events("7") if e["kind"] == "run.rework"]
+    assert len(rework) == 1
+    assert rework[0]["actor"] == "example-alice"
+    assert rework[0]["source"] == "pr-comment:101"
 
 
 def test_sweep_pr_command_from_a_non_approver_is_ignored(config, taskdefs, store, tmp_path):

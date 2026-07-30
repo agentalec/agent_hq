@@ -5,6 +5,7 @@ from test_state import _clone_worktree, _make_origin
 from engine.config import Config
 from engine.engine import (
     STATUS_LABELS,
+    _handle_failure,
     apply_handoffs,
     check_budget,
     check_concurrency,
@@ -24,6 +25,23 @@ def _store(tmp_path: Path) -> tuple[GitJsonStateStore, Path]:
     origin = _make_origin(tmp_path)
     worktree = _clone_worktree(tmp_path, origin, "wt")
     return GitJsonStateStore(worktree), worktree
+
+
+def _noop_adapters():
+    """Minimal adapter_fn covering the post-write side effects a block path
+    makes: the status label (tracker) and the escalation comment (messaging)."""
+    class _Tracker:
+        def fetch_ticket(self, ticket_id):
+            return TicketDetails(ticket_id=ticket_id, title="t", body="b", labels=[])
+
+        def set_status_labels(self, ticket_id, status, labels):
+            pass
+
+    class _Messaging:
+        def notify(self, target, message, attachments, event_id):
+            pass
+
+    return lambda port, adapter, **kw: _Tracker() if port == "tracker" else _Messaging()
 
 
 def test_enqueue_is_idempotent(tmp_path):
@@ -203,6 +221,43 @@ def test_apply_handoffs_rejects_batch_that_would_exceed_max_runs(tmp_path):
     store.write(try_apply)
     assert result["reason"] is None
     assert len(result["applied"]) == 2
+
+
+def test_engine_side_block_records_its_reason_in_state(tmp_path):
+    """Regression: `_block_ticket` used to set only `status="BLOCKED"` and drop
+    the `reason` it was handed, so every engine-side block (gate rejected /
+    expired, retries exhausted, unknown spend, handoff-apply failure, PR
+    feedback over budget) left `block_reason` null and the dashboard rendered
+    "BLOCKED" with no reason. Driven here through `_handle_failure`'s
+    retries-exhausted branch."""
+    store, _ = _store(tmp_path)
+    config = Config(
+        components={"tracker": {"adapter": "fake"}, "messaging": {"adapter": "fake"}},
+        repos={}, projects={"engine_repo": "o/engine"},
+        approvers={"groups": {"escalation": {"members": ["example-carol"]}}},
+        budgets={"loop_guard": {"max_runs": 25, "max_depth": 12}, "ticket_cap_usd": 1000.0},
+    )
+    taskdef = {"id": "build", "version": 1, "budget": {"retries": 0, "max_cost_usd": 100.0}}
+    run = {
+        "run_id": "r1", "task_id": "build", "ticket_id": "ticket-1", "chain_depth": 0,
+        "bindings": {}, "state": "FAILED", "task_version": 1, "attempt": 0,
+        "cost_usd": 0.5, "tokens": 10, "usage_known": True, "artifacts": [],
+    }
+    store.write(lambda txn: (
+        txn.set_ticket("ticket-1", status="ACTIVE", pinned_comment_id=None),
+        txn.put_run("ticket-1", run),
+    ))
+
+    _handle_failure(
+        store, config, {"build": taskdef}, taskdef, "ticket-1", run,
+        _noop_adapters(), block_on_unknown_usage=True,
+    )
+
+    state = store.read_state("ticket-1")
+    assert state["status"] == "BLOCKED"
+    assert state["block_reason"] == "retries exhausted"
+    assert state["block_source"] == "engine"
+    assert state["interrupted_run_id"] == "r1"
 
 
 def test_dispatch_does_not_block_a_queued_run_exactly_at_max_runs(tmp_path):

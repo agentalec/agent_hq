@@ -1088,6 +1088,9 @@ def _collect_success(
                         f"auto-approved by task config (would have asked "
                         f"{gate_entry.get('approvers')})"
                     ),
+                    # Stated, not absent: "no human approved this gate" is
+                    # itself the thing an audit needs to be able to see.
+                    actor="engine",
                 ).to_dict(),
             )
 
@@ -1236,7 +1239,8 @@ def intake_ticket(issue_ref: str, event_key: str, config, taskdefs, store, adapt
         pinned_id = tracker.upsert_pinned_comment(ticket_id, body, event_id)
         store.write(
             lambda txn: (
-                txn.set_ticket(ticket_id, status="BLOCKED", pinned_comment_id=pinned_id),
+                txn.set_ticket(ticket_id, pinned_comment_id=pinned_id),
+                txn.set_block(ticket_id, reason="; ".join(reasons), source="intake"),
                 txn.append_event(
                     ticket_id,
                     Event(
@@ -1245,6 +1249,7 @@ def intake_ticket(issue_ref: str, event_key: str, config, taskdefs, store, adapt
                         ticket_id=ticket_id,
                         run_id="",
                         detail="; ".join(reasons),
+                        source=event_id,
                     ).to_dict(),
                 ),
             )
@@ -1260,7 +1265,12 @@ def intake_ticket(issue_ref: str, event_key: str, config, taskdefs, store, adapt
         pinned_id = tracker.upsert_pinned_comment(ticket_id, body, event_id)
         store.write(
             lambda txn: (
-                txn.set_ticket(ticket_id, status="BLOCKED", pinned_comment_id=pinned_id),
+                txn.set_ticket(ticket_id, pinned_comment_id=pinned_id),
+                txn.set_block(
+                    ticket_id,
+                    reason="prompt-injection pattern detected in ticket text",
+                    source="intake",
+                ),
                 txn.append_event(
                     ticket_id,
                     Event(
@@ -1269,6 +1279,7 @@ def intake_ticket(issue_ref: str, event_key: str, config, taskdefs, store, adapt
                         ticket_id=ticket_id,
                         run_id="",
                         detail="prompt-injection pattern detected in ticket text",
+                        source=event_id,
                     ).to_dict(),
                 ),
             )
@@ -1278,8 +1289,16 @@ def intake_ticket(issue_ref: str, event_key: str, config, taskdefs, store, adapt
     pinned_id = tracker.upsert_pinned_comment(
         ticket_id, "Accepted by agent-hq; work has been queued.", event_id
     )
+    # Re-admission clears the lifecycle block. `set_ticket` is a bare
+    # dict.update(), so without nulling these a ticket blocked at intake (or
+    # by a task) and then re-labelled would run ACTIVE while still carrying
+    # the old `block_reason` -- and the dashboard and `hq-ticket` would report
+    # a reason for a ticket that is no longer blocked.
     store.write(
-        lambda txn: txn.set_ticket(ticket_id, status="ACTIVE", pinned_comment_id=pinned_id)
+        lambda txn: txn.set_ticket(
+            ticket_id, status="ACTIVE", pinned_comment_id=pinned_id,
+            block_reason=None, block_source=None, interrupted_run_id=None,
+        )
     )
     eng.set_status_label(config, adapter_fn, ticket_id, "ACTIVE")
 
