@@ -105,15 +105,49 @@ Near-term, in rough order:
    the library; a gate that should be automatic in a pilot and staffed in
    production needs the switch in `config/`, not in `tasks/`.
 
-1. Wire the staged tasks that already have definitions — `arch-plan`,
+1. **Explicit ticket queue + issue-thread control plane.** A ticket's route
+   becomes a stored, ordered queue (runs in `QUEUED`, ordered by `queue_seq`)
+   that any run may revise at handoff, rather than a one-hop `handoff` append
+   constrained by a per-task `allowed` list. A comment on the engine issue
+   becomes a first-class queue operation (insert at head), which is also what
+   finally gives `BLOCKED` an exit — today nothing in the engine clears it
+   (there is no `clear_block`), so the only routes out are a full restart via
+   re-label or hand-editing the state branch. Implements the "retains the
+   queue and pending gates" semantics already specified for hardening Tasks
+   14/16/18 (`docs/architecture.md` Lifecycle) rather than adding a path
+   beside it.
+
+   Deletes, rather than adds: `handoff.allowed`/`max` from all 11 `task.yml`
+   files, two of three control outcomes (`handoff` and `complete` collapse
+   into `queue`), the `summary.md` and `review.md` filename conventions in
+   `_complete_if_queue_empty`, and `loop_guard.max_depth` (measured on the
+   pilot's own tickets, depth is `max_runs` minus retries — the same axis).
+   Adds `actor`/`source` to `schemas/event.schema.json`, which today records
+   *what* happened but never *who* caused it.
+
+   **Sequenced first because it changes how #2 is done:** the staged tasks'
+   activation edits are `handoff.allowed` edits, and that field does not
+   survive this. Wiring them afterwards means naming them in a queue
+   declaration instead.
+
+   Open question to settle when this is picked up: whether it supersedes #3
+   (`poll` / `github-issue-reactions`) — a comment thread that routes work
+   covers "ask the humans something" without a reactions adapter.
+
+2. Wire the staged tasks that already have definitions — `arch-plan`,
    `arch-approval`, `breakdown` (each `task.yml` header names its activation
-   edit), then `clinical` / `poll` / `docs`.
-2. `github-issue-reactions` (poll) adapter — the blocker for `poll`. The
+   edit), then `clinical` / `poll` / `docs`. See #1: the activation mechanism
+   changes if #1 lands first.
+3. `github-issue-reactions` (poll) adapter — the blocker for `poll`. The
    `docker-compose` qa-env adapter stays deferred: `qa` ships without it, and
    only a stack the devcontainer can't stand up would justify restoring it.
-3. Multi-repo `implement` fan-out + input-join (`parallel_ok`).
-4. Ops alerts — run failures and gates past half-timeout, via messaging.
-5. GitHub App auth replacing the pilot PAT — before the first multi-repo
+4. Multi-repo `implement` fan-out + input-join (`parallel_ok`). Carries a
+   known limitation that must be fixed *with* it, not after:
+   `loop_guard.max_runs` counts every run on a ticket regardless of target
+   repo, so legitimate fan-out work trips a cap tuned for a single-repo linear
+   route (`docs/roadmap.md` §A).
+5. Ops alerts — run failures and gates past half-timeout, via messaging.
+6. GitHub App auth replacing the pilot PAT — before the first multi-repo
    production pilot.
 
 Everything else — the full deferred backlog with its restore trigger per
