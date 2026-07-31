@@ -15,3 +15,4 @@
 {"event_id": "def8efb752ecfdec:collected", "kind": "run.collected", "ticket_id": "20", "run_id": "def8efb752ecfdec", "tokens": 1010300, "cost_usd": 0.562}
 {"event_id": "def8efb752ecfdec:failed", "kind": "run.failed", "ticket_id": "20", "run_id": "def8efb752ecfdec", "state": "FAILED"}
 {"event_id": "def8efb752ecfdec:handoff_rejected", "kind": "handoff.rejected", "ticket_id": "20", "run_id": "def8efb752ecfdec", "detail": "control.json schema violation: <root>: 'outcome' is a required property"}
+{"event_id": "def8efb752ecfdec:blocked", "kind": "ticket.blocked", "ticket_id": "20", "run_id": "def8efb752ecfdec", "detail": "retries exhausted"}
