@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-31T12:32:27Z",
+  "generated_at": "2026-07-31T12:32:30Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -718,6 +718,23 @@
           ],
           "output_commit": "06b31e605d7e6e230cdb3e9f1617f586c6350429",
           "pr_ref": "agentalec/care_fe#1"
+        },
+        {
+          "run_id": "58530fb88aa61bd0",
+          "task_id": "spec",
+          "task_version": 1,
+          "ticket_id": "11",
+          "state": "QUEUED",
+          "attempt": 0,
+          "bindings": {},
+          "cost_usd": null,
+          "tokens": null,
+          "usage_known": false,
+          "artifacts": [],
+          "chain_depth": 0,
+          "source_event_id": "11:labeled:2026-07-31T12:32:07Z",
+          "enqueue_index": 0,
+          "queue_seq": 22
         }
       ],
       "work_repos": [
