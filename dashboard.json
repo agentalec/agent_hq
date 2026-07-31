@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-31T11:10:21Z",
+  "generated_at": "2026-07-31T11:10:43Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -1281,7 +1281,7 @@
           "pr_ref": null
         }
       ],
-      "comments_polled_at": "2026-07-31T11:06:11Z",
+      "comments_polled_at": "2026-07-31T11:10:23Z",
       "block_reason": "queue ran dry after `spec` without reaching `finalize`",
       "block_source": "engine",
       "interrupted_run_id": "526e764dc267a0c9"
