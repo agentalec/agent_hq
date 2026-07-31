@@ -68,3 +68,67 @@ def test_engine_repo_is_configured():
     match = re.search(r'name="agent-hq:engine-repo"\s+content="([^"]*)"', html)
     assert match, "index.html must carry the agent-hq:engine-repo meta tag"
     assert re.fullmatch(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+", match.group(1))
+
+
+def test_run_chain_orders_by_queue_position_not_array_or_depth():
+    """`queue_seq` is the queue's order, and the chain view has to use it.
+
+    Depth stopped being an ordering axis once one run could declare several
+    entries -- they share the declaring run's depth + 1, so every comparison
+    tied and the tiebreak decided the order. Array order is wrong for a
+    different reason: a retry inherits the position of the attempt it replaces,
+    so it can belong EARLIER than a run appended after that attempt failed.
+
+    Source-level, like the other rules here -- the dashboard is deliberately
+    testable without a JS runtime.
+    """
+    code = _code(DASHBOARD / "app.js")
+    assert "queue_seq" in code, "the chain view must read queue_seq"
+    assert re.search(r"order\.sort\(.*?a\.pos\s*-\s*b\.pos", code, re.DOTALL), (
+        "steps() must sort by queue position"
+    )
+    assert "firstIndex" not in code, (
+        "array-appearance order is no longer a valid tiebreak -- a retry can sit "
+        "earlier in the queue than a run appended after it"
+    )
+
+
+def test_cancelled_entries_are_rendered_as_a_distinct_state():
+    """A cancelled entry is planned-then-dropped work, and the only place the
+    ledger shows a route CHANGING rather than progressing. It must not fall
+    through to the generic muted default with no explanation."""
+    code = _code(DASHBOARD / "app.js")
+    assert "CANCELLED" in code, "the chain view must know the CANCELLED state"
+    assert "cancelled before it ran" in code
+    assert ".step-note" in (DASHBOARD / "app.css").read_text()
+
+
+def test_fixture_exercises_the_queue_fields():
+    """The fixture is what a developer sees on `localhost` (README), so it has
+    to actually contain the shapes the new rendering exists for -- otherwise
+    the local page silently stops covering them."""
+    import json
+
+    tickets = json.loads((DASHBOARD / "fixture.json").read_text())["tickets"]
+    runs = [r for t in tickets for r in t.get("runs", [])]
+
+    assert any("queue_seq" in r for r in runs), "no run carries queue_seq"
+    assert any(r.get("state") == "CANCELLED" for r in runs), "no cancelled entry"
+    # The whole point of the split: whoever enqueued a run need not be whose
+    # output it read.
+    split = [
+        r for r in runs
+        if r.get("input_from_run_id") and r["input_from_run_id"] != r.get("parent_run_id")
+    ]
+    assert split, "no run where input_from_run_id differs from parent_run_id"
+    # A pre-declared queue: several entries from one enqueuer at one depth,
+    # distinguished only by queue_seq.
+    by_parent: dict[str, list[dict]] = {}
+    for r in runs:
+        if r.get("parent_run_id"):
+            by_parent.setdefault(r["parent_run_id"], []).append(r)
+    assert any(
+        len({r["queue_seq"] for r in group if "queue_seq" in r}) > 1
+        and len({r.get("chain_depth") for r in group}) == 1
+        for group in by_parent.values()
+    ), "no ticket shows a multi-entry queue declared by one run"
