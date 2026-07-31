@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-31T11:12:33Z",
+  "generated_at": "2026-07-31T11:12:40Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -317,7 +317,7 @@
           "task_id": "spec",
           "task_version": 1,
           "ticket_id": "11",
-          "state": "RUNNING",
+          "state": "SUCCEEDED",
           "attempt": 0,
           "bindings": {
             "tracker": "github-issues",
@@ -328,7 +328,9 @@
           "cost_usd": 0.189,
           "tokens": 257300,
           "usage_known": true,
-          "artifacts": [],
+          "artifacts": [
+            "specs/11/spec.md"
+          ],
           "chain_depth": 0,
           "source_event_id": "11:labeled:2026-07-31T11:08:25Z",
           "enqueue_index": 0,
@@ -338,6 +340,34 @@
           "attempt_started_at": "2026-07-31T11:09:33Z",
           "base_commit": "6819a4f7730935bbb053d553c44426313f17fc43",
           "input_from_run_id": "3c1a6da726192005",
+          "input_artifacts": [
+            "specs/11/spec.md"
+          ],
+          "output_commit": "6819a4f7730935bbb053d553c44426313f17fc43",
+          "pr_ref": "agentalec/care_fe#1"
+        },
+        {
+          "run_id": "1fd46895ed42efff",
+          "task_id": "arch-plan",
+          "task_version": 1,
+          "ticket_id": "11",
+          "state": "QUEUED",
+          "attempt": 0,
+          "bindings": {
+            "tracker": "github-issues",
+            "agent-session": "copilot-cli",
+            "messaging": "github-comment",
+            "gate": "github-issue-comment"
+          },
+          "cost_usd": null,
+          "tokens": null,
+          "usage_known": false,
+          "artifacts": [],
+          "chain_depth": 1,
+          "parent_run_id": "a87459ad6005560e",
+          "queue_seq": 11,
+          "handoff_key": "arch-plan-care-fe",
+          "repo": "agentalec/care_fe",
           "input_artifacts": [
             "specs/11/spec.md"
           ]

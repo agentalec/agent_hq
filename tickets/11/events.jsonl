@@ -49,3 +49,8 @@
 {"event_id": "3c1a6da726192005:blocked", "kind": "ticket.blocked", "ticket_id": "11", "run_id": "3c1a6da726192005", "detail": "queue ran dry after `spec` without reaching `finalize`"}
 {"event_id": "a87459ad6005560e:queued", "kind": "run.queued", "ticket_id": "11", "run_id": "a87459ad6005560e", "task_id": "spec", "task_version": 1, "state": "QUEUED", "bindings": {}}
 {"event_id": "a87459ad6005560e:collected", "kind": "run.collected", "ticket_id": "11", "run_id": "a87459ad6005560e", "tokens": 257300, "cost_usd": 0.189}
+{"event_id": "a87459ad6005560e:auto_approval", "kind": "gate.decided", "ticket_id": "11", "run_id": "a87459ad6005560e", "detail": "auto-approved by task config (would have asked product-owners)", "actor": "engine"}
+{"event_id": "a87459ad6005560e:arch-plan-care-fe:proposed", "kind": "handoff.proposed", "ticket_id": "11", "run_id": "a87459ad6005560e", "detail": "Spec approved; producing architecture plan and classification for frontend patient age display changes"}
+{"event_id": "1fd46895ed42efff:queued", "kind": "run.queued", "ticket_id": "11", "run_id": "1fd46895ed42efff", "task_id": "arch-plan", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment", "gate": "github-issue-comment"}}
+{"event_id": "a87459ad6005560e:arch-plan-care-fe:accepted", "kind": "handoff.accepted", "ticket_id": "11", "run_id": "a87459ad6005560e", "detail": "Spec approved; producing architecture plan and classification for frontend patient age display changes"}
+{"event_id": "a87459ad6005560e:succeeded", "kind": "run.succeeded", "ticket_id": "11", "run_id": "a87459ad6005560e", "state": "SUCCEEDED", "artifacts": ["specs/11/spec.md"]}
