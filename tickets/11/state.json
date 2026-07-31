@@ -403,7 +403,9 @@
         "specs/11/plan.md"
       ],
       "deadline": "2026-07-31T11:47:40Z",
-      "attempt_started_at": "2026-07-31T11:17:40Z"
+      "attempt_started_at": "2026-07-31T11:17:40Z",
+      "base_commit": "6819a4f7730935bbb053d553c44426313f17fc43",
+      "input_from_run_id": "1fd46895ed42efff"
     }
   ],
   "work_repos": [
