@@ -291,7 +291,7 @@ config and the notes file.
 Per-task `budget.max_cost_usd`/`max_runtime_min`/`retries` bound one run.
 Ticket-wide caps live in `config/budgets.yml`: `ticket_cap_usd` (total spend
 across every run on a ticket), `in_flight_cap` (global concurrent-ticket
-cap), and `loop_guard.max_runs`/`max_depth` (runaway-handoff protection --
+cap), and `loop_guard.max_runs` (runaway protection --
 total run count and causal chain depth). All four are checked before a
 handoff set is applied (`engine.engine.apply_queue`) and before a queued
 run is dispatched, so a task cannot out-run these limits by proposing more

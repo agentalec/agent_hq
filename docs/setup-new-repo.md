@@ -119,9 +119,11 @@ checks shape against `schemas/`, not that the values are real — see
   ([architecture.md](architecture.md) deviation 9). It binds again under
   `claude-code-headless`.
 - `in_flight_cap` (3): max concurrently active tickets.
-- `loop_guard.max_runs` (25) / `max_depth` (12): per-ticket run-count and
-  handoff-chain-depth ceilings — the guards that still bound runaway work
-  when USD metering doesn't.
+- `loop_guard.max_runs` (25): the per-ticket run-count ceiling, and the only
+  structural one — `CANCELLED` runs are excluded since they never executed, and
+  there is deliberately no depth ceiling (see `check_loop_guard`). Together
+  with `budget.retries`, the in-flight cap, and the per-run deadline, this is
+  what still bounds runaway work when USD metering doesn't.
 
 ## 4. Secrets and variables
 

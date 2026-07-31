@@ -249,21 +249,27 @@ def check_claim_active(ticket_doc: dict | None, run_id: str) -> bool:
 
 
 def check_loop_guard(
-    state_doc: dict, max_runs: int = 25, max_depth: int = 12
+    state_doc: dict, max_runs: int = 25
 ) -> tuple[bool, list[dict] | None]:
-    """True (ok, None) unless the ticket has too many runs or too deep a
-    causal chain, in which case (False, trace) with trace being every run's
-    run_id/task_id/parent_run_id for the BLOCKED reason.
+    """True (ok, None) unless the ticket has too many runs, in which case
+    (False, trace) with trace being every run's run_id/task_id/parent_run_id
+    for the BLOCKED reason.
 
     CANCELLED runs are excluded from the count: they never executed and spent
     nothing, so a route revised a few times must not exhaust the ticket's run
-    ceiling with work that never happened. They stay in `runs` as audit."""
+    ceiling with work that never happened. They stay in `runs` as audit.
+
+    There is no depth ceiling. `chain_depth` is still recorded as provenance,
+    but it stopped measuring anything a runaway could exhaust: a pre-declared
+    queue puts every entry at the declaring run's depth + 1, so a ten-step
+    route is depth 1. Even before that it was redundant -- measured on the
+    pilot's own tickets, depth was `max_runs` minus retries (the same axis),
+    and `budget.retries` already caps retries per task."""
     runs = [
         r for r in state_doc.get("runs", []) if r.get("state") != RunState.CANCELLED.value
     ]
-    max_chain_depth = max((r.get("chain_depth", 0) for r in runs), default=0)
     # Guard runs BEFORE an enqueue, so `<` makes max_runs the true ceiling.
-    if len(runs) < max_runs and max_chain_depth < max_depth:
+    if len(runs) < max_runs:
         return True, None
     trace = [
         {"run_id": r["run_id"], "task_id": r["task_id"], "parent_run_id": r.get("parent_run_id")}
@@ -569,12 +575,13 @@ def apply_queue(
     # every accepted handoff in this batch lands at the SAME child depth
     # (source_run's chain_depth + 1), which the current runs' own recorded
     # depths don't yet reflect.
-    existing_runs = ticket_doc.get("runs", [])
-    existing_max_depth = max((r.get("chain_depth", 0) for r in existing_runs), default=0)
+    existing_runs = [
+        r for r in ticket_doc.get("runs", [])
+        if r.get("state") != RunState.CANCELLED.value
+    ]
     projected_runs = len(existing_runs) + len(accepted)
-    projected_depth = max(existing_max_depth, source_run["chain_depth"] + 1)
-    if projected_runs > loop_cfg["max_runs"] or projected_depth > loop_cfg["max_depth"]:
-        return [], "loop guard would trip applying this handoff set"
+    if projected_runs > loop_cfg["max_runs"]:
+        return [], "loop guard would trip applying this queue declaration"
     for h in accepted:
         budget = taskdefs[h.target_task]["budget"]
         verdict = check_budget(ticket_doc, budget, config.budgets["ticket_cap_usd"])
@@ -1135,7 +1142,6 @@ def poll_pr_feedback(store, config, taskdefs, adapter_fn, ticket_id: str, state:
             ok, _trace = check_loop_guard(
                 doc,
                 max_runs=config.budgets["loop_guard"]["max_runs"],
-                max_depth=config.budgets["loop_guard"]["max_depth"],
             )
             verdict = check_budget(doc, taskdef["budget"], config.budgets["ticket_cap_usd"])
             if not ok or verdict["over_ticket_cap"] or verdict["insufficient_headroom"]:
@@ -1325,17 +1331,16 @@ def dispatch(
 
             # Current-state check, not the prospective (pre-insertion) one
             # `check_loop_guard` implements: this run was already accepted
-            # onto the ticket (possibly exactly AT max_runs/max_depth), so
+            # onto the ticket (possibly exactly AT max_runs), so
             # only reject dispatch if the ticket is ALREADY beyond the
             # configured limit -- reusing the enqueue-time "<" ceiling here
             # would block a legitimately-queued boundary run before it ever
             # executes.
-            runs = state.get("runs", [])
-            max_chain_depth = max((r.get("chain_depth", 0) for r in runs), default=0)
-            if (
-                len(runs) > budgets["loop_guard"]["max_runs"]
-                or max_chain_depth > budgets["loop_guard"]["max_depth"]
-            ):
+            runs = [
+                r for r in state.get("runs", [])
+                if r.get("state") != RunState.CANCELLED.value
+            ]
+            if len(runs) > budgets["loop_guard"]["max_runs"]:
                 _block_ticket(store, config, adapter_fn, ticket_id, run_id, "loop guard tripped")
                 break
 
