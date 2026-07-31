@@ -103,3 +103,4 @@
 {"event_id": "454a9eccec948dcf:succeeded", "kind": "run.succeeded", "ticket_id": "11", "run_id": "454a9eccec948dcf", "state": "SUCCEEDED", "artifacts": ["specs/11/summary.md"]}
 {"event_id": "d224211ea1c91f04:queued", "kind": "run.queued", "ticket_id": "11", "run_id": "d224211ea1c91f04", "task_id": "spec", "task_version": 1, "state": "QUEUED", "bindings": {}}
 {"event_id": "d224211ea1c91f04:collected", "kind": "run.collected", "ticket_id": "11", "run_id": "d224211ea1c91f04", "tokens": 348700, "cost_usd": 0.273}
+{"event_id": "d224211ea1c91f04:succeeded", "kind": "run.succeeded", "ticket_id": "11", "run_id": "d224211ea1c91f04", "state": "SUCCEEDED", "artifacts": ["specs/11/spec.md"]}
