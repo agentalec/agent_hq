@@ -26,7 +26,7 @@ CONFIG_DIR = REPO_ROOT / "config"
 # not a task definition.
 EXPECTED_TASK_IDS = {
     "spec", "arch-plan", "arch-approval", "breakdown", "implement", "review",
-    "finalize", "clinical", "poll", "qa", "docs",
+    "finalize", "clinical", "poll", "qa", "docs", "triage",
 }
 
 CONCRETE_ADAPTER_NAMES = (

@@ -569,13 +569,21 @@ def _prepare(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskd
             (r for r in ticket_doc.get("runs", []) if r["run_id"] == input_from), None,
         )
 
+    # A ROOT run had no declaring queue entry to choose its inputs, so it
+    # inherits whatever its input source recorded. A queued entry's
+    # `input_artifacts` is its declarer's decision -- including a deliberately
+    # empty one -- and is never overridden here.
+    inherited = run.get("input_artifacts") or []
+    if parent and not run.get("parent_run_id") and not inherited:
+        inherited = list(parent.get("artifacts") or [])
+
     store.write(
         lambda txn: txn.update_run(
             ticket_id, run_id, bindings=bindings, base_commit=base_commit,
-            input_from_run_id=input_from,
+            input_from_run_id=input_from, input_artifacts=list(inherited),
         )
     )
-    run = {**run, "input_from_run_id": input_from}
+    run = {**run, "input_from_run_id": input_from, "input_artifacts": list(inherited)}
 
     rework = _rework_comments(store, ticket_id, run_id)
     declared = [subst(a, ticket_id) for a in taskdef.get("outputs", {}).get("artifacts", [])]

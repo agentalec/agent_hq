@@ -3,7 +3,7 @@ reopen commands").
 
 Engine-owned, not tracker-owned: the same command decides a gate on the
 engine issue (`github-issue-comment`) and sends work back from a work-repo
-PR (`engine.engine.poll_pr_feedback`). It lives here rather than in either
+PR (`engine.engine.poll_comments`). It lives here rather than in either
 caller because engine code may not import a concrete adapter
 (`tests/test_config_swap.py`), and duplicating a security-relevant parser is
 how the two copies drift.
@@ -16,6 +16,10 @@ import re
 from engine.models import GateStatus
 
 DECISION_RE = re.compile(r"^/agent-hq (approve|request-changes|reject)(?:\s+(.*))?$")
+# `/agent-hq do <task> [reason]` -- put a task at the head of the ticket's
+# queue. The primitive the issue thread exposes: everything else a comment can
+# do is this with the task chosen for you.
+QUEUE_RE = re.compile(r"^/agent-hq do\s+([A-Za-z0-9][A-Za-z0-9._-]*)(?:\s+(.*))?$")
 # `compute_run_id` is sha1[:16] -- what tells an explicit target apart from
 # the first word of a reason.
 RUN_ID_RE = re.compile(r"^[0-9a-f]{16}$")
@@ -55,4 +59,18 @@ def parse_decision(body: str, run_id: str) -> tuple[str, str] | None:
         if RUN_ID_RE.match(head):
             continue
         return command, rest
+    return None
+
+
+def parse_queue_command(body: str) -> tuple[str, str] | None:
+    """First `/agent-hq do <task> [reason]` line in `body`, as `(task, reason)`.
+
+    Separate from `parse_decision` because it is not a decision about a gated
+    run -- it queues work. The task id is validated against the loaded library
+    by the caller, not here: this module knows the grammar, not the deployment.
+    """
+    for line in body.splitlines():
+        match = QUEUE_RE.match(line.strip())
+        if match:
+            return match.group(1), (match.group(2) or "").strip()
     return None

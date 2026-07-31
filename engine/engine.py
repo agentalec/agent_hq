@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from collections.abc import Callable
 
-from engine.commands import parse_decision
+from engine.commands import parse_decision, parse_queue_command
 from engine.config import Config
 from engine.models import (
     Event,
@@ -86,7 +86,21 @@ def resolve_input_source(runs: list[dict], run: dict) -> str | None:
     ]
     if earlier:
         return max(earlier, key=lambda r: positions[r["run_id"]])["run_id"]
-    return run.get("parent_run_id")
+    if run.get("parent_run_id"):
+        return run["parent_run_id"]
+    # A ROOT run has no declared predecessor -- intake's first run, or a comment
+    # inserted at the head of the queue. It is an interjection rather than a
+    # step, so queue position tells us nothing: fall back to the ticket's most
+    # recent SUCCEEDED run anywhere. Without this a comment-sourced run sees no
+    # ledger artifacts at all, which is fatal for a task whose job is to read
+    # what happened and re-plan.
+    produced = [
+        r for r in runs
+        if r["state"] == RunState.SUCCEEDED.value and r["run_id"] != run["run_id"]
+    ]
+    if produced:
+        return max(produced, key=lambda r: positions[r["run_id"]])["run_id"]
+    return None
 
 
 def _next_queue_seq(txn: Txn, ticket_id: str) -> int:
@@ -95,6 +109,29 @@ def _next_queue_seq(txn: Txn, ticket_id: str) -> int:
     each preceding insert and assigns increasing positions."""
     runs = txn.ticket_doc(ticket_id).get("runs", [])
     return max(queue_positions(runs).values(), default=-1) + 1
+
+
+def _insert_at_queue_head(txn: Txn, ticket_id: str) -> int:
+    """Free the front of the queue and return the position freed.
+
+    Every QUEUED run at or after the current front is bumped by one, so an
+    inserted entry runs BEFORE work already planned while that work keeps its
+    relative order. Bumping rather than using `front - 1` keeps positions
+    non-negative (the schema's minimum) and needs no renumbering scheme.
+
+    Only QUEUED runs move: a terminal run's position is history, and a new entry
+    sharing a position with one is harmless -- terminal runs are not dispatch
+    candidates and the sort is stable.
+    """
+    runs = txn.ticket_doc(ticket_id).get("runs", [])
+    positions = queue_positions(runs)
+    pending = [r for r in runs if r["state"] == RunState.QUEUED.value]
+    if not pending:
+        return _next_queue_seq(txn, ticket_id)
+    front = min(positions[r["run_id"]] for r in pending)
+    for r in pending:
+        txn.update_run(ticket_id, r["run_id"], queue_seq=positions[r["run_id"]] + 1)
+    return front
 
 
 def _put_queued_run(txn: Txn, run_id: str, *, ticket_id: str, task_id: str, task_version: int,
@@ -889,19 +926,23 @@ def sweep(
         state = store.read_state(ticket_id)
         if state is None:
             continue
-        in_flight = any(r["state"] in NON_TERMINAL for r in state.get("runs", []))
-        if state.get("status") in ("ACTIVE", "AWAITING_MERGE") and not in_flight:
-            # Per-ticket, not per-run: PR feedback is about the ticket's work
-            # PRs, and no run has to be in flight for a reviewer to ask for
-            # changes -- that is the gap this closes.
-            #
-            # Skipped entirely while anything IS in flight, rather than
-            # queueing alongside it: a rework run enqueued mid-flight would
-            # race the run already working the same branch, and a second
-            # reviewer comment would stack a third. Nothing is lost by
-            # waiting -- the watermark only advances on a pass that actually
-            # polls, so the comment is still there once the queue drains.
-            poll_pr_feedback(store, config, taskdefs, adapter_fn, ticket_id, state)
+        # Deferred only while a run is genuinely WORKING (RUNNING/WAITING_GATE),
+        # not while one merely sits QUEUED. A run enqueued mid-flight would race
+        # the run already working the same branch -- that is the hazard, and a
+        # queued sibling is not it: per-ticket exclusivity (`claim_run`) means
+        # two runs never execute at once, so a queued sibling just waits its
+        # turn. Nothing is lost by deferring -- the watermark only advances on a
+        # pass that actually polls, so the comment is still there next sweep.
+        #
+        # Counting QUEUED here used to make two things impossible: polling a
+        # BLOCKED ticket that still had work queued behind it (dispatch skips
+        # BLOCKED tickets, so that run is going nowhere and would have vetoed
+        # the poll that releases it, forever), and inserting a comment at the
+        # FRONT of a non-empty queue -- which is the whole point of a comment
+        # being an interjection.
+        working = any(r["state"] in EXCLUSIVE_STATES for r in state.get("runs", []))
+        if state.get("status") in ("ACTIVE", "AWAITING_MERGE", "BLOCKED") and not working:
+            poll_comments(store, config, taskdefs, adapter_fn, ticket_id, state)
             state = store.read_state(ticket_id) or state
         if state.get("status") == "AWAITING_MERGE":
             # Every run on an AWAITING_MERGE ticket is terminal by
@@ -1051,142 +1092,249 @@ def _complete_if_queue_empty(store, config, adapter_fn, ticket_id, terminal_run:
     )
 
 
-def poll_pr_feedback(store, config, taskdefs, adapter_fn, ticket_id: str, state: dict) -> None:
-    """Send work back when an approver comments `/agent-hq request-changes
-    <reason>` on one of the ticket's work PRs.
+# Every comment the engine authors carries an `<!--hq:...-->` marker: the
+# messaging adapter's event-id dedupe marker, or the pinned-comment marker. That
+# makes the marker a reliable "this is ours" signal without the engine having to
+# know its own tracker identity.
+_HQ_COMMENT_MARKER = "<!--hq:"
 
-    This is the only path by which review feedback reaches the engine once no
-    run is gated: the `pr-review` gate polls a PR *while a run waits on it*,
-    which is exactly when the queue is not empty. Polled from `sweep` for the
-    same reason `resolve_awaiting_merge` is -- the engine repository cannot
-    receive product-repo events.
 
-    Deliberately narrow. A PR is a wider, lower-trust audience than the
-    engine issue, so:
-    - only an explicit command counts, never "an approver said something"
-    - only `feedback_approvers` members count, checked before the body is
-      read at all
-    - the loop/budget guards run first, so a comment thread cannot spend past
-      the ceilings a handoff respects
+def _comment_intent(
+    body: str, *, feedback_task: str | None, default_task: str | None
+) -> tuple[str, str] | None:
+    """Which task a comment asks for, as `(task_id, reason)`, or None.
 
-    Every qualifying comment in the window folds into ONE run, and that run's
-    id derives causally from the latest such comment
-    (`pr-comment:<comment_id>`), so re-polling the same comment resolves to
-    the same run id and re-enqueues nothing. That -- not the watermark -- is
-    what makes this idempotent; `comments_polled_at` only keeps the read
-    small.
+    Three forms, most specific first:
+    - `/agent-hq request-changes <reason>` -> `projects.feedback_task`
+    - `/agent-hq do <task> [reason]`       -> that task
+    - anything else                        -> `default_task` if the caller
+      passes one (only the engine issue does), else nothing
+
+    The task id is returned unvalidated; the caller checks it against the loaded
+    library, because an unknown task deserves a reply rather than silence.
     """
-    task_id = config.projects.get("feedback_task")
+    parsed = parse_decision(body, "")
+    if parsed is not None and parsed[0] == "request-changes":
+        return (feedback_task, parsed[1]) if feedback_task else None
+    queued = parse_queue_command(body)
+    if queued is not None:
+        return queued
+    if default_task:
+        return default_task, body.strip()
+    return None
+
+
+def _comment_run_count(doc: dict, prefixes: tuple[str, ...]) -> int:
+    return sum(
+        1 for r in doc.get("runs", [])
+        if str(r.get("source_event_id") or "").startswith(prefixes)
+    )
+
+
+_COMMENT_SOURCE_PREFIXES = ("issue-comment:", "pr-comment:")
+
+
+def poll_comments(store, config, taskdefs, adapter_fn, ticket_id: str, state: dict) -> None:
+    """Turn authorized comments into queued work, on the engine issue and on
+    every recorded work PR.
+
+    The engine issue is the ticket-level control surface: it is where intake,
+    gate requests, pinned status and escalations are already posted, so it was
+    the one place the engine talked without listening. A work PR stays a
+    subject too, but a narrower one -- see `_poll_comment_subject`.
+
+    Polled from `sweep` rather than driven by events, for the same reason
+    `resolve_awaiting_merge` is: the engine repository cannot observe
+    product-repo events at all.
+    """
+    feedback_task = config.projects.get("feedback_task")
+    default_task = config.projects.get("comment_default_task")
     group = config.projects.get("feedback_approvers")
-    if not task_id or not group or task_id not in taskdefs:
+    if not group:
         return
     members = set(config.approvers.get("groups", {}).get(group, {}).get("members", []))
     if not members:
         return
-    taskdef = taskdefs[task_id]
+
+    # The engine issue: ticket-level watermark, and the only subject where a
+    # bare approver comment (no command) may act, because it is a narrower
+    # audience than a work PR.
+    if feedback_task or default_task:
+        _poll_comment_subject(
+            store, config, taskdefs, adapter_fn, ticket_id,
+            repo=intake_repo(config), number=ticket_id, source_prefix="issue-comment",
+            watermark=state.get("comments_polled_at"),
+            save_watermark=lambda txn, w: txn.set_ticket(ticket_id, comments_polled_at=w),
+            members=members, feedback_task=feedback_task, default_task=default_task,
+            ack=lambda message, event_id: notify_ticket(
+                config, adapter_fn, ticket_id, message, event_id
+            ),
+        )
 
     for work_repo in list(state.get("work_repos", [])):
         pr_ref = work_repo.get("pr_ref")
         if not pr_ref:
             continue
         repo, _, number = pr_ref.rpartition("#")
-        messaging = adapter_fn("messaging", config.components["messaging"]["adapter"], repo=repo)
-        comments = messaging.list_comments(number, work_repo.get("comments_polled_at"))
-        if not comments:
+        _poll_comment_subject(
+            store, config, taskdefs, adapter_fn, ticket_id,
+            repo=repo, number=number, source_prefix="pr-comment",
+            watermark=work_repo.get("comments_polled_at"),
+            save_watermark=lambda txn, w, r=repo: txn.upsert_work_repo(
+                ticket_id, r, comments_polled_at=w
+            ),
+            members=members, feedback_task=feedback_task,
+            # A PR is a wider, lower-trust audience than the engine issue, so an
+            # explicit command is still required there -- "an approver said
+            # something" never spends budget from a PR thread.
+            default_task=None,
+            run_repo=repo,
+            ack=lambda message, event_id, pr=pr_ref: post_pr_comment(
+                config, adapter_fn, pr, message, event_id
+            ),
+        )
+
+
+def _poll_comment_subject(
+    store, config, taskdefs, adapter_fn, ticket_id: str, *,
+    repo: str, number: str, source_prefix: str, watermark: str | None,
+    save_watermark, members: set[str], feedback_task: str | None,
+    default_task: str | None, ack, run_repo: str | None = None,
+) -> None:
+    """Poll one comment thread and queue at most one run from it.
+
+    Idempotency is the derived run id (`<source_prefix>:<latest comment id>`), so
+    re-polling the same comment resolves to the same run and enqueues nothing.
+    The watermark only keeps the read small -- it is not the dedupe. The two
+    subjects use DIFFERENT prefixes: comment ids are unique per repository, not
+    globally, and reusing one prefix would let an issue comment and a PR comment
+    collide onto a single run.
+    """
+    messaging = adapter_fn("messaging", config.components["messaging"]["adapter"], repo=repo)
+    comments = messaging.list_comments(number, watermark)
+    if not comments:
+        return
+
+    requests = []
+    for comment in comments:
+        # Ordered cheapest-and-safest first. The marker check is what stops
+        # `block -> _escalate posts a comment -> run -> block` from being an
+        # unbounded spend loop: escalations, pins and gate requests all land on
+        # the engine issue, so the moment it became a polled subject the engine
+        # could answer itself. Membership alone would usually catch it (the
+        # engine's identity is not an approver), but that depends on config
+        # hygiene and this does not.
+        if _HQ_COMMENT_MARKER in (comment.get("body") or ""):
             continue
-
-        requests = []
-        for comment in comments:
-            if comment["author"] not in members:
-                continue
-            parsed = parse_decision(comment["body"], "")
-            if parsed is None or parsed[0] != "request-changes":
-                continue
-            requests.append((comment, parsed[1]))
-
-        # Advance past everything read, qualifying or not -- a thread of
-        # ordinary conversation must not be re-read every sweep forever.
-        watermark = max(c["created_at"] for c in comments)
-
-        if not requests:
-            store.write(
-                lambda txn, r=repo, w=watermark: txn.upsert_work_repo(
-                    ticket_id, r, comments_polled_at=w
-                )
-            )
+        if comment["author"] not in members:
             continue
+        intent = _comment_intent(
+            comment["body"], feedback_task=feedback_task, default_task=default_task
+        )
+        if intent is None:
+            continue
+        requests.append((comment, intent))
 
-        # One run for the whole window, carrying every reason in it: three
-        # comments asking for three fixes are one rework, not three runs
-        # racing for the same branch.
-        latest_id = requests[-1][0]["id"]
-        reason = "\n\n".join(f"@{c['author']}: {text}" for c, text in requests if text)
-        run_id = compute_run_id(f"pr-comment:{latest_id}", 0, task_id, 0)
-        # The run's identity derives from the LATEST qualifying comment, so
-        # that comment's author is who triggered it. A window can carry several
-        # authors; every one of them stays in `detail`.
-        latest_author = requests[-1][0]["author"]
-        result: dict = {}
+    # Advance past everything read, qualifying or not -- a thread of ordinary
+    # conversation must not be re-read every sweep forever.
+    latest_read = max(c["created_at"] for c in comments)
 
-        # `res=result` for the same reason as every other binding here: the
-        # closure is defined in a loop. It is called synchronously inside the
-        # iteration that built it, so late binding never actually bit -- but
-        # binding it is what the rest of the signature already does, and it
-        # is what stops ruff's B023 from being permanently red.
-        def apply(
-            txn: Txn, r=repo, w=watermark, rid=run_id, why=reason, cid=latest_id,
-            who=latest_author, res=result,
-        ) -> None:
-            # Cleared per attempt, like `claim_run`'s own flag: a write that
-            # loses the push race re-runs this against fresh state, and only
-            # the attempt that actually lands may decide the outcome. Without
-            # the reset, a refusal on attempt 1 would still block the ticket
-            # after attempt 2 enqueued successfully.
-            res.clear()
-            txn.upsert_work_repo(ticket_id, r, comments_polled_at=w)
-            doc = txn.ticket_doc(ticket_id)
-            ok, _trace = check_loop_guard(
-                doc,
-                max_runs=config.budgets["loop_guard"]["max_runs"],
+    if not requests:
+        store.write(lambda txn, w=latest_read: save_watermark(txn, w))
+        return
+
+    # One run for the whole window: three comments asking for three things are
+    # one piece of work, not three runs racing for the same branch. The LAST
+    # qualifying comment picks the task and owns the run's identity; every
+    # comment's text goes into the reason.
+    latest_comment, (task_id, _) = requests[-1]
+    reason = "\n\n".join(
+        f"@{c['author']}: {text}" for c, (_, text) in requests if text
+    )
+    source_event_id = f"{source_prefix}:{latest_comment['id']}"
+
+    if task_id not in taskdefs:
+        # A typo deserves an answer. Idempotent by comment id, so at most one
+        # reply per comment however often the sweep re-reads it.
+        store.write(lambda txn, w=latest_read: save_watermark(txn, w))
+        ack(
+            f"`{task_id}` is not a task in this deployment, so nothing was queued.",
+            f"{source_event_id}:unknown-task",
+        )
+        return
+
+    taskdef = taskdefs[task_id]
+    run_id = compute_run_id(source_event_id, 0, task_id, 0)
+    result: dict = {}
+
+    def apply(txn: Txn) -> None:
+        # Cleared per attempt, like `claim_run`'s own flag: a write that loses
+        # the push race re-runs this against fresh state, and only the attempt
+        # that actually lands may decide the outcome.
+        result.clear()
+        save_watermark(txn, latest_read)
+        doc = txn.ticket_doc(ticket_id)
+
+        # A separate ceiling from `loop_guard.max_runs`: a chatty thread would
+        # otherwise exhaust the ticket's run budget, block it, and then have the
+        # next comment unblock it -- a slow oscillation that spends real money.
+        cap = config.budgets.get("max_comment_runs_per_ticket")
+        if cap is not None and _comment_run_count(doc, _COMMENT_SOURCE_PREFIXES) >= cap:
+            result["refused"] = (
+                f"this ticket has already spent its {cap} comment-triggered runs"
             )
-            verdict = check_budget(doc, taskdef["budget"], config.budgets["ticket_cap_usd"])
-            if not ok or verdict["over_ticket_cap"] or verdict["insufficient_headroom"]:
-                res["refused"] = (
-                    "PR feedback would exceed this ticket's run/budget ceiling"
-                )
-                return
-            if not _put_queued_run(
-                txn, rid, ticket_id=ticket_id, task_id=task_id,
-                task_version=taskdef["version"], bindings={}, attempt=0, chain_depth=0,
-                source_event_id=f"pr-comment:{cid}", enqueue_index=0, repo=r,
-            ):
-                return  # already applied on an earlier pass
-            # `_rework_comments` reads this back at prepare time and inlines it
-            # under "## Requested changes" -- the same channel the gate's own
-            # CHANGES_REQUESTED path uses.
-            txn.append_event(
-                ticket_id,
-                Event(
-                    event_id=f"{rid}:rework", kind="run.rework", ticket_id=ticket_id,
-                    run_id=rid, detail=why, actor=who, source=f"pr-comment:{cid}",
-                ).to_dict(),
-            )
-            if doc.get("status") == "AWAITING_MERGE":
-                txn.set_ticket(ticket_id, status="ACTIVE")
-            res["enqueued"] = rid
-
-        store.write(apply)
-
-        if result.get("refused"):
-            _block_ticket(store, config, adapter_fn, ticket_id, run_id, result["refused"])
-            _escalate(store, config, adapter_fn, ticket_id, run_id, result["refused"])
             return
-        if result.get("enqueued"):
-            set_status_label(config, adapter_fn, ticket_id, "ACTIVE")
-            post_pr_comment(
-                config, adapter_fn, pr_ref,
-                "Queued rework for this feedback.", f"{run_id}:ack",
+        ok, _trace = check_loop_guard(doc, max_runs=config.budgets["loop_guard"]["max_runs"])
+        verdict = check_budget(doc, taskdef["budget"], config.budgets["ticket_cap_usd"])
+        if not ok or verdict["over_ticket_cap"] or verdict["insufficient_headroom"]:
+            result["refused"] = "comment would exceed this ticket's run/budget ceiling"
+            return
+
+        # At the FRONT of the queue: a comment is an interjection, so it runs
+        # before work already planned rather than behind it. Nothing else about
+        # the queue is disturbed.
+        seq = _insert_at_queue_head(txn, ticket_id)
+        if not _put_queued_run(
+            txn, run_id, ticket_id=ticket_id, task_id=task_id,
+            task_version=taskdef["version"], bindings={}, attempt=0, chain_depth=0,
+            source_event_id=source_event_id, enqueue_index=0, repo=run_repo,
+            queue_seq=seq,
+        ):
+            return  # already applied on an earlier pass
+        # `_rework_comments` reads this back at prepare and inlines it under
+        # "## Requested changes" -- the same channel the gate's own
+        # CHANGES_REQUESTED path uses. A blocked ticket's reason rides along, so
+        # a task asked to re-plan can see why the ticket stopped.
+        detail = reason
+        if doc.get("block_reason"):
+            detail = f"{detail}\n\n(ticket was blocked: {doc['block_reason']})".lstrip()
+        txn.append_event(
+            ticket_id,
+            Event(
+                event_id=f"{run_id}:rework", kind="run.rework", ticket_id=ticket_id,
+                run_id=run_id, detail=detail, actor=latest_comment["author"],
+                source=source_event_id,
+            ).to_dict(),
+        )
+        # A comment is the exit from both waiting states. BLOCKED especially:
+        # nothing else in the engine clears it, so before this the only routes
+        # out were a full restart via re-label or hand-editing the state branch.
+        if doc.get("status") in ("AWAITING_MERGE", "BLOCKED"):
+            txn.set_ticket(
+                ticket_id, status="ACTIVE",
+                block_reason=None, block_source=None, interrupted_run_id=None,
             )
+        result["enqueued"] = run_id
+
+    store.write(apply)
+
+    if result.get("refused"):
+        _block_ticket(store, config, adapter_fn, ticket_id, run_id, result["refused"])
+        _escalate(store, config, adapter_fn, ticket_id, run_id, result["refused"])
+        return
+    if result.get("enqueued"):
+        set_status_label(config, adapter_fn, ticket_id, "ACTIVE")
+        ack(f"Queued `{task_id}`.", f"{run_id}:ack")
 
 
 def resolve_awaiting_merge(store, config, adapter_fn, ticket_id: str, state: dict) -> None:
