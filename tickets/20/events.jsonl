@@ -41,3 +41,7 @@
 {"event_id": "1a0af9fcbda54d9e:implement-20-care-fe:accepted", "kind": "handoff.accepted", "ticket_id": "20", "run_id": "1a0af9fcbda54d9e", "detail": "Add search functionality to FacilityServices page per acceptance criteria"}
 {"event_id": "1a0af9fcbda54d9e:succeeded", "kind": "run.succeeded", "ticket_id": "20", "run_id": "1a0af9fcbda54d9e", "state": "SUCCEEDED", "artifacts": ["specs/20/spec.md"]}
 {"event_id": "21e084c4f835f5c0:collected", "kind": "run.collected", "ticket_id": "20", "run_id": "21e084c4f835f5c0", "tokens": 718800, "cost_usd": 0.44}
+{"event_id": "21e084c4f835f5c0:review-20:proposed", "kind": "handoff.proposed", "ticket_id": "20", "run_id": "21e084c4f835f5c0", "detail": "Review implementation against acceptance criteria"}
+{"event_id": "a3246889df973077:queued", "kind": "run.queued", "ticket_id": "20", "run_id": "a3246889df973077", "task_id": "review", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
+{"event_id": "21e084c4f835f5c0:review-20:accepted", "kind": "handoff.accepted", "ticket_id": "20", "run_id": "21e084c4f835f5c0", "detail": "Review implementation against acceptance criteria"}
+{"event_id": "21e084c4f835f5c0:succeeded", "kind": "run.succeeded", "ticket_id": "20", "run_id": "21e084c4f835f5c0", "state": "SUCCEEDED", "artifacts": []}
