@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-31T10:54:02Z",
+  "generated_at": "2026-07-31T10:54:20Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -227,7 +227,7 @@
           "task_id": "triage",
           "task_version": 1,
           "ticket_id": "11",
-          "state": "QUEUED",
+          "state": "RUNNING",
           "attempt": 0,
           "bindings": {},
           "cost_usd": null,
@@ -237,7 +237,9 @@
           "chain_depth": 0,
           "source_event_id": "issue-comment:5104732429",
           "enqueue_index": 0,
-          "queue_seq": 7
+          "queue_seq": 7,
+          "deadline": "2026-07-31T11:09:20Z",
+          "attempt_started_at": "2026-07-31T10:54:20Z"
         }
       ],
       "work_repos": [
