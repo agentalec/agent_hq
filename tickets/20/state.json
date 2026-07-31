@@ -508,7 +508,9 @@
         "specs/20/qa.md"
       ],
       "deadline": "2026-07-31T13:39:45Z",
-      "attempt_started_at": "2026-07-31T13:24:45Z"
+      "attempt_started_at": "2026-07-31T13:24:45Z",
+      "base_commit": "f2311dc5029ba333e1ca33b74640ca1867d71b70",
+      "input_from_run_id": "82f3111c45eb77be"
     }
   ],
   "work_repos": [
