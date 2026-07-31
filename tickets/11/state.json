@@ -285,7 +285,7 @@
       "pr_ref": "agentalec/care_fe#1"
     }
   ],
-  "comments_polled_at": "2026-07-31T10:53:57Z",
+  "comments_polled_at": "2026-07-31T11:04:01Z",
   "block_reason": "retries exhausted",
   "block_source": "engine",
   "interrupted_run_id": "9c3750ed19c6a865"
