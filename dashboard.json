@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-31T13:05:25Z",
+  "generated_at": "2026-07-31T13:06:05Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -1919,7 +1919,7 @@
           "task_id": "review",
           "task_version": 1,
           "ticket_id": "20",
-          "state": "QUEUED",
+          "state": "RUNNING",
           "attempt": 0,
           "bindings": {
             "tracker": "github-issues",
@@ -1938,7 +1938,9 @@
           "input_artifacts": [
             "specs/20/spec.md",
             "specs/20/review.md"
-          ]
+          ],
+          "deadline": "2026-07-31T13:36:05Z",
+          "attempt_started_at": "2026-07-31T13:06:05Z"
         }
       ],
       "work_repos": [
