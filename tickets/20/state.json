@@ -445,7 +445,7 @@
       "task_id": "qa",
       "task_version": 1,
       "ticket_id": "20",
-      "state": "RUNNING",
+      "state": "SUCCEEDED",
       "attempt": 0,
       "bindings": {
         "tracker": "github-issues",
@@ -455,7 +455,16 @@
       "cost_usd": 0.578,
       "tokens": 952400,
       "usage_known": true,
-      "artifacts": [],
+      "artifacts": [
+        "specs/20/qa.md",
+        "specs/20/screenshots/debounced-search.png",
+        "specs/20/screenshots/empty-state.png",
+        "specs/20/screenshots/initial-services-list.png",
+        "specs/20/screenshots/no-pagination.png",
+        "specs/20/screenshots/search-cleared.png",
+        "specs/20/screenshots/search-filtered.png",
+        "specs/20/screenshots/search-mobile.png"
+      ],
       "chain_depth": 5,
       "parent_run_id": "f87d399ae6f27567",
       "queue_seq": 15,
@@ -468,7 +477,36 @@
       "deadline": "2026-07-31T14:10:11Z",
       "attempt_started_at": "2026-07-31T13:10:11Z",
       "base_commit": "f2311dc5029ba333e1ca33b74640ca1867d71b70",
-      "input_from_run_id": "f87d399ae6f27567"
+      "input_from_run_id": "f87d399ae6f27567",
+      "output_commit": "f2311dc5029ba333e1ca33b74640ca1867d71b70",
+      "pr_ref": "agentalec/care_fe#7"
+    },
+    {
+      "run_id": "ad112d9ca0f36e90",
+      "task_id": "finalize",
+      "task_version": 1,
+      "ticket_id": "20",
+      "state": "QUEUED",
+      "attempt": 0,
+      "bindings": {
+        "tracker": "github-issues",
+        "agent-session": "copilot-cli",
+        "messaging": "github-comment"
+      },
+      "cost_usd": null,
+      "tokens": null,
+      "usage_known": false,
+      "artifacts": [],
+      "chain_depth": 6,
+      "parent_run_id": "82f3111c45eb77be",
+      "queue_seq": 16,
+      "handoff_key": "finalize-20",
+      "repo": "agentalec/care_fe",
+      "input_artifacts": [
+        "specs/20/spec.md",
+        "specs/20/review.md",
+        "specs/20/qa.md"
+      ]
     }
   ],
   "work_repos": [
