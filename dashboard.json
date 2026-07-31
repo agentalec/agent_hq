@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-31T11:18:44Z",
+  "generated_at": "2026-07-31T11:18:51Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -1378,7 +1378,7 @@
           "task_id": "spec",
           "task_version": 1,
           "ticket_id": "20",
-          "state": "RUNNING",
+          "state": "SUCCEEDED",
           "attempt": 0,
           "bindings": {
             "tracker": "github-issues",
@@ -1389,7 +1389,9 @@
           "cost_usd": 0.243,
           "tokens": 351200,
           "usage_known": true,
-          "artifacts": [],
+          "artifacts": [
+            "specs/20/spec.md"
+          ],
           "chain_depth": 0,
           "source_event_id": "20:labeled:2026-07-31T11:14:40Z",
           "enqueue_index": 0,
@@ -1401,7 +1403,9 @@
           "input_from_run_id": "0a744bffb1efa437",
           "input_artifacts": [
             "specs/20/spec.md"
-          ]
+          ],
+          "output_commit": "5466816828ba496f9d4e6099e77360eb516ece31",
+          "pr_ref": null
         }
       ],
       "work_repos": [
