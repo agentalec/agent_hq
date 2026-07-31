@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-31T10:59:57Z",
+  "generated_at": "2026-07-31T10:59:58Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -271,7 +271,12 @@
           "enqueue_index": 0,
           "queue_seq": 8,
           "deadline": "2026-07-31T11:14:57Z",
-          "attempt_started_at": "2026-07-31T10:59:57Z"
+          "attempt_started_at": "2026-07-31T10:59:57Z",
+          "base_commit": "6819a4f7730935bbb053d553c44426313f17fc43",
+          "input_from_run_id": "0dfc7128660a8b91",
+          "input_artifacts": [
+            "specs/11/review.md"
+          ]
         }
       ],
       "work_repos": [
