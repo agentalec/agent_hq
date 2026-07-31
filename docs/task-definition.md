@@ -27,10 +27,10 @@ verifies that every `skills` entry and every task-local `context` entry
 across directories.
 
 Nothing wires a task into the live graph except another task's
-`handoff.allowed` naming it (or `config/projects.yml`'s `initial_task`
+some run's `control.json` queueing it (or `config/projects.yml`'s `initial_task`
 naming it as the ticket's root task). There is no fixed chain and no
 task-name special case in the engine — a defined task that no
-`handoff.allowed` reaches is registered but unwired (see the dispositions
+no prompt queues is registered but unused (see the dispositions
 table in [task-authoring.md](task-authoring.md)).
 
 ## Annotated example
@@ -38,7 +38,7 @@ table in [task-authoring.md](task-authoring.md)).
 `tasks/spec/task.yml`, verbatim, with commentary:
 
 ```yaml
-id: spec                      # identity; what handoff.allowed targets name
+id: spec                      # identity; what a queue entry's `task` names
 version: 1                    # recorded on every run as task_version
 description: Author the specification for the ticket.
 trigger: enqueued_by          # required; currently always this value
@@ -75,7 +75,7 @@ Required top-level fields: `id`, `version`, `description`, `trigger`,
 ### `id` (string, required)
 
 The task's identity: the key it is loaded under, and the string other
-tasks' `handoff.allowed` (and `config/projects.yml`'s `initial_task`) use
+queue entries (and `config/projects.yml`'s `initial_task`) use
 to name it. By convention it matches the directory name; what is enforced
 is uniqueness — two directories declaring the same `id` fail
 `agent-hq tasks validate` (`engine/taskdefs.py:load_all`).
@@ -83,7 +83,7 @@ is uniqueness — two directories declaring the same `id` fail
 ### `version` (integer >= 1, required)
 
 Recorded on every run as `task_version` (`engine/engine.py` — `enqueue`,
-`apply_handoffs`, `reenqueue_same`), so state history shows which revision
+`apply_queue`, `reenqueue_same`), so state history shows which revision
 of the task a run executed. Bump it when the task's behavior changes.
 
 ### `description` (string, required)
@@ -198,7 +198,7 @@ boundary, persists them under `tickets/<id>/artifacts/<run_id>/` on the
 state branch (`engine/state.py:write_artifact`), and excludes them from the
 work patch that lands on the branch. Together with the run's inherited
 `input_artifacts` they form the **provenance set** — the only paths a
-handoff may forward (`engine/handoff.py:validate_handoffs`).
+handoff may forward (`engine/handoff.py:validate_queue`).
 
 ### `opens_pr` (boolean, optional)
 
@@ -211,15 +211,11 @@ this.
 
 ### `handoff` (object, optional)
 
-- `handoff.allowed` (list of task ids) — the only targets this task's
-  `control.json` may propose; every entry must resolve to a loaded task
-  (`engine/taskdefs.py:validate_library`).
-- `handoff.max` (integer >= 0) — the most handoffs one run may propose in
   a single `control.json`. Default when omitted: 0, i.e. the task may not
   hand off at all.
 
 A proposed set violating either — or any other check — is rejected
-whole (`engine/handoff.py:validate_handoffs`); see
+whole (`engine/handoff.py:validate_queue`); see
 [task-authoring.md](task-authoring.md) "Handoffs" for the full validation
 pipeline and the handoff-spawned run's identity rules.
 
@@ -237,7 +233,7 @@ empty meaning `--allow-all-tools`.
 ### `budget` (object, required — all three keys required)
 
 - `max_cost_usd` (number > 0) — per-run cost cap, enforced as headroom:
-  the dispatcher and `apply_handoffs` refuse a run when the ticket's known
+  the dispatcher and `apply_queue` refuse a run when the ticket's known
   spend plus this cap would exceed `config/budgets.yml`'s
   `ticket_cap_usd` (`engine/engine.py:check_budget`). Under the default
   `copilot-cli` executor, per-run cost is not metered (runs record
@@ -256,7 +252,7 @@ empty meaning `--allow-all-tools`.
 Every completed run writes exactly one `.agent-hq/control.json` — a single
 JSON object validated against `schemas/control.schema.json`
 (`additionalProperties: false`, including inside each handoff item) by
-`engine/handoff.py:validate_handoffs` before anything in it is trusted. A
+`engine/handoff.py:validate_queue` before anything in it is trusted. A
 schema-invalid document **fails the run** (retrying per its own
 `budget.retries`); it is never silently ignored.
 
@@ -274,7 +270,7 @@ run's provenance set and containment-safe).
 
 The contract is injected into every prompt automatically
 (`engine/runner.py:_assemble_prompt`): the outcome shapes, this task's own
-`handoff.allowed`/`max`, and its required output paths. A task never
+the queueable task list and `max_queue_length`, and its required output paths. A task never
 spells this out in its own prompts, and the injection does not depend on
 the task including `constitution` in `context`.
 
@@ -308,10 +304,11 @@ the task including `constitution` in `context`.
 `tasks validate` (`engine/cli.py:_tasks_validate`) loads every
 `tasks/*/task.yml` — schema validation, on-disk `skills`/task-local
 `context` existence, duplicate-id detection (`engine/taskdefs.py`) — then
-cross-checks the library (every `handoff.allowed` target resolves to a
-loaded task) and every task's declared `components` port against
-`components.yml` (`engine/config.py:validate_task_bindings`). It loads the
-config to do so, so a broken config fails this command too.
+validates each task in isolation (ids unique and self-consistent — there are
+no declared route edges left to cross-check) and every task's declared
+`components` port against `components.yml`
+(`engine/config.py:validate_task_bindings`). It loads the config to do so, so
+a broken config fails this command too.
 
 `config validate` loads the five registries (`components`, `repos`,
 `projects`, `approvers`, `budgets`) against their schemas

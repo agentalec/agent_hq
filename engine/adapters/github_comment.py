@@ -48,6 +48,20 @@ class GithubCommentMessaging:
 
         self._client.post(f"/repos/{repo}/issues/{ticket_id}/comments", json={"body": body})
 
+    def react(self, comment_id: str | int, content: str) -> None:
+        """Add a reaction to one issue/PR comment.
+
+        Idempotent at the API: the same content from the same identity returns
+        the existing reaction rather than adding a second. That is the whole
+        reason the poller signals with reactions instead of replies -- the
+        watermark is inclusive at the boundary second, so a comment can be
+        re-read, and a reply would duplicate where a reaction cannot.
+        """
+        self._client.post(
+            f"/repos/{self.repo}/issues/comments/{comment_id}/reactions",
+            json={"content": content},
+        )
+
     def list_comments(self, subject_id: str, since: str | None = None) -> list[dict]:
         """Comments on `subject_id` (an issue or PR number in this adapter's
         repo -- a PR is an issue), oldest first, as

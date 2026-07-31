@@ -24,7 +24,10 @@ repo, so the message that ends up on the branch is the `summary` you write in
 `.agent-hq/control.json` (see Control output below) -- describe what you
 actually changed there, not what the ticket asked for.
 
-When the work is committed, propose a single `review` handoff in your
+When the work is committed, queue a single `review` entry in your
 `.agent-hq/control.json` (see Control output below), forwarding
 `specs/{ticket}/spec.md` in `artifacts` -- and also `specs/{ticket}/review.md`
-if it was handed to you, so the reviewer keeps its round history.
+if it was given to you, so the reviewer keeps its round history.
+
+Leave the rest of the ticket's queue alone: entries you do not mention stay
+queued, and you have no reason to cancel work someone else planned.

@@ -2,13 +2,13 @@
 # reviewers per group as the deployment grows.
 groups:
   product-owners:
-    members: [agentalec]
+    members: [agentalec, gigincg]
   architects:
     members: [agentalec]
   clinical-reviewers:
     members: [agentalec]
   escalation:
-    members: [agentalec]
+    members: [agentalec, gigincg]
 working_hours:
   timezone: Asia/Kolkata
   start: 9

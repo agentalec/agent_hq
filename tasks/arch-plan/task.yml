@@ -1,5 +1,8 @@
-# Staged: activate by pointing tasks/spec/task.yml handoff.allowed at arch-plan
-# (the minimal route hands spec straight to implement).
+# Staged: no activation edit needed any more -- any task in the library is
+# queueable, so this runs as soon as some run's control.json queues it (e.g.
+# clinical's prompt, or a triage entry). What is still missing is a prompt that
+# tells a run to queue it.
+# (the pilot's spec prompt queues implement directly).
 id: arch-plan
 version: 1
 description: Produce an implementation plan and classify the ticket as crud or beyond-crud.
@@ -13,11 +16,6 @@ outputs:
   artifacts:
     - specs/{ticket}/plan.md
     - specs/{ticket}/classification.json
-handoff:
-  allowed:
-    - arch-approval
-    - breakdown
-  max: 1
 budget:
   max_cost_usd: 5
   max_runtime_min: 30

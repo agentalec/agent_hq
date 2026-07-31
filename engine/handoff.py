@@ -1,11 +1,10 @@
-"""Pure handoff-proposal validation (schemas/control.schema.json).
+"""Pure queue-declaration validation (schemas/control.schema.json).
 
-`validate_handoffs` checks a task's `.agent-hq/control.json` against the
-control schema, then -- for a `handoff` outcome -- each proposed handoff's
-artifact-path containment and provenance. It takes no state-store or
-ticket-state input: ledger-existence and loop/budget/depth guards need state
-and are enforced atomically in Task 9's `apply_handoffs` transaction, not
-here.
+`validate_queue` checks a task's `.agent-hq/control.json` against the control
+schema, then -- for a `queue` outcome -- each declared entry's artifact-path
+containment and provenance. It takes no state-store or ticket-state input:
+ledger existence, cancellation resolution, and the loop/budget guards all need
+state and are enforced atomically in `apply_queue`, not here.
 """
 
 from __future__ import annotations
@@ -41,7 +40,7 @@ def _check_containment(worktree: Path, rel_path: str) -> str | None:
     return None
 
 
-def validate_handoffs(
+def validate_queue(
     control: dict,
     *,
     taskdef: dict,
@@ -50,9 +49,13 @@ def validate_handoffs(
     worktree: str | Path,
     run: TaskRun,
 ) -> tuple[list[Handoff], str | None]:
-    """Validate the source run's proposed handoffs. Returns (accepted,
+    """Validate the queue entries a run declares. Returns (accepted,
     rejection_reason): any single schema/containment/provenance violation
-    rejects the WHOLE proposed set (accepted == []).
+    rejects the WHOLE declaration (accepted == []).
+
+    Cancellations are NOT validated here -- which keys are cancellable depends
+    on the ticket's current runs, which this pure function cannot see. They are
+    resolved atomically in `apply_queue`.
     """
     validator = Draft202012Validator(_load_control_schema())
     errors = sorted(validator.iter_errors(control), key=lambda e: list(e.path))
@@ -61,10 +64,10 @@ def validate_handoffs(
         json_path = "/".join(str(p) for p in first.path) or "<root>"
         return [], f"control.json schema violation: {json_path}: {first.message}"
 
-    if control["outcome"] != "handoff":
+    if control["outcome"] != "queue":
         return [], None
 
-    proposed = control["handoffs"]
+    proposed = control["queue"]
     worktree = Path(worktree).resolve()
 
     # Pass 1: path containment on every declared artifact across every handoff.
@@ -74,12 +77,20 @@ def validate_handoffs(
             if reason:
                 return [], reason
 
-    # Pass 2: per-handoff semantic checks.
-    handoff_cfg = taskdef.get("handoff", {})
-    allowed = set(handoff_cfg.get("allowed", []))
-    max_handoffs = handoff_cfg.get("max", 0)
-    if len(proposed) > max_handoffs:
-        return [], f"{len(proposed)} handoffs exceeds this task's handoff.max ({max_handoffs})"
+    # Pass 2: per-entry semantic checks.
+    #
+    # There is no per-task allowlist. Which task may follow which is the agent's
+    # call, recorded in the queue and revisable by any later run -- a static
+    # adjacency table across every task.yml was a route maintained by hand in
+    # eleven files, and the queue is the route now. What survives is a global
+    # sanity bound on one declaration, so a single run cannot queue 500 tasks.
+    # The rails against a bad route are `loop_guard.max_runs`, the budget caps,
+    # and the fact that removing queued work is explicit and audited.
+    max_entries = config.budgets.get("max_queue_length", 8)
+    if len(proposed) > max_entries:
+        return [], (
+            f"{len(proposed)} queue entries exceeds max_queue_length ({max_entries})"
+        )
 
     provenance = set(run.input_artifacts or [])
     provenance |= {
@@ -95,15 +106,13 @@ def validate_handoffs(
         artifacts = item.get("artifacts", [])
 
         if key in seen_keys:
-            return [], f"duplicate handoff key: {key}"
+            return [], f"duplicate queue entry key: {key}"
         seen_keys.add(key)
 
         if target not in taskdefs:
-            return [], f"handoff target '{target}' is not a known task"
-        if target not in allowed:
-            return [], f"handoff target '{target}' is not in this task's handoff.allowed"
+            return [], f"queue entry target '{target}' is not a known task"
         if repo is not None and repo not in config.repos:
-            return [], f"handoff repo '{repo}' is not a configured repo"
+            return [], f"queue entry repo '{repo}' is not a configured repo"
         for rel_path in artifacts:
             if rel_path not in provenance:
                 return [], f"artifact '{rel_path}' is not in this run's provenance set"

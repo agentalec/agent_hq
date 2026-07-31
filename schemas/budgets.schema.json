@@ -4,13 +4,23 @@
   "title": "Budgets config",
   "type": "object",
   "additionalProperties": false,
-  "required": ["ticket_cap_usd", "in_flight_cap", "loop_guard"],
+  "required": [
+    "ticket_cap_usd",
+    "in_flight_cap",
+    "loop_guard"
+  ],
   "properties": {
-    "ticket_cap_usd": { "type": "number", "exclusiveMinimum": 0 },
+    "ticket_cap_usd": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
     "label_overrides": {
       "type": "object",
       "description": "Label -> ticket cost cap override in USD",
-      "additionalProperties": { "type": "number", "exclusiveMinimum": 0 }
+      "additionalProperties": {
+        "type": "number",
+        "exclusiveMinimum": 0
+      }
     },
     "in_flight_cap": {
       "type": "integer",
@@ -20,11 +30,25 @@
     "loop_guard": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["max_runs", "max_depth"],
+      "required": [
+        "max_runs"
+      ],
       "properties": {
-        "max_runs": { "type": "integer", "minimum": 1 },
-        "max_depth": { "type": "integer", "minimum": 1 }
+        "max_runs": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
+    },
+    "max_queue_length": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Most entries one run may declare in a single control.json. Replaces the former per-task handoff.max: a global sanity bound on a runaway declaration, not a task-by-task adjacency table."
+    },
+    "max_comment_runs_per_ticket": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Ceiling on comment-triggered runs for one ticket, separate from loop_guard.max_runs. Without it a chatty thread exhausts the ticket's run budget, blocks it, and the next comment unblocks it -- a slow oscillation that spends real money."
     }
   }
 }

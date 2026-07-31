@@ -6,11 +6,21 @@ repos:
 intake_label: hq:intake
 engine_repo: agentalec/agent_hq
 initial_task: spec
+# The route's designed end. Queue-empty completion posts the closing summary
+# and finishes the ticket only when the last run was THIS task; a queue that
+# drains anywhere else stopped early, which blocks the ticket for a human.
+# Config rather than a filename convention, and the mirror of initial_task.
+final_task: finalize
 # Enqueued when an approver sends work back with `/agent-hq request-changes`
 # on a work-repo PR. Names the task, so the engine keeps no task-name
 # special case -- point it wherever rework belongs in your route. Drop
 # either key to switch PR-comment feedback off entirely.
 feedback_task: implement
+# What a bare comment from a `feedback_approvers` member on the ENGINE ISSUE
+# queues, with no `/agent-hq` command. Only the issue thread honours this --
+# a work PR is a wider audience, so it still requires an explicit command.
+# Drop the key to require a command everywhere.
+comment_default_task: triage
 # Who may spend engine budget from a work-repo PR. A PR is a wider audience
 # than the engine issue, so this is an explicit allowlist, never "anyone who
 # can comment".

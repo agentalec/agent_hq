@@ -3,7 +3,7 @@ against fake adapters and a real git-JSON state store.
 
 Every task's transition is driven by `.agent-hq/control.json` (the three
 outcomes: `handoff`/`complete`/`blocked`) validated through
-`engine.handoff.validate_handoffs` + `engine.engine.apply_handoffs` -- there
+`engine.handoff.validate_queue` + `engine.engine.apply_queue` -- there
 is no more static `on_success` chain, so fake agents emit `control.json`
 directly (either via `FakeAgent.run`, or written into the transported
 `execute_dir_for(...)` the same way tests write `execute-result.json`).
@@ -95,7 +95,7 @@ class FakeAgent:
         self.usage_known = usage_known
         self.cost_usd = cost_usd
         self.tokens = tokens
-        self.control = control if control is not None else {"outcome": "complete"}
+        self.control = control if control is not None else {"outcome": "queue", "queue": []}
         self.apply_patch_error = apply_patch_error
         self.land_result = land_result
         # pr_ref -> {"state": ..., "merged": ...}; unlisted refs read as open.
@@ -179,18 +179,33 @@ class FakeGate:
 
 
 class FakeMessaging:
-    def __init__(self, comments=None):
+    """`comments` are the default thread; `by_subject` overrides per subject id.
+
+    The engine polls MORE than one comment thread per ticket now (the engine
+    issue and each work PR), so a fake that answered every subject with the same
+    list would have one comment queue two runs. `by_subject` is how a test says
+    which thread a comment is on; `comments` remains the default for the
+    subjects it does not name.
+    """
+
+    def __init__(self, comments=None, by_subject=None):
         self.calls = []
         # [{"id", "body", "author", "created_at"}], as the adapter returns them.
         self.comments = list(comments or [])
+        self.by_subject = {str(k): list(v) for k, v in (by_subject or {}).items()}
         self.listed: list[tuple] = []
+        self.reactions: list[tuple] = []
 
     def notify(self, audience, message, links, event_id):
         self.calls.append((audience, message, event_id))
 
+    def react(self, comment_id, content):
+        self.reactions.append((comment_id, content))
+
     def list_comments(self, subject_id, since=None):
         self.listed.append((subject_id, since))
-        return [c for c in self.comments if since is None or c["created_at"] >= since]
+        thread = self.by_subject.get(str(subject_id), self.comments)
+        return [c for c in thread if since is None or c["created_at"] >= since]
 
 
 class FakeWorkflowApi:
@@ -490,7 +505,7 @@ def test_prepare_base_commit_uses_recorded_head_and_survives_downstream_failure(
     _seed(store, _run_dict("buildrun", "build", state="RUNNING"))
     _stage(config, "buildrun", "impl/7.md", "the impl")
     _write_execute_result(config, "buildrun")
-    _write_control(config, "buildrun", {"outcome": "complete"})
+    _write_control(config, "buildrun", {"outcome": "queue", "queue": []})
     agent = FakeAgent(tmp_path / "work")
     adapters = _adapters(tracker=FakeTracker(_details()), agent=agent)
     run_task("buildrun", "collect", config, taskdefs, store,
@@ -545,8 +560,8 @@ def test_collect_gated_task_waits_gate(config, taskdefs, store, tmp_path):
     _stage(config, "specrun", "specs/7/spec.md", "the spec")
     _write_execute_result(config, "specrun", cost_usd=2.0, tokens=50)
     _write_control(config, "specrun", {
-        "outcome": "handoff",
-        "handoffs": [
+        "outcome": "queue",
+        "queue": [
             {"key": "build-1", "task": "build", "reason": "ready for build",
              "artifacts": ["specs/7/spec.md"]},
         ],
@@ -589,6 +604,38 @@ def test_collect_gated_task_waits_gate(config, taskdefs, store, tmp_path):
     assert work_repo["recorded_head"] == "commit-specrun"
 
 
+def test_collect_gated_run_may_not_also_cancel(config, taskdefs, store, tmp_path):
+    """`pending_handoffs` carries a gated run's additions but nothing carries
+    its removals, so approving later would apply half the declaration. Rejected
+    outright, down the ordinary invalid-control path, rather than half-applied."""
+    _seed(store, _run_dict("specrun", "spec", state="RUNNING",
+                           bindings={"agent-session": "claude-code-headless", "gate": "pr-review"}))
+    _stage(config, "specrun", "specs/7/spec.md", "the spec")
+    _write_execute_result(config, "specrun", cost_usd=2.0, tokens=50)
+    _write_control(config, "specrun", {
+        "outcome": "queue",
+        "queue": [
+            {"key": "build-1", "task": "build", "reason": "ready",
+             "artifacts": ["specs/7/spec.md"]},
+        ],
+        "cancel_pending": True,
+    })
+    adapters = _adapters(
+        tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"),
+        gate=FakeGate(request_id="42"),
+    )
+    run_task("specrun", "collect", config, taskdefs, store,
+             now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
+
+    runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
+    assert runs["specrun"]["state"] == "FAILED"
+    # Nothing was written by the rejected transaction: no gate wait, no children.
+    assert not any(r["state"] == "QUEUED" and r["run_id"] != "specrun" for r in runs.values())
+    assert "may not also cancel" in "".join(
+        e.get("detail") or "" for e in store.read_events("7")
+    )
+
+
 def test_collect_opens_pr_records_pr_ref(config, taskdefs, store, tmp_path):
     """`build` (fixture stand-in for `implement`) declares `opens_pr: true`:
     collect must open a draft PR via the injected agent-session adapter and
@@ -597,7 +644,7 @@ def test_collect_opens_pr_records_pr_ref(config, taskdefs, store, tmp_path):
     _seed(store, _run_dict("buildrun", "build", state="RUNNING"))
     _stage(config, "buildrun", "impl/7.md", "the impl")
     _write_execute_result(config, "buildrun")
-    _write_control(config, "buildrun", {"outcome": "complete"})
+    _write_control(config, "buildrun", {"outcome": "queue", "queue": []})
     agent = FakeAgent(tmp_path / "work")
     adapters = _adapters(tracker=FakeTracker(_details()), agent=agent)
     run_task("buildrun", "collect", config, taskdefs, store,
@@ -637,7 +684,7 @@ def test_landed_commit_message_is_the_run_s_own_summary(config, taskdefs, store,
     `materialize_work_patch`, so `control.summary` is the only description
     that survives to the work repo. Ticket and run id are trailers."""
     message = _landed_message(config, taskdefs, store, tmp_path, {
-        "outcome": "complete",
+        "outcome": "queue", "queue": [],
         "summary": "feat: add the patient-age formatter\n\nCovers the under-1y case.",
     })
     subject, _, rest = message.partition("\n")
@@ -652,13 +699,13 @@ def test_landed_commit_falls_back_to_the_ticket_when_no_summary(
     config, taskdefs, store, tmp_path
 ):
     """A run that declares no summary still beats a bare run id."""
-    message = _landed_message(config, taskdefs, store, tmp_path, {"outcome": "complete"})
+    message = _landed_message(config, taskdefs, store, tmp_path, {"outcome": "queue", "queue": []})
     assert message.partition("\n")[0] == "build: Add backend endpoint"
 
 
 def test_long_commit_subject_is_truncated(config, taskdefs, store, tmp_path):
     message = _landed_message(config, taskdefs, store, tmp_path, {
-        "outcome": "complete", "summary": "feat: " + "add the patient-age formatter " * 5,
+        "outcome": "queue", "queue": [], "summary": "feat: " + "add the patient-age formatter " * 5,
     })
     subject = message.partition("\n")[0]
     assert len(subject) <= 72
@@ -670,20 +717,24 @@ def test_collect_reuses_stable_branch_and_pr_across_tasks(config, taskdefs, stor
     every task -- a second task on the same ticket/repo lands on the same
     branch and never opens a second PR."""
     _seed(store, _run_dict("buildrun", "build", state="RUNNING"))
+    # The next entry is already queued, so the first collect does not drain the
+    # queue -- a mid-route run whose queue ran dry would BLOCK the ticket, and
+    # then the second collect would (correctly) be a zombie.
+    store.write(lambda txn: txn.put_run(
+        "7", _run_dict("buildrun2", "build", state="QUEUED", parent_run_id="buildrun")
+    ))
     _stage(config, "buildrun", "impl/7.md", "the impl")
     _write_execute_result(config, "buildrun")
-    _write_control(config, "buildrun", {"outcome": "complete"})
+    _write_control(config, "buildrun", {"outcome": "queue", "queue": []})
     agent = FakeAgent(tmp_path / "work")
     adapters = _adapters(tracker=FakeTracker(_details()), agent=agent)
     run_task("buildrun", "collect", config, taskdefs, store,
              now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
 
-    store.write(lambda txn: txn.put_run(
-        "7", _run_dict("buildrun2", "build", state="RUNNING", parent_run_id="buildrun")
-    ))
+    store.write(lambda txn: txn.update_run("7", "buildrun2", state="RUNNING"))
     _stage(config, "buildrun2", "impl/7.md", "more impl")
     _write_execute_result(config, "buildrun2")
-    _write_control(config, "buildrun2", {"outcome": "complete"})
+    _write_control(config, "buildrun2", {"outcome": "queue", "queue": []})
     run_task("buildrun2", "collect", config, taskdefs, store,
              now_iso="2026-07-18T10:00:00Z", adapter_fn=adapters)
 
@@ -705,8 +756,8 @@ def test_collect_handoff_ungated_applies_immediately(config, taskdefs, store, tm
     _stage(config, "buildrun", "impl/7.md", "the impl")
     _write_execute_result(config, "buildrun")
     _write_control(config, "buildrun", {
-        "outcome": "handoff",
-        "handoffs": [{"key": "final-1", "task": "finalize", "reason": "done building"}],
+        "outcome": "queue",
+        "queue": [{"key": "final-1", "task": "finalize", "reason": "done building"}],
     })
     adapters = _adapters(tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"))
     run_task("buildrun", "collect", config, taskdefs, store,
@@ -762,7 +813,7 @@ def test_collect_patch_apply_failure_fails_run_never_lands(config, taskdefs, sto
                            source_event_id="evt", enqueue_index=0))
     _stage(config, "buildrun", "impl/7.md", "the impl")
     _write_execute_result(config, "buildrun")
-    _write_control(config, "buildrun", {"outcome": "complete"})
+    _write_control(config, "buildrun", {"outcome": "queue", "queue": []})
     agent = FakeAgent(tmp_path / "work", apply_patch_error="patch does not apply")
     adapters = _adapters(tracker=FakeTracker(_details()), agent=agent)
     run_task("buildrun", "collect", config, taskdefs, store,
@@ -801,7 +852,7 @@ def test_collect_finalize_marks_pr_ready_and_waits_for_the_merge(config, taskdef
     )
     _stage(config, "finalrun", "specs/7/summary.md", "Ticket 7 shipped: PR ready, QA green.")
     _write_execute_result(config, "finalrun", cost_usd=0.5, tokens=5)
-    _write_control(config, "finalrun", {"outcome": "complete"})
+    _write_control(config, "finalrun", {"outcome": "queue", "queue": []})
     agent = FakeAgent(tmp_path / "work")
     tracker = FakeTracker(_details())
     adapters = _adapters(tracker=tracker, agent=agent)
@@ -836,7 +887,7 @@ def test_collect_completion_without_a_pr_closes_the_issue_immediately(
     )
     _stage(config, "finalrun", "specs/7/summary.md", "No code changes were needed.")
     _write_execute_result(config, "finalrun", cost_usd=0.5, tokens=5)
-    _write_control(config, "finalrun", {"outcome": "complete"})
+    _write_control(config, "finalrun", {"outcome": "queue", "queue": []})
     tracker = FakeTracker(_details())
     adapters = _adapters(tracker=tracker, agent=FakeAgent(tmp_path / "work"))
     run_task("finalrun", "collect", config, taskdefs, store,
@@ -846,44 +897,45 @@ def test_collect_completion_without_a_pr_closes_the_issue_immediately(
     assert store.read_state("7")["status"] == "DONE"
 
 
-def test_collect_completion_pins_awaiting_human_input_without_summary(config, taskdefs, store, tmp_path):
-    """A terminal SUCCEEDED run whose own artifacts don't include the
-    declared summary (e.g. an unwired terminal task) never auto-completes --
-    it pins "awaiting human input" instead."""
+def test_queue_running_dry_before_the_final_task_blocks(config, taskdefs, store, tmp_path):
+    """A run that queues nothing when it is NOT `projects.final_task` stopped the
+    route early. That blocks the ticket -- it used to pin "awaiting human input"
+    and leave the status ACTIVE, so the issue read `hq:active` with nothing
+    running and nobody was paged."""
     _seed(store, _run_dict("buildrun", "build", state="RUNNING"))
     _stage(config, "buildrun", "impl/7.md", "the impl")
     _write_execute_result(config, "buildrun")
-    _write_control(config, "buildrun", {"outcome": "complete"})
+    _write_control(config, "buildrun", {"outcome": "queue", "queue": []})
     tracker = FakeTracker(_details())
     adapters = _adapters(tracker=tracker, agent=FakeAgent(tmp_path / "work"))
     run_task("buildrun", "collect", config, taskdefs, store,
              now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
 
-    assert store.read_state("7")["status"] == "ACTIVE"
-    assert any("awaiting human input" in body for _, body, _ in tracker.pinned)
+    state = store.read_state("7")
+    assert state["status"] == "BLOCKED"
+    assert "ran dry after `build`" in state["block_reason"]
+    assert state["block_source"] == "engine"
+    # And a human is actually told, rather than a pin nobody is paged for.
+    assert adapters.messaging.calls
 
 
-def test_review_park_posts_findings_comment_then_awaits_human(config, taskdefs, store):
-    """Review-park endpoint: a terminal run that parks (no summary artifact)
-    but recorded a review.md surfaces its accumulated findings as a ticket-
-    thread comment before pinning awaiting-human -- the PR is left in draft.
-    Keyed on the review.md filename, not a task name."""
-    review = _run_dict("revrun", "review", state="SUCCEEDED", artifacts=["specs/7/review.md"])
-    _seed(store, review)
+def test_completing_on_the_final_task_posts_the_summary(config, taskdefs, store):
+    """The positive case: the terminal run IS `projects.final_task`, so the
+    route reached its designed end and the ticket finishes. No PR recorded here,
+    so it closes to DONE."""
+    config.projects["final_task"] = "build"
+    final = _run_dict("buildrun", "build", state="SUCCEEDED", artifacts=["specs/7/summary.md"])
+    _seed(store, final)
     store.write(
-        lambda txn: txn.write_artifact(
-            "7", "revrun", "specs/7/review.md", b"## Round 3\n- blocker: auth check still missing\n"
-        )
+        lambda txn: txn.write_artifact("7", "buildrun", "specs/7/summary.md", b"all done\n")
     )
     tracker = FakeTracker(_details())
     adapters = _adapters(tracker=tracker)
-    _complete_if_queue_empty(store, config, adapters, "7", review)
 
-    findings = [c for c in adapters.messaging.calls if c[2] == "7:revrun:done:review-findings"]
-    assert len(findings) == 1
-    assert "auth check still missing" in findings[0][1]
-    assert any("awaiting human input" in body for _, body, _ in tracker.pinned)
-    assert store.read_state("7")["status"] == "ACTIVE"  # parked, not DONE; PR left in draft
+    _complete_if_queue_empty(store, config, adapters, "7", final)
+
+    assert store.read_state("7")["status"] == "DONE"
+    assert any("all done" in body for _, body, _ in tracker.closing_summaries)
 
 
 def test_collect_auto_approved_gate_never_waits(config, taskdefs, store, tmp_path):
@@ -899,8 +951,8 @@ def test_collect_auto_approved_gate_never_waits(config, taskdefs, store, tmp_pat
     _stage(config, "specrun", "specs/7/spec.md", "the spec")
     _write_execute_result(config, "specrun", cost_usd=2.0, tokens=50)
     _write_control(config, "specrun", {
-        "outcome": "handoff",
-        "handoffs": [
+        "outcome": "queue",
+        "queue": [
             {"key": "build-1", "task": "build", "reason": "ready for build",
              "artifacts": ["specs/7/spec.md"]},
         ],
@@ -1062,7 +1114,7 @@ def test_collect_stores_a_directory_artifact_as_bytes(config, taskdefs, store, t
     _stage(config, "specrun", "specs/7/spec.md", "the spec")
     _stage(config, "specrun", "specs/7/shots/desktop.png", png)
     _write_execute_result(config, "specrun", cost_usd=1.0, tokens=10)
-    _write_control(config, "specrun", {"outcome": "complete"})
+    _write_control(config, "specrun", {"outcome": "queue", "queue": []})
 
     gate = FakeGate()
     run_task("specrun", "collect", config, taskdefs, store, now_iso="2026-07-18T09:00:00Z",
@@ -1184,7 +1236,7 @@ def test_collect_ticket_blocked_mid_collect_is_zombie_noop(config, taskdefs, sto
     _seed(store, _run_dict("buildrun", "build", state="RUNNING"))
     _stage(config, "buildrun", "impl/7.md", "the impl")
     _write_execute_result(config, "buildrun")
-    _write_control(config, "buildrun", {"outcome": "complete"})
+    _write_control(config, "buildrun", {"outcome": "queue", "queue": []})
     store.write(lambda txn: txn.set_ticket("7", status="BLOCKED"))
     agent = FakeAgent(tmp_path / "work")
     adapters = _adapters(tracker=FakeTracker(_details()), agent=agent)
@@ -1224,7 +1276,7 @@ def test_collect_redriven_lost_run_creates_no_duplicate_side_effects(
     # lands -- a zombie by now (its own run state is no longer RUNNING).
     _stage(config, "buildrun", "impl/7.md", "the impl")
     _write_execute_result(config, "buildrun")
-    _write_control(config, "buildrun", {"outcome": "complete"})
+    _write_control(config, "buildrun", {"outcome": "queue", "queue": []})
     agent = FakeAgent(tmp_path / "work")
     run_task("buildrun", "collect", config, taskdefs, store,
              now_iso="2026-07-18T09:05:00Z", adapter_fn=_adapters(tracker=tracker, agent=agent))
@@ -1555,7 +1607,7 @@ def test_sweep_pr_request_changes_from_an_approver_queues_rework(config, taskdef
     the engine, and its text reaches the rework prompt."""
     _feedback_config(config)
     _with_pr(store)
-    messaging = FakeMessaging([_comment(101, "/agent-hq request-changes fix the N+1")])
+    messaging = FakeMessaging(by_subject={"11": [_comment(101, "/agent-hq request-changes fix the N+1")]})
     adapters = _adapters(
         tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
     )
@@ -1586,7 +1638,7 @@ def test_sweep_pr_command_from_a_non_approver_is_ignored(config, taskdefs, store
     _feedback_config(config)
     _with_pr(store)
     messaging = FakeMessaging(
-        [_comment(101, "/agent-hq request-changes ship it", author="random-drive-by")]
+        by_subject={"11": [_comment(101, "/agent-hq request-changes ship it", author="random-drive-by")]}
     )
     adapters = _adapters(
         tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
@@ -1604,7 +1656,7 @@ def test_sweep_pr_command_from_a_non_approver_is_ignored(config, taskdefs, store
 def test_sweep_pr_ordinary_conversation_queues_nothing(config, taskdefs, store, tmp_path):
     _feedback_config(config)
     _with_pr(store)
-    messaging = FakeMessaging([_comment(101, "nice, wonder if this handles nulls")])
+    messaging = FakeMessaging(by_subject={"11": [_comment(101, "nice, wonder if this handles nulls")]})
     adapters = _adapters(
         tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
     )
@@ -1620,7 +1672,7 @@ def test_sweep_pr_feedback_is_idempotent_across_passes(config, taskdefs, store, 
     that already exists."""
     _feedback_config(config)
     _with_pr(store)
-    messaging = FakeMessaging([_comment(101, "/agent-hq request-changes fix it")])
+    messaging = FakeMessaging(by_subject={"11": [_comment(101, "/agent-hq request-changes fix it")]})
     adapters = _adapters(
         tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
     )
@@ -1636,9 +1688,297 @@ def test_sweep_pr_feedback_is_idempotent_across_passes(config, taskdefs, store, 
     store.write(lambda txn: txn.update_run("7", rework_id, state="SUCCEEDED"))
     _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
 
-    assert messaging.listed[1][1] == "2026-07-18T08:00:00Z"  # narrowed by the watermark
+    # Indexed by subject, not by call order: the sweep polls the engine issue
+    # as well as each work PR, so position in `listed` is not the PR's poll
+    # count. The second PR poll is narrowed by the watermark the first stored.
+    pr_polls = [since for subject, since in messaging.listed if subject == "11"]
+    assert pr_polls == [None, "2026-07-18T08:00:00Z"]
     assert [c["id"] for c in messaging.list_comments("11", "2026-07-18T08:00:00Z")] == [101]
     assert [r["run_id"] for r in store.read_state("7")["runs"]] == ["finalrun", rework_id]
+
+
+def _issue_comments(*comments):
+    """Comments on the ENGINE ISSUE thread (subject id = the ticket number)."""
+    return {"7": list(comments)}
+
+
+def test_engine_never_acts_on_its_own_comment(config, taskdefs, store, tmp_path):
+    """THE guard. Escalations, pins and gate requests all land on the engine
+    issue, so the moment that thread became a polled subject the engine could
+    answer itself: block -> escalate posts a comment -> run -> block, forever,
+    spending real money each lap.
+
+    Every engine-authored comment carries an `<!--hq:...-->` marker (the
+    messaging adapter's event-id dedupe marker, or the pinned marker), and that
+    is checked before anything else. The comment below is otherwise perfectly
+    qualifying -- authored by an approver, on the right thread -- so only the
+    marker can be stopping it."""
+    _feedback_config(config)
+    config.projects["comment_default_task"] = "build"
+    _with_pr(store, status="BLOCKED")
+    messaging = FakeMessaging(by_subject=_issue_comments(
+        _comment(201, "<!--hq:evt:7:somerun:escalation-->\n@example-alice run failed"),
+    ))
+    adapters = _adapters(
+        tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    state = store.read_state("7")
+    assert [r for r in state["runs"] if r["state"] == "QUEUED"] == []
+    assert state["status"] == "BLOCKED"  # not revived by its own escalation
+    # Still watermarked: the engine's own comment must not be re-read forever.
+    assert state["comments_polled_at"] == "2026-07-18T08:00:00Z"
+
+
+def test_every_read_comment_gets_an_outcome_reaction(config, taskdefs, store, tmp_path):
+    """Without this, a comment that queued work and one that was ignored look
+    identical from the issue -- and so does a thread the engine has not polled
+    at all. `gigincg` commenting while not an approver was exactly that: nothing
+    happened and nothing said so.
+
+    Reactions rather than replies because the watermark is inclusive at the
+    boundary second, so a comment can be re-read; a reply would duplicate where
+    a reaction is idempotent at the API.
+    """
+    _feedback_config(config)
+    # Command-only: with `comment_default_task` set, ANY approver comment is an
+    # instruction, so there would be no "approver said something that asked for
+    # nothing" case to test. That variant is covered below.
+    config.projects.pop("comment_default_task", None)
+    _with_pr(store, status="ACTIVE")
+    messaging = FakeMessaging(by_subject=_issue_comments(
+        # The engine's own pinned comment: skipped by the marker guard, and
+        # deliberately NOT reacted to -- it was not waiting for an answer.
+        _comment(400, "<!--hq:pinned--> Queue is empty."),
+        _comment(401, "just thinking out loud", author="example-alice"),
+        _comment(402, "not on the allowlist", author="random-drive-by"),
+        _comment(403, "/agent-hq do build please", author="example-alice"),
+    ))
+    adapters = _adapters(
+        tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    reacted = dict(messaging.reactions)
+    assert 400 not in reacted                 # engine's own comment, untouched
+    assert reacted[401] == "eyes"             # read, asked for nothing
+    assert reacted[402] == "eyes"             # read, not authorized -- the case that was silent
+    assert reacted[403] == "rocket"           # produced the run
+
+
+def test_with_a_default_task_a_bare_approver_comment_counts_as_an_instruction(
+    config, taskdefs, store, tmp_path
+):
+    """The pilot sets `comment_default_task: triage`, which means an approver
+    thinking out loud on the issue queues work. That is the intent -- the issue
+    thread is a control surface, not a discussion board -- but it is worth
+    pinning, because the reaction is what tells the commenter it happened."""
+    _feedback_config(config)
+    config.projects["comment_default_task"] = "build"
+    _with_pr(store, status="ACTIVE")
+    messaging = FakeMessaging(by_subject=_issue_comments(
+        _comment(405, "hmm, the search box is on the wrong page"),
+    ))
+    adapters = _adapters(
+        tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    assert dict(messaging.reactions)[405] == "rocket"
+    queued = [r for r in store.read_state("7")["runs"] if r["state"] == "QUEUED"]
+    assert len(queued) == 1
+
+
+def test_a_refused_comment_is_not_marked_as_queued(config, taskdefs, store, tmp_path):
+    """Over the comment-run ceiling the ticket blocks and escalates, so the
+    reaction must not claim the work was queued."""
+    _feedback_config(config)
+    config.budgets["max_comment_runs_per_ticket"] = 1
+    _with_pr(store, status="ACTIVE")
+    store.write(lambda txn: txn.put_run("7", _run_dict(
+        "spent", "build", state="SUCCEEDED", source_event_id="issue-comment:1",
+    )))
+    messaging = FakeMessaging(by_subject=_issue_comments(
+        _comment(404, "/agent-hq do build again"),
+    ))
+    adapters = _adapters(
+        tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    assert dict(messaging.reactions)[404] == "eyes"
+    assert store.read_state("7")["status"] == "BLOCKED"
+
+
+def test_comment_run_budget_refuses_and_blocks(config, taskdefs, store, tmp_path):
+    """A ceiling separate from `loop_guard.max_runs`. Without it a chatty thread
+    exhausts the ticket's run budget, blocks the ticket, and the next comment
+    unblocks it -- an oscillation that spends money on every lap."""
+    _feedback_config(config)
+    config.budgets["max_comment_runs_per_ticket"] = 1
+    _with_pr(store, status="ACTIVE")
+    # One comment-sourced run already on the ticket.
+    store.write(lambda txn: txn.put_run("7", _run_dict(
+        "spent", "build", state="SUCCEEDED", source_event_id="issue-comment:1",
+    )))
+    messaging = FakeMessaging(by_subject=_issue_comments(
+        _comment(202, "/agent-hq do build please retry"),
+    ))
+    adapters = _adapters(
+        tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    state = store.read_state("7")
+    assert [r for r in state["runs"] if r["state"] == "QUEUED"] == []
+    assert state["status"] == "BLOCKED"
+    assert "comment-triggered runs" in state["block_reason"]
+
+
+def test_comment_unblocks_a_blocked_ticket(config, taskdefs, store, tmp_path):
+    """Nothing in the engine clears BLOCKED, so before this the only ways out
+    were a full restart via re-label or hand-editing the state branch. A comment
+    is now the exit -- and the block fields are cleared with it, so the ticket
+    does not run ACTIVE still reporting an old reason."""
+    _feedback_config(config)
+    config.projects["comment_default_task"] = "build"
+    _with_pr(store, status="ACTIVE")
+    store.write(lambda txn: txn.set_block(
+        "7", reason="queue ran dry after `build`", source="engine", interrupted_run="finalrun",
+    ))
+    messaging = FakeMessaging(by_subject=_issue_comments(
+        _comment(203, "carry on, the spec was fine"),
+    ))
+    adapters = _adapters(
+        tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    state = store.read_state("7")
+    assert state["status"] == "ACTIVE"
+    assert state["block_reason"] is None
+    assert state["block_source"] is None
+    assert state["interrupted_run_id"] is None
+    queued = [r for r in state["runs"] if r["state"] == "QUEUED"]
+    assert len(queued) == 1 and queued[0]["task_id"] == "build"
+    # The blocked reason rides along so the task can see why it stopped.
+    rework = [e for e in store.read_events("7") if e["kind"] == "run.rework"]
+    assert "ran dry" in rework[-1]["detail"]
+    assert rework[-1]["actor"] == "example-alice"
+    assert rework[-1]["source"] == "issue-comment:203"
+
+
+def test_a_blocked_ticket_with_queued_work_is_still_polled(config, taskdefs, store, tmp_path):
+    """Regression: dispatch skips BLOCKED tickets, so a QUEUED run on one is not
+    going anywhere and must not veto the poll that would release it. Gating the
+    poll on "nothing in flight" (which counts QUEUED) made BLOCKED unexitable
+    exactly when work was waiting behind it."""
+    _feedback_config(config)
+    config.projects["comment_default_task"] = "build"
+    _with_pr(store, status="ACTIVE")
+    store.write(lambda txn: (
+        txn.put_run("7", _run_dict("stuck", "build", state="QUEUED")),
+        txn.set_block("7", reason="retries exhausted", source="engine"),
+    ))
+    messaging = FakeMessaging(by_subject=_issue_comments(_comment(204, "try again")))
+    adapters = _adapters(
+        tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    assert store.read_state("7")["status"] == "ACTIVE"
+
+
+def test_comment_runs_at_the_front_of_the_queue(config, taskdefs, store, tmp_path):
+    """A comment is an interjection: it runs BEFORE work already planned, or it
+    could not re-plan it. Pending entries keep their relative order and stay
+    non-negative."""
+    _feedback_config(config)
+    config.projects["comment_default_task"] = "build"
+    _with_pr(store, status="ACTIVE")
+    store.write(lambda txn: (
+        txn.put_run("7", _run_dict("planned-a", "build", state="QUEUED", queue_seq=3)),
+        txn.put_run("7", _run_dict("planned-b", "build", state="QUEUED", queue_seq=4)),
+    ))
+    messaging = FakeMessaging(by_subject=_issue_comments(_comment(205, "hold on")))
+    adapters = _adapters(
+        tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
+    inserted = next(r for r in runs.values() if r.get("source_event_id") == "issue-comment:205")
+    assert inserted["queue_seq"] == 3
+    assert runs["planned-a"]["queue_seq"] == 4
+    assert runs["planned-b"]["queue_seq"] == 5
+
+
+def test_do_command_naming_an_unknown_task_answers_instead_of_ignoring(
+    config, taskdefs, store, tmp_path
+):
+    """A typo should not read as "the engine ignored me"."""
+    _feedback_config(config)
+    _with_pr(store, status="ACTIVE")
+    messaging = FakeMessaging(by_subject=_issue_comments(
+        _comment(206, "/agent-hq do implememt fix it"),
+    ))
+    adapters = _adapters(
+        tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    assert [r for r in store.read_state("7")["runs"] if r["state"] == "QUEUED"] == []
+    assert any("implememt" in msg for _, msg, _ in adapters.messaging.calls)
+
+
+def test_bare_comment_on_a_work_pr_queues_nothing(config, taskdefs, store, tmp_path):
+    """A PR is a wider, lower-trust audience than the engine issue, so
+    `comment_default_task` is never honoured there -- an explicit command stays
+    required. Same comment, same author; only the thread differs."""
+    _feedback_config(config)
+    config.projects["comment_default_task"] = "build"
+    _with_pr(store, status="ACTIVE")
+    messaging = FakeMessaging(by_subject={"11": [_comment(207, "looks good to me")]})
+    adapters = _adapters(
+        tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    assert [r for r in store.read_state("7")["runs"] if r["state"] == "QUEUED"] == []
+
+
+def test_issue_and_pr_comment_ids_do_not_collide(config, taskdefs, store, tmp_path):
+    """Comment ids are unique per repository, not globally. The two subjects use
+    different source prefixes, so the same id on both threads is two runs rather
+    than one silently deduped away."""
+    _feedback_config(config)
+    _with_pr(store, status="ACTIVE")
+    messaging = FakeMessaging(by_subject={
+        "7": [_comment(300, "/agent-hq do build from the issue")],
+        "11": [_comment(300, "/agent-hq request-changes from the PR")],
+    })
+    adapters = _adapters(
+        tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    sources = {
+        r.get("source_event_id") for r in store.read_state("7")["runs"]
+        if r["state"] == "QUEUED"
+    }
+    assert sources == {"issue-comment:300", "pr-comment:300"}
 
 
 def test_sweep_pr_multiple_requests_fold_into_one_run(config, taskdefs, store, tmp_path):
@@ -1646,10 +1986,10 @@ def test_sweep_pr_multiple_requests_fold_into_one_run(config, taskdefs, store, t
     and no reason is dropped on the floor."""
     _feedback_config(config)
     _with_pr(store)
-    messaging = FakeMessaging([
+    messaging = FakeMessaging(by_subject={"11": [
         _comment(101, "/agent-hq request-changes fix the N+1", created_at="2026-07-18T08:00:00Z"),
         _comment(102, "/agent-hq request-changes add a test", created_at="2026-07-18T08:05:00Z"),
-    ])
+    ]})
     adapters = _adapters(
         tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
     )
@@ -1668,8 +2008,8 @@ def test_sweep_pr_feedback_respects_the_loop_guard(config, taskdefs, store, tmp_
     """A comment thread must not spend past the ceilings a handoff respects."""
     _feedback_config(config)
     _with_pr(store)
-    config.budgets["loop_guard"] = {"max_runs": 1, "max_depth": 12}
-    messaging = FakeMessaging([_comment(101, "/agent-hq request-changes again")])
+    config.budgets["loop_guard"] = {"max_runs": 1}
+    messaging = FakeMessaging(by_subject={"11": [_comment(101, "/agent-hq request-changes again")]})
     adapters = _adapters(
         tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
     )
@@ -1693,7 +2033,7 @@ def test_sweep_pr_feedback_waits_while_a_run_is_in_flight(config, taskdefs, stor
             txn.put_run("7", _run_dict("buildrun", "build", state="RUNNING")),
         )
     )
-    messaging = FakeMessaging([_comment(101, "/agent-hq request-changes fix it")])
+    messaging = FakeMessaging(by_subject={"11": [_comment(101, "/agent-hq request-changes fix it")]})
     adapters = _adapters(
         tracker=FakeTracker(_details()),
         agent=FakeAgent(tmp_path / "work"),

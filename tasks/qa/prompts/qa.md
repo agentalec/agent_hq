@@ -90,12 +90,12 @@ worse than no link at all: it advertises a screenshot that does not exist.
 Finish with a `## Limits` section: what you could not exercise, and why.
 
 Cap the whole pass at 45 minutes. If the install or build eats that budget,
-stop, write what you have with `not-exercised` verdicts, and hand off — a
-partial honest QA is a valid outcome, a timed-out run is not.
+stop, write what you have with `not-exercised` verdicts, and queue what comes
+next — a partial honest QA is a valid outcome, a timed-out run is not.
 
-## Decide the handoff (see Control output below)
+## Decide what runs next (see Control output below)
 
-Always hand off to `finalize`, forwarding `specs/{ticket}/spec.md`,
+Always queue `finalize`, forwarding `specs/{ticket}/spec.md`,
 `specs/{ticket}/review.md`, and `specs/{ticket}/qa.md`. That holds even when
 nothing user-facing changed (write `qa.md` saying so, with no screenshots)
 and when criteria failed — `qa` reports, it does not gate. Note any failure

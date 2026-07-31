@@ -38,14 +38,14 @@ that plus a checklist (see "Prompts are the behavior" below).
 
 ## Design the graph before the tasks
 
-A route is a graph whose edges are `handoff.allowed` entries; nothing else
+A route is what runs actually queue; nothing else
 wires tasks together. Sketch the edges first, then write the nodes.
 
 - Default to a linear chain with `max: 1`. Every wired task except
   `breakdown` is `max: 1`, and a linear chain is the easiest route to
   reason about, gate, and debug.
 - Fan out only where one run genuinely yields per-repo work. `breakdown` is
-  the model: `handoff.max: 2` because `config/repos.yml` configures two
+  the model: a prompt fans out per repo because `config/repos.yml` configures
   repos, and each `implement` handoff carries its `repo` field. Set `max`
   to the number of configured repos, not a round number.
 - Do not design for parallelism inside a ticket — it doesn't exist. The
@@ -62,7 +62,7 @@ actually does. Keep the yaml thin and put all the judgment in the prompt.
 Two things are injected into every prompt automatically by
 `engine.runner._assemble_prompt`: the control-output contract (the
 `.agent-hq/control.json` outcome shapes, this task's own
-`handoff.allowed`/`max`, and the output path) and the run's repo scoping.
+and the output path) and the run's repo scoping.
 Never restate either in a prompt — a stale restatement that drifts from the
 real contract is worse than silence.
 
@@ -82,7 +82,7 @@ checkable ("every acceptance criterion is testable"); skip them otherwise.
   [task-authoring.md](task-authoring.md) "Artifact namespace".
 - In a handoff, pass exactly what the child needs in `artifacts[]` — the
   child's `input_artifacts` are its only input source. The provenance rule
-  (`engine.handoff.validate_handoffs`): a run may forward only artifacts it
+  (`engine.handoff.validate_queue`): a run may forward only artifacts it
   inherited as inputs or declared as its own outputs, never an arbitrary
   worktree file.
 - Never write outside the worktree. Every proposed artifact path is
@@ -110,34 +110,39 @@ Set `timeout_working_hours` deliberately. A gate past its timeout resolves
 `EXPIRED` at the next sweep, which blocks the ticket and escalates — an
 overly tight timeout turns a slow reviewer into a blocked ticket.
 
-## End every route the finalize way
+## End every route on `final_task`
 
-Queue-empty completion (`engine.engine._complete_if_queue_empty`) closes
-the issue only when the terminal run's own recorded artifacts include
-`specs/{ticket}/summary.md`. So every route must end with a task that:
+Queue-empty completion (`engine.engine._complete_if_queue_empty`) finishes a
+ticket only when the terminal run's task is the one named by
+`config/projects.yml` `final_task` (`finalize` in the pilot). That task must:
 
-- declares `specs/{ticket}/summary.md` in `outputs.artifacts`,
-- emits `{"outcome": "complete"}` — i.e. proposes no handoffs on the
-  terminal run.
+- declare `specs/{ticket}/summary.md` in `outputs.artifacts` — there has to be
+  something to post, and a required declared output means a run that skips it
+  fails rather than completing silently,
+- queue nothing, so the queue is actually empty when it finishes.
 
-Leaving `handoff.allowed` off the terminal task entirely is the recommended
-convention, but the engine never checks it — a task that declares handoffs
-yet emits `complete` closes the ticket identically.
+A queue that drains on any **other** task did not finish the route, it stopped
+early: the ticket goes `BLOCKED` with that reason and escalates. Naming the
+endpoint in config rather than checking for a filename is what makes those two
+outcomes distinguishable — before, a run that stopped halfway and a run that
+finished looked identical to the engine unless one happened to write a file
+called `summary.md`.
 
-That is the `finalize` pattern, and it's a convention, not a special case —
-any task shaped this way terminates a route the same way. A route that ends
-without it leaves the ticket pinned "awaiting human input" instead of
-closed.
+To move the endpoint, repoint `final_task` (via `hq-config`) — the engine still
+special-cases no task name.
+
+A task that *gives up* should emit `{"outcome": "blocked", "reason": "..."}`
+instead; `review` does this at its round cap. Queueing nothing would look like
+the route ending in the wrong place.
 
 ## Staged tasks are normal
 
 It is fine — expected, even — to define a task nobody hands off to yet.
 `clinical`, `poll`, `docs`, and `qa` are all valid library members that
-stay unwired until some task's `handoff.allowed` names them; `agent-hq
-tasks validate` only requires that handoff *targets* resolve, not that
-every task is targeted. Record the activation edit as a header comment in
-the task's own `task.yml`, the way `clinical` does ("activate by pointing
-`tasks/spec/task.yml` `handoff.allowed` at clinical"), so wiring it in
+stay unqueued until some prompt names them; `agent-hq tasks validate` checks
+each task in isolation and never asks whether anything queues it. Record that
+it is staged as a header comment in the task's own `task.yml`, the way
+`clinical` does, so using it
 later is a documented one-liner rather than archaeology.
 
 ## Budgets and retries
@@ -153,7 +158,7 @@ that actually constrain a task:
 - `budget.max_runtime_min` — size to the task's real work, not a default:
   `implement` gets 90, document-producing tasks get 30, `finalize` 15. Too
   small kills healthy runs; too large delays lost-run detection.
-- `loop_guard` (`max_runs`/`max_depth`) in `config/budgets.yml` is the
+- `loop_guard.max_runs` in `config/budgets.yml` is the
   ticket-level backstop, checked both before handoffs apply and at
   dispatch; `in_flight_cap` is a global concurrent-ticket cap, checked at
   dispatch/claim only. Leave them alone when adding a task unless
@@ -163,7 +168,7 @@ that actually constrain a task:
 ## Testing a new task
 
 1. `agent-hq tasks validate` — schema, on-disk skill files, every
-   `handoff.allowed` target resolves, declared `components` ports exist in
+   declared `components` ports exist in
    `components.yml`.
 2. If the task introduces a new graph shape (a new fan-out, a new gate
    binding), extend `tests/test_task_library.py` — its checks are generic
@@ -180,13 +185,13 @@ that actually constrain a task:
 - Expecting engine behavior keyed to a task name — there is none; even
   `intake` and `finalize` are not special-cased
   (`test_no_intake_task_directory` pins it).
-- Handing off to a task not in your `handoff.allowed` — the entire handoff
-  set is rejected (`engine.handoff.validate_handoffs`).
+- Queueing a task id that is not in the loaded library — the entire declaration
+  set is rejected (`engine.handoff.validate_queue`).
 - Absolute or `..` artifact paths — containment check rejects the set
   (`engine.handoff._check_containment`).
 - Forwarding an artifact outside your provenance set (not inherited, not
-  your own declared output) — rejected by `validate_handoffs`.
-- Emitting `"outcome": "handoff"` with an empty `handoffs` list —
+  your own declared output) — rejected by `validate_queue`.
+- Emitting `"outcome": "queue"` with no `queue` key at all —
   schema-invalid (`control.schema.json` requires `minItems: 1`); an empty
   set of next steps is `"complete"`.
 - Relying on `max_cost_usd`/`ticket_cap_usd` for safety under the Copilot

@@ -82,9 +82,9 @@ worktree, and execute reads them back to build its own transported output:
   further payload -- no apply, no land, no push.
 - **`control.json`** (`schemas/control.schema.json`) -- read only when
   `execute-result.json` reports `"success"`. One of the three control
-  outcomes (`handoff`/`complete`/`blocked`,
+  outcomes (`queue`/`blocked`,
   `docs/task-authoring.md` "Control outcomes"); validated by
-  `engine.handoff.validate_handoffs` before anything in it is trusted.
+  `engine.handoff.validate_queue` before anything in it is trusted.
 - **The staged declared/input artifacts** -- execute containment-checks and
   copies the declared `outputs.artifacts` and any restored `input_artifacts`
   into a staging directory (the first traversal boundary); collect

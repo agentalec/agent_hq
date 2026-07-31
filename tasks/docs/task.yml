@@ -1,6 +1,6 @@
-# P1: activation = insert between qa and finalize (qa already hands off here
-# via handoff.allowed once qa is activated); handoff.allowed below still
-# targets finalize directly since qa isn't wired into the live chain yet.
+# P1: sits between qa and finalize in the route. No activation edit needed any
+# more -- any task in the library is queueable -- so what is missing is qa's
+# prompt queueing `docs` ahead of `finalize` instead of `finalize` alone.
 # Docs destination is per repos.yml docs role/destination (requirements §12
 # open question -- until answered, write under the target repo's own docs/
 # dir).
@@ -17,10 +17,6 @@ skills:
 outputs:
   artifacts:
     - specs/{ticket}/docs.md
-handoff:
-  allowed:
-    - finalize
-  max: 1
 budget:
   max_cost_usd: 5
   max_runtime_min: 30

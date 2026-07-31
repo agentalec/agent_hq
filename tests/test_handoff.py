@@ -1,6 +1,6 @@
-"""Tests for engine.handoff.validate_handoffs -- pure schema, containment,
+"""Tests for engine.handoff.validate_queue -- pure schema, containment,
 and provenance validation of a task's proposed handoffs. No state-store
-input: ledger/loop/budget/depth guards are Task 9's apply_handoffs, not this
+input: ledger/loop/budget/depth guards are Task 9's apply_queue, not this
 module."""
 
 import os
@@ -8,7 +8,7 @@ import os
 import pytest
 
 from engine.config import Config
-from engine.handoff import validate_handoffs
+from engine.handoff import validate_queue
 from engine.models import RunState, TaskRun
 
 TICKET_ID = "T-1"
@@ -16,7 +16,6 @@ TICKET_ID = "T-1"
 SOURCE_TASKDEF = {
     "id": "spec",
     "outputs": {"artifacts": ["specs/{ticket}/spec.md"]},
-    "handoff": {"allowed": ["implement", "review"], "max": 2},
 }
 
 TASKDEFS = {
@@ -27,7 +26,8 @@ TASKDEFS = {
 }
 
 CONFIG = Config(
-    components={}, repos={"org/repo": {}}, projects={}, approvers={}, budgets={}
+    components={}, repos={"org/repo": {}}, projects={}, approvers={},
+    budgets={"max_queue_length": 2},
 )
 
 
@@ -61,7 +61,7 @@ def worktree(tmp_path):
 
 
 def _handoff_doc(*handoffs):
-    return {"outcome": "handoff", "handoffs": list(handoffs)}
+    return {"outcome": "queue", "queue": list(handoffs)}
 
 
 def _valid_item(**overrides):
@@ -78,7 +78,7 @@ def _valid_item(**overrides):
 
 def test_valid_handoff_set_accepted(worktree):
     control = _handoff_doc(_valid_item())
-    accepted, reason = validate_handoffs(
+    accepted, reason = validate_queue(
         control, taskdef=SOURCE_TASKDEF, taskdefs=TASKDEFS, config=CONFIG,
         worktree=worktree, run=_run(),
     )
@@ -93,8 +93,8 @@ def test_valid_handoff_set_accepted(worktree):
 
 
 def test_non_handoff_outcome_is_a_noop(worktree):
-    control = {"outcome": "complete"}
-    accepted, reason = validate_handoffs(
+    control = {"outcome": "queue", "queue": []}
+    accepted, reason = validate_queue(
         control, taskdef=SOURCE_TASKDEF, taskdefs=TASKDEFS, config=CONFIG,
         worktree=worktree, run=_run(),
     )
@@ -105,10 +105,10 @@ def test_non_handoff_outcome_is_a_noop(worktree):
 def test_schema_invalid_control_doc_rejects_whole_set(worktree):
     # handoff item missing required "reason" -> schema-invalid.
     control = {
-        "outcome": "handoff",
-        "handoffs": [{"key": "impl-1", "task": "implement"}],
+        "outcome": "queue",
+        "queue": [{"key": "impl-1", "task": "implement"}],
     }
-    accepted, reason = validate_handoffs(
+    accepted, reason = validate_queue(
         control, taskdef=SOURCE_TASKDEF, taskdefs=TASKDEFS, config=CONFIG,
         worktree=worktree, run=_run(),
     )
@@ -119,7 +119,7 @@ def test_schema_invalid_control_doc_rejects_whole_set(worktree):
 
 def test_absolute_artifact_path_rejected(worktree):
     control = _handoff_doc(_valid_item(artifacts=["/etc/passwd"]))
-    accepted, reason = validate_handoffs(
+    accepted, reason = validate_queue(
         control, taskdef=SOURCE_TASKDEF, taskdefs=TASKDEFS, config=CONFIG,
         worktree=worktree, run=_run(),
     )
@@ -129,7 +129,7 @@ def test_absolute_artifact_path_rejected(worktree):
 
 def test_parent_traversal_artifact_path_rejected(worktree):
     control = _handoff_doc(_valid_item(artifacts=["../secret.txt"]))
-    accepted, reason = validate_handoffs(
+    accepted, reason = validate_queue(
         control, taskdef=SOURCE_TASKDEF, taskdefs=TASKDEFS, config=CONFIG,
         worktree=worktree, run=_run(),
     )
@@ -139,7 +139,7 @@ def test_parent_traversal_artifact_path_rejected(worktree):
 
 def test_missing_artifact_file_rejected(worktree):
     control = _handoff_doc(_valid_item(artifacts=["specs/T-1/missing.md"]))
-    accepted, reason = validate_handoffs(
+    accepted, reason = validate_queue(
         control, taskdef=SOURCE_TASKDEF, taskdefs=TASKDEFS, config=CONFIG,
         worktree=worktree, run=_run(),
     )
@@ -155,7 +155,7 @@ def test_symlink_escape_artifact_rejected(worktree, tmp_path_factory):
     os.symlink(secret, escape_link)
 
     control = _handoff_doc(_valid_item(artifacts=["specs/T-1/escape.md"]))
-    accepted, reason = validate_handoffs(
+    accepted, reason = validate_queue(
         control, taskdef=SOURCE_TASKDEF, taskdefs=TASKDEFS, config=CONFIG,
         worktree=worktree, run=_run(),
     )
@@ -165,7 +165,7 @@ def test_symlink_escape_artifact_rejected(worktree, tmp_path_factory):
 
 def test_unknown_target_task_rejected(worktree):
     control = _handoff_doc(_valid_item(task="does-not-exist", artifacts=[]))
-    accepted, reason = validate_handoffs(
+    accepted, reason = validate_queue(
         control, taskdef=SOURCE_TASKDEF, taskdefs=TASKDEFS, config=CONFIG,
         worktree=worktree, run=_run(),
     )
@@ -173,19 +173,24 @@ def test_unknown_target_task_rejected(worktree):
     assert "not a known task" in reason
 
 
-def test_target_not_in_allowed_rejected(worktree):
+def test_any_task_in_the_library_may_be_queued(worktree):
+    """There is no per-task allowlist any more: the route is the queue, not a
+    static adjacency table across every task.yml. `finalize` was previously
+    unreachable from `spec` and is now a legitimate entry -- which is exactly
+    what lets a spec that finds nothing to build route straight to a closing
+    summary."""
     control = _handoff_doc(_valid_item(task="finalize", artifacts=[]))
-    accepted, reason = validate_handoffs(
+    accepted, reason = validate_queue(
         control, taskdef=SOURCE_TASKDEF, taskdefs=TASKDEFS, config=CONFIG,
         worktree=worktree, run=_run(),
     )
-    assert accepted == []
-    assert "handoff.allowed" in reason
+    assert reason is None
+    assert [h.target_task for h in accepted] == ["finalize"]
 
 
 def test_unknown_repo_rejected(worktree):
     control = _handoff_doc(_valid_item(repo="org/unknown-repo", artifacts=[]))
-    accepted, reason = validate_handoffs(
+    accepted, reason = validate_queue(
         control, taskdef=SOURCE_TASKDEF, taskdefs=TASKDEFS, config=CONFIG,
         worktree=worktree, run=_run(),
     )
@@ -193,18 +198,18 @@ def test_unknown_repo_rejected(worktree):
     assert "configured repo" in reason
 
 
-def test_over_max_handoffs_rejected(worktree):
+def test_over_max_queue_length_rejected(worktree):
     control = _handoff_doc(
         _valid_item(key="impl-1", task="implement", artifacts=[]),
         _valid_item(key="impl-2", task="implement", artifacts=[]),
         _valid_item(key="review-1", task="review", artifacts=[]),
     )
-    accepted, reason = validate_handoffs(
+    accepted, reason = validate_queue(
         control, taskdef=SOURCE_TASKDEF, taskdefs=TASKDEFS, config=CONFIG,
         worktree=worktree, run=_run(),
     )
     assert accepted == []
-    assert "handoff.max" in reason
+    assert "max_queue_length" in reason
 
 
 def test_duplicate_handoff_key_rejected(worktree):
@@ -212,7 +217,7 @@ def test_duplicate_handoff_key_rejected(worktree):
         _valid_item(key="dup", task="implement", artifacts=[]),
         _valid_item(key="dup", task="review", artifacts=[]),
     )
-    accepted, reason = validate_handoffs(
+    accepted, reason = validate_queue(
         control, taskdef=SOURCE_TASKDEF, taskdefs=TASKDEFS, config=CONFIG,
         worktree=worktree, run=_run(),
     )
@@ -224,7 +229,7 @@ def test_artifact_outside_provenance_rejected(worktree):
     # specs/T-1/extra.md is a real, contained file, but neither an inherited
     # input_artifact nor a declared output of this task -- must be rejected.
     control = _handoff_doc(_valid_item(artifacts=["specs/T-1/extra.md"]))
-    accepted, reason = validate_handoffs(
+    accepted, reason = validate_queue(
         control, taskdef=SOURCE_TASKDEF, taskdefs=TASKDEFS, config=CONFIG,
         worktree=worktree, run=_run(),
     )

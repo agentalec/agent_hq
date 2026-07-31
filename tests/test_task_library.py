@@ -1,12 +1,14 @@
-"""Task library: schema/library validity, handoff-target resolution,
-gate-adapter resolvability, and no-concrete-adapter-name discipline. The
-static P0_CHAIN (on_success/on_failure) is gone with the atomic handoff
-cutover (Task 9) -- every enqueue is a validated handoff, so this file
-asserts the generic properties every task must hold, not one fixed chain.
+"""Task library: schema/library validity, gate-adapter resolvability,
+no-concrete-adapter-name discipline, and retired-vocabulary discipline in the
+agent-facing prompts. The static P0_CHAIN (on_success/on_failure) is gone, and
+so is the per-task `handoff.allowed` graph that replaced it -- the route is the
+queue a run declares, so this file asserts the generic properties every task
+must hold, not one fixed chain.
 """
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -26,24 +28,7 @@ CONFIG_DIR = REPO_ROOT / "config"
 # not a task definition.
 EXPECTED_TASK_IDS = {
     "spec", "arch-plan", "arch-approval", "breakdown", "implement", "review",
-    "finalize", "clinical", "poll", "qa", "docs",
-}
-
-# The wired handoff graph a fresh ticket walks (spec's fan-out is capacity,
-# not a fixed edge -- it emits 1..handoff.max `implement` handoffs depending
-# on how many repos a ticket touches).
-EXPECTED_HANDOFF_ALLOWED = {
-    "spec": (["implement"], 3),
-    "arch-plan": (["arch-approval", "breakdown"], 1),
-    "arch-approval": (["breakdown"], 1),
-    "breakdown": (["implement"], 2),
-    "implement": (["review"], 1),
-    "review": (["implement", "qa"], 1),
-    "finalize": ([], 0),
-    "clinical": (["arch-plan"], 1),
-    "poll": ([], 0),
-    "qa": (["finalize"], 1),
-    "docs": (["finalize"], 1),
+    "finalize", "clinical", "poll", "qa", "docs", "triage",
 }
 
 CONCRETE_ADAPTER_NAMES = (
@@ -58,18 +43,17 @@ def test_task_library_loads_and_validates_clean():
     assert validate_library(taskdefs) == []
 
 
-def test_handoff_targets_resolve_within_the_library():
-    """Every handoff.allowed target of every task resolves to a loaded task
-    id (validate_library's own check), and the graph's specific
-    allowed-set/max matches the plan -- most tellingly spec's
-    handoff.max: 3, the minimal route's per-repo fan-out point."""
+def test_no_task_declares_a_route():
+    """The library encodes no graph. There used to be a hand-maintained
+    `handoff.allowed`/`max` table across every task.yml -- eleven files
+    describing one route -- and the queue replaced it: what runs next is
+    declared per run and revisable by any later run. A task.yml that still
+    carries a `handoff` block would fail schema load, so this asserts the
+    stronger property that none of them mention it at all."""
     taskdefs = load_all(TASKS_DIR, SCHEMAS_DIR)
-    for task_id, (allowed, max_handoffs) in EXPECTED_HANDOFF_ALLOWED.items():
-        handoff = taskdefs[task_id].get("handoff", {})
-        assert handoff.get("allowed", []) == allowed, f"{task_id}: handoff.allowed mismatch"
-        assert handoff.get("max", 0) == max_handoffs, f"{task_id}: handoff.max mismatch"
-        for target in allowed:
-            assert target in taskdefs, f"{task_id}: handoff target '{target}' not in library"
+    assert set(taskdefs) == EXPECTED_TASK_IDS
+    offenders = [tid for tid, td in taskdefs.items() if "handoff" in td]
+    assert offenders == []
 
 
 def test_gate_tasks_resolve_to_constructible_adapters():
@@ -119,3 +103,64 @@ def test_cli_tasks_validate_direct_call(capsys):
     args = parser.parse_args(["tasks", "validate", "--repo-root", str(REPO_ROOT)])
     args.func(args, REPO_ROOT)
     assert "tasks OK" in capsys.readouterr().out
+
+
+# Vocabulary the control schema no longer accepts. `outcome: "handoff"` and
+# `outcome: "complete"` are rejected outright, and `handoff.allowed`/`max` are
+# not schema fields any more -- a prompt naming any of them tells an agent to
+# emit a document that fails validation, which costs a run and its retries
+# before the ticket blocks.
+RETIRED_PROMPT_VOCABULARY = re.compile(
+    r'"outcome"\s*:\s*"(handoff|complete)"'
+    r"|handoff\.(allowed|max)"
+    r"|\bhand(s|ed)? off\b"
+    r"|\bhandoffs?\b",
+    re.IGNORECASE,
+)
+
+
+def _prompt_sources() -> list[Path]:
+    files = sorted(TASKS_DIR.glob("*/prompts/*.md")) + sorted(TASKS_DIR.glob("*/checklists/*.md"))
+    assert files, "task prompts not found"
+    return files
+
+
+def test_no_prompt_teaches_retired_control_vocabulary():
+    """Prompts are agent-facing contract, and nothing else checks them.
+
+    The engine never parses a prompt, so a prompt still saying "propose a
+    `review` handoff" passes every other check in CI and only fails against a
+    real ticket -- the agent emits `outcome: "handoff"`, the schema rejects it,
+    the run burns its retries and blocks. That is exactly what happened to
+    `implement` and `qa` when the queue cutover landed: the engine-injected
+    contract said `queue` while the task prompt said handoff, and the two
+    disagreed in the one place no test was looking.
+
+    Same discipline `test_no_task_yml_names_a_concrete_adapter` applies to
+    task.yml, applied to the text an agent actually reads.
+    """
+    offenders = {
+        str(path.relative_to(TASKS_DIR)): sorted({m.group(0) for m in
+                                                  RETIRED_PROMPT_VOCABULARY.finditer(path.read_text())})
+        for path in _prompt_sources()
+        if RETIRED_PROMPT_VOCABULARY.search(path.read_text())
+    }
+    assert not offenders, (
+        f"prompts teach vocabulary the control schema rejects: {offenders}. "
+        'A run declares `{"outcome": "queue", "queue": [...]}`; an empty queue '
+        "means nothing further. Say `queue`/`entry`, never `handoff`."
+    )
+
+
+def test_task_yml_headers_do_not_describe_the_retired_route_model():
+    """The same trap one file over: a `task.yml` header comment claiming a task
+    is activated by "pointing spec's handoff.allowed at it" sends whoever reads
+    it looking for a field that no longer exists."""
+    offenders = [
+        str(p.relative_to(TASKS_DIR)) for p in sorted(TASKS_DIR.glob("*/task.yml"))
+        if RETIRED_PROMPT_VOCABULARY.search(p.read_text())
+    ]
+    assert not offenders, (
+        f"task.yml headers describe the retired handoff model: {offenders}. "
+        'A task declares no route; "unwired" now means no prompt queues it.'
+    )

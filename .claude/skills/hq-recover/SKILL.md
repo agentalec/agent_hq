@@ -8,6 +8,8 @@ disable-model-invocation: true
 
 Contract: only the procedures below are permitted. Any situation they do not cover means stop and report — never improvise a state edit. Until the operator CLI (`retry`/`block`/`unblock`/`reopen`, hardening Tasks 14-18) lands, repair means hand-editing the `agent-hq-state` branch; this skill is the safe path for that.
 
+**Try a comment first.** A `BLOCKED` ticket usually needs no state surgery at all: an authorized comment on the engine issue clears the block and queues work (`engine.engine.poll_comments`). Post `/agent-hq do <task> <reason>` to name the task, or a bare comment if `projects.comment_default_task` is set. Picked up by the dispatch cron (`*/15`), not instantly. Use the procedures below only when that cannot express the repair — a specific run needs retrying at `attempt+1`, a branch has diverged, or the closing side effects landed half-done.
+
 Diagnose first with `hq-ticket`; this skill assumes you already know which procedure applies. If reading `agent-hq-state` fails because the branch does not exist, there is no deployment state yet — nothing to recover; stop.
 
 ## Steps
@@ -24,7 +26,7 @@ Diagnose first with `hq-ticket`; this skill assumes you already know which proce
    3. Force-reset `agent-hq/<issue-number>` back to exactly `recorded_head`. Do NOT hand-merge: a merge moves the head off `recorded_head`, so the retried attempt just re-blocks.
    4. §10 says "retry" — that CLI does not exist yet; perform procedure (C) below as its manual equivalent.
 
-3. **(B) Crashed queue-empty completion** — ticket `ACTIVE`, every run terminal, no `pending_handoffs`, but closing side effects are partial (the sweep never re-drives this; hardening Task 15 gap). Mirror `engine/engine.py:_complete_if_queue_empty`:
+3. **(B) Crashed queue-empty completion** — ticket `ACTIVE`, every run terminal, no pending entries, the terminal run's task IS `config/projects.yml` `final_task`, but closing side effects are partial (the sweep never re-drives this; hardening Task 15 gap). If the terminal run is NOT `final_task`, the queue ran dry early and the engine should have BLOCKED the ticket — that is not this procedure; report it. Mirror `engine/engine.py:_complete_if_queue_empty`:
    1. Determine which side effects already happened: closing summary comment on the issue (dedupe marker `<!--hq:evt:<ticket>:<run_id>:done:closing-summary-->`)? Each `work_repos[].pr_ref` marked ready? Issue closed?
    2. Complete only the missing ones, confirming each with the operator first: post the summary from the terminal run's ledger copy (`tickets/<id>/artifacts/<run_id>/specs/<id>/summary.md`) including its dedupe marker; for each recorded PR, split `pr_ref` (`owner/repo#<number>`) on `#` and run `gh pr ready <number> -R <owner/repo>` (mirrors `mark_pr_ready` in `engine/adapters/claude_code_headless.py`); `gh issue close <issue-number>`.
    3. Edit `state.json`: `"status": "DONE"`. Diff, confirm, commit, push per step 1.
@@ -42,7 +44,7 @@ Diagnose first with `hq-ticket`; this skill assumes you already know which proce
       using the old run's `parent_run_id` if set, else its `source_event_id`. If you cannot recompute the id (missing `handoff_key` on a run that should have one, or a root run whose causal fields — `parent_run_id`/`source_event_id` — are unclear) — stop and report.
    3. The new run copies the old run's `task_id`, `ticket_id`, `bindings`, `chain_depth`, `parent_run_id`, `handoff_key`, `repo`, and `input_artifacts` (a root run copies `source_event_id` and `enqueue_index` instead of the last three), with `"state": "QUEUED"`, `"cost_usd": null`, `"tokens": null`, `"usage_known": false`, `"artifacts": []`. `task_version` is NOT copied from the old run: use the current `version` in `tasks/<task_id>/task.yml` (what `taskdef["version"]` resolves to), matching `reenqueue_same`.
    4. Append the matching event to `events.jsonl`: `{"event_id": "<new_run_id>:queued", "kind": "run.queued", "ticket_id": ..., "run_id": ..., "task_id": ..., "task_version": ..., "state": "QUEUED", "bindings": {...}}`.
-   5. Set the ticket back to `"status": "ACTIVE"` and null out `block_reason`/`block_source`/`interrupted_run_id`. Diff, confirm, commit, push, then `gh workflow run dispatch.yml`.
+   5. Set the ticket back to `"status": "ACTIVE"` and null out `block_reason`/`block_source`/`interrupted_run_id`. Diff, confirm, commit, push, then `gh workflow run dispatch.yml`. (A comment does all of this for a NEW run; procedure (C) exists for re-running a SPECIFIC past run at `attempt+1`, which a comment cannot express.)
 
 5. **(D) Pause/resume dispatch.** `gh variable set AGENT_HQ_KILL_SWITCH --body 1` pauses all new dispatch (in-flight runs finish; intake still records). `gh variable delete AGENT_HQ_KILL_SWITCH` resumes. See `docs/operations.md` §6.
 

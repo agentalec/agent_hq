@@ -5,8 +5,9 @@ against `schemas/task.schema.json`, plus whatever `prompts/`/`checklists/`
 skill files it references. There is no fixed chain and no task-name special
 case in the engine (`intake` and `finalize` used to be special-cased; neither
 is anymore -- see "Dispositions" below). A task joins the live graph the
-moment some other task's `handoff.allowed` names it and an accepted run
-proposes a handoff to it; nothing else "wires it in".
+moment some run's accepted `control.json` queues it; nothing else "wires it
+in". Since any task in the library is queueable, that means editing a prompt --
+there is no declared edge to add.
 
 ## Generic fields
 
@@ -45,7 +46,6 @@ ignored):
   "Artifact namespace".
 - `opens_pr` -- open (or reuse) a draft PR on the task's work branch on
   success, independent of any gate (`implement` sets this).
-- `handoff.allowed` / `handoff.max` -- see "Handoffs" below.
 - `tools` -- allowed tool names passed to the agent adapter.
 - `budget.max_cost_usd` / `max_runtime_min` / `retries` -- per-run caps; see
   "Budgets".
@@ -69,33 +69,34 @@ they can stay unbound in `components.yml` without breaking validation.
 ## Handoffs
 
 A task proposes its children by writing `.agent-hq/control.json` with
-outcome `"handoff"` (see "Control outcomes" below); the task definition only
+outcome `"queue"` (see "Control outcomes" below); the task definition only
 constrains what's *allowed*:
 
-- `handoff.allowed` -- the list of task ids this task may hand off to. A
-  proposed handoff naming any other target is rejected
-  (`engine.handoff.validate_handoffs`).
-- `handoff.max` -- the most handoffs one run may propose in a single
-  `control.json`. Most tasks are `max: 1` (a linear next step); `breakdown`
-  is `max: 2` -- the pilot's fan-out point, emitting one `implement` handoff
-  per affected configured repo (`config/repos.yml`), each carrying that
-  repo in the handoff's `repo` field.
+- There is **no** per-task allowlist. Any task in the loaded library may be
+  queued by any run; a target that isn't a loaded task id is rejected
+  (`engine.handoff.validate_queue`).
+- `budgets.max_queue_length` -- the most entries one run may declare in a
+  single `control.json`. One global sanity bound rather than a per-task table:
+  a run cannot queue 500 tasks, but which tasks it queues is its own call.
+  Fan-out is a prompt decision -- the pilot's `spec` queues one `implement`
+  entry per affected configured repo (`config/repos.yml`), each carrying that
+  repo in the entry's `repo` field.
 
-Validation is pure and total-rejection: `engine.handoff.validate_handoffs`
-checks the whole proposed set against `schemas/control.schema.json`, then
-path containment on every artifact, then per-handoff semantics (target in
-`handoff.allowed` and in the loaded library, `repo` if given is a configured
-repo, key uniqueness, total count `<= handoff.max`, and each artifact is in
+Validation is pure and total-rejection: `engine.handoff.validate_queue`
+checks the whole declaration against `schemas/control.schema.json`, then
+path containment on every artifact, then per-entry semantics (target in
+the loaded library, `repo` if given is a configured repo, key uniqueness,
+total count `<= budgets.max_queue_length`, and each artifact is in
 the run's **provenance set** -- its inherited `input_artifacts` union its own
 substituted `outputs.artifacts`, never an arbitrary worktree file). Any
 single violation rejects the *entire* set, not just the offending item.
 
 State-dependent guards that the pure validator can't see (each artifact's
 ledger entry actually exists, and the ticket's loop/budget/depth limits
-still hold) are enforced atomically in `engine.engine.apply_handoffs`, inside
+still hold) are enforced atomically in `engine.engine.apply_queue`, inside
 the same state-store transaction that marks the source run terminal --
 so a crash between "run succeeded" and "children queued" can't happen.
-Handoff-spawned run identity is `(source_run_id, handoff_key, attempt)` only
+A queued entry's run identity is `(source_run_id, key, attempt)` only
 -- the target task id is **not** part of it, so a re-delivered handoff key
 always resolves to the same run id regardless of payload content (the first
 accepted delivery wins; a duplicate is a no-op).
@@ -107,20 +108,37 @@ Every completed run writes exactly one `.agent-hq/control.json`
 schema-invalid means the run *fails* per its own retry budget, never
 "ignored"):
 
-- `{"outcome": "handoff", "handoffs": [...]}` -- `handoffs` required,
-  non-empty. With no `gates.post` on this task, accepted handoffs enqueue as
-  `QUEUED` runs immediately and this run finishes `SUCCEEDED`. With a
-  `gates.post` entry, the proposals are stored as `run.pending_handoffs` and
-  the run stops at `WAITING_GATE`; a gate `APPROVED` decision applies them
-  and completes the run — unless that gate sets `auto_approve`, in which case
-  they apply immediately as if there were no gate (see "Gates" below).
-- `{"outcome": "complete"}` -- `handoffs` forbidden; the run finishes
-  `SUCCEEDED` with no children. This is what feeds queue-empty completion
-  (see "Terminal-summary convention" below) -- a task with no
-  `handoff.allowed` at all (e.g. `finalize`) always emits this.
-- `{"outcome": "blocked", "reason": "..."}` -- `handoffs` forbidden, `reason`
-  required; the run is recorded blocked and the ticket moves to `BLOCKED`
-  with that reason, escalating to a human with no auto-retry.
+- `{"outcome": "queue", "queue": [...]}` -- `queue` required; entries run in
+  the order listed. With no `gates.post` on this task they enqueue as `QUEUED`
+  runs immediately and this run finishes `SUCCEEDED`. With a `gates.post`
+  entry, they are stored as `run.pending_handoffs` and the run stops at
+  `WAITING_GATE`; a gate `APPROVED` decision applies them and completes the
+  run — unless that gate sets `auto_approve`, in which case they apply
+  immediately as if there were no gate (see "Gates" below).
+
+  An **empty** `queue` is how a run says "nothing further from me" — there is
+  no separate `complete` outcome. This is what feeds queue-empty completion
+  (see "Where the route ends" below), and a task with no
+  prompt that queues anything (e.g. `finalize`) always emits it.
+
+  A `queue` outcome may also remove pending work: `"cancel": ["<key>"]` drops
+  named `QUEUED` entries, and `"cancel_pending": true` clears the whole
+  remaining queue before this document's own entries are added. **Omission
+  never cancels** — a run that simply does not mention a pending entry leaves
+  it alone, so one branch of a fan-out cannot drop its sibling by saying
+  nothing. Each removal is recorded as a `run.cancelled` event and the run
+  becomes `CANCELLED`; runs are never deleted, because `runs` is the audit
+  trail. A key matching no `QUEUED` entry is ignored; a key matching more than
+  one is an error, since keys are unique only per source run.
+
+  A run that stops at a gate may **not** also cancel: `pending_handoffs`
+  carries its additions but nothing carries its removals, so approving later
+  would apply half the declaration. The engine rejects that combination
+  outright rather than half-applying it.
+- `{"outcome": "blocked", "reason": "..."}` -- `queue`/`cancel`/
+  `cancel_pending` forbidden, `reason` required; the run is recorded blocked
+  and the ticket moves to `BLOCKED` with that reason, escalating to a human
+  with no auto-retry.
 
 Any outcome may also carry `summary` -- a Conventional Commits description of
 what the run changed in the work repo. Its first line becomes the subject of
@@ -132,7 +150,7 @@ back to the ticket title).
 
 `engine.runner._assemble_prompt` injects this contract into every prompt
 automatically (the required outcome shapes, the `summary` convention, this
-task's own `handoff.allowed`/`max`, and the output path) -- a task never needs
+the queueable task list and `max_queue_length`, and the output path) -- a task never needs
 to spell this out itself, and it does not depend on the task including
 `constitution.md` in `context`.
 
@@ -274,9 +292,9 @@ config and the notes file.
 Per-task `budget.max_cost_usd`/`max_runtime_min`/`retries` bound one run.
 Ticket-wide caps live in `config/budgets.yml`: `ticket_cap_usd` (total spend
 across every run on a ticket), `in_flight_cap` (global concurrent-ticket
-cap), and `loop_guard.max_runs`/`max_depth` (runaway-handoff protection --
+cap), and `loop_guard.max_runs` (runaway protection --
 total run count and causal chain depth). All four are checked before a
-handoff set is applied (`engine.engine.apply_handoffs`) and before a queued
+handoff set is applied (`engine.engine.apply_queue`) and before a queued
 run is dispatched, so a task cannot out-run these limits by proposing more
 handoffs. Under the default Copilot-billed executor, run cost is not
 metered (`cost_usd: 0.0`, `usage_known: true`), so `max_cost_usd`/
@@ -284,27 +302,44 @@ metered (`cost_usd: 0.0`, `usage_known: true`), so `max_cost_usd`/
 guard, the in-flight cap, and runtime deadlines still do (see
 `docs/architecture.md` deviation 9).
 
-## Terminal-summary convention
+## Where the route ends
 
-Queue-empty completion (`engine.engine._complete_if_queue_empty`) fires once
-a ticket has no `QUEUED`/`RUNNING`/`WAITING_GATE` run and no
-`pending_handoffs` left anywhere, but only actually closes the ticket if the
-**terminal run's own recorded artifacts** include the declared summary path
-`specs/{ticket}/summary.md` -- a reopened ticket can't complete off a prior
-lifecycle's stale summary. `finalize` is exactly this: no `handoff.allowed`,
-one declared output (`specs/{ticket}/summary.md`), always emits
-`{"outcome": "complete"}`. Any task chain that wants queue-empty completion
-to land on a real "done" message should end the same way: declare the
-summary artifact, emit `complete`, propose no further handoffs. Without a
-matching summary, completion instead pins "awaiting human input" and takes
-no terminal action.
+Queue-empty completion (`engine.engine._complete_if_queue_empty`) fires once a
+ticket has no `QUEUED`/`RUNNING`/`WAITING_GATE` run and no pending entries left
+anywhere. What it does then depends on **which task** the terminal run was:
+
+- **It is `config.projects.final_task`** (`finalize` in the pilot): the route
+  reached its designed end. The closing summary posts from that run's ledger
+  copy of `specs/{ticket}/summary.md`, every recorded work PR is marked ready,
+  and the ticket goes `AWAITING_MERGE` (or `DONE` when no PR exists).
+- **It is anything else**: the queue ran dry early. The ticket goes `BLOCKED`
+  with that reason and escalates. "I am done" and "I stopped" are different
+  facts, and only one of them should close a ticket.
+
+This used to key off whether the terminal run happened to produce
+`specs/{ticket}/summary.md` -- a filename the engine had to know about, sitting
+oddly beside "the engine special-cases no task name". `final_task` is config,
+the mirror of `initial_task` and `feedback_task`, so "the route finished" and
+"someone wrote a file with the right name" stop being the same question.
+
+`final_task` still needs to declare `specs/{ticket}/summary.md` as an output so
+there is something to post; a required declared output means a run that didn't
+write it fails rather than completing silently. A **reopened** ticket cannot
+complete off a prior lifecycle's stale summary, because the summary is read from
+the terminal run's own ledger namespace.
+
+A task that gives up rather than finishes should emit
+`{"outcome": "blocked", "reason": "..."}` -- `review` does exactly this when its
+round cap is reached. That is what labels the issue for a human, escalates, and
+records the reason; queueing nothing would instead look like the route ending
+somewhere unexpected.
 
 ## Validation
 
 - `agent-hq tasks validate` loads every `tasks/*/task.yml`
   (`engine.taskdefs.load_all`, schema + on-disk skill/context checks),
   cross-checks the library (`engine.taskdefs.validate_library`: every
-  `handoff.allowed` target resolves to a loaded task id), and checks every
+  ids are unique and self-consistent), and checks every
   task's declared `components` port against `components.yml`
   (`engine.config.validate_task_bindings`).
 - `agent-hq config validate` validates `config/*.yml` against
@@ -319,17 +354,17 @@ no terminal action.
 | Task | Status |
 |---|---|
 | intake | **Not a task.** Engine entry logic (`engine.runner.intake_ticket`) reads eligibility from `config.projects["intake"]`/`["public"]`/`["public_safe_label"]` and enqueues `config.projects["initial_task"]` (`spec` in the pilot config) with the root run's resolved repo. There is no `tasks/intake/` directory and no task-name special case for it. |
-| spec | Converted (wired). `handoff.allowed: [implement]`, gated (`spec-approval`) but currently `auto_approve: true` -- the checkpoint is declared and evented, decided by the engine rather than a product owner; staffing it is deleting that one line. The fan-out point in the minimal route: `handoff.max: 3`, one `implement` handoff per affected configured repo. |
-| arch-plan | Converted, defined, **unwired** -- its header names the activation edit (point `spec`'s `handoff.allowed` back at it). `handoff.allowed: [arch-approval, breakdown]`. |
-| arch-approval | Converted, defined, **unwired** (activated with `arch-plan`, its only in-edge). Confirms the plan artifacts, no changes; gated (`default`); `handoff.allowed: [breakdown]`. |
-| breakdown | Converted, defined, **unwired** (activated with the `arch-plan` chain). `handoff.max: 2`, one `implement` handoff per affected repo when wired. |
-| implement | Converted (wired). `opens_pr: true`; `handoff.allowed: [review]`. |
-| review | Converted (wired). `handoff.allowed: [implement, qa]` -- loops back to `implement` while blockers remain (prompt-capped at 3 rounds; on the cap it emits `complete` and the engine posts the accumulated `review.md` findings to the thread, parking awaiting-human with the PR left in draft), else hands to `qa`. Round memory is `review.md` forwarded around the loop as an input artifact. Every review round also reflects its latest-round findings onto the work-repo PR as a comment (`engine.engine.post_pr_comment`, in the credentialed collect phase -- the read-only agent can't, PD-5). |
-| finalize | Converted (wired). Terminal task: writes `summary.md`, always `complete`, feeds queue-empty completion (see above). No task-name special case; any task ending this way completes the same way. |
-| clinical | Converted, defined, **unwired** until an accepted handoff selects it -- its own header names the one-line activation edit (point `spec`'s `handoff.allowed` at it). Gated (`clinical-reviewers`, `default` adapter). |
+| spec | Routed through by the pilot's prompts. Gated (`spec-approval`) but currently `auto_approve: true` -- the checkpoint is declared and evented, decided by the engine rather than a product owner; staffing it is deleting that one line. Its prompt queues one `implement` entry per affected configured repo (the fan-out point), or nothing when the ticket needs no change. |
+| arch-plan | Defined; **no prompt queues it**. Nothing to activate beyond a prompt that names it -- any task in the library is queueable. |
+| arch-approval | Defined; **no prompt queues it**. Confirms the plan artifacts, no changes; gated (`default`). |
+| breakdown | Defined; **no prompt queues it**. Would queue one `implement` entry per affected repo. |
+| implement | Routed through. `opens_pr: true`; its prompt queues `review`. |
+| review | Routed through. Its prompt loops back to `implement` while blockers remain (prompt-capped at 3 rounds; on the cap it queues nothing and the engine posts the accumulated `review.md` findings to the thread, parking awaiting-human with the PR left in draft), else queues `qa`. Round memory is `review.md` forwarded around the loop as an input artifact. Every review round also reflects its latest-round findings onto the work-repo PR as a comment (`engine.engine.post_pr_comment`, in the credentialed collect phase -- the read-only agent can't, PD-5). |
+| finalize | Routed through, and named by `config.projects.final_task`: writes `summary.md`, queues nothing, and its completion is what finishes the ticket (see "Where the route ends"). Still no task-name special case in the engine -- the name lives in config, and pointing `final_task` elsewhere moves the endpoint. |
+| clinical | Defined; **no prompt queues it**. Gated (`clinical-reviewers`, `default` adapter). |
 | poll | Converted, defined, **unwired** -- needs the P1 reaction-based `poll` adapter (`docs/roadmap.md`); no task currently hands off to it. |
-| docs | Converted, defined, **unwired** until an accepted handoff selects it (its header names the activation edit: point `qa`'s `handoff.allowed` at it). |
-| qa | Converted (wired). `handoff.allowed: [finalize]`, always -- `qa` reports, it never gates. `writes_code: false`, so the engine discards its work patch outright: everything it leaves in the worktree is scratch, and an instruction to keep scratch under `.agent-hq/` is advisory where discarding is not. Stands the app up with the work repo's own tooling inside the devcontainer and screenshots each acceptance criterion; it declares **no** `components` port, so the deferred `qa-env` binding (`docs/ports/qa-env.md`) is still not required. Screenshots are ledger artifacts under the **directory artifact** `specs/{ticket}/screenshots/` -- kept out of the work repo, which is for product code -- and collect rewrites `qa.md`'s relative image links to their state-branch URLs before posting it to the PR (`engine.runner._ledger_image_urls`). |
+| docs | Defined; **no prompt queues it** -- it belongs between `qa` and `finalize`, so `qa`'s prompt would name it. |
+| qa | Routed through. Its prompt always queues `finalize` -- `qa` reports, it never gates. `writes_code: false`, so the engine discards its work patch outright: everything it leaves in the worktree is scratch, and an instruction to keep scratch under `.agent-hq/` is advisory where discarding is not. Stands the app up with the work repo's own tooling inside the devcontainer and screenshots each acceptance criterion; it declares **no** `components` port, so the deferred `qa-env` binding (`docs/ports/qa-env.md`) is still not required. Screenshots are ledger artifacts under the **directory artifact** `specs/{ticket}/screenshots/` -- kept out of the work repo, which is for product code -- and collect rewrites `qa.md`'s relative image links to their state-branch URLs before posting it to the PR (`engine.runner._ledger_image_urls`). |
 
 None of the above is a name the engine special-cases; every row describes a
 task-graph state (wired vs. defined-but-unwired), not an engine code path.

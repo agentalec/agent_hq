@@ -172,7 +172,7 @@ class Txn:
     def has_artifact(self, ticket_id: str, run_id: str, rel_path: str) -> bool:
         """True if `rel_path` was staged in THIS transaction or already
         persisted for (ticket_id, run_id) -- the state-dependent "ledger
-        entry exists" guard `apply_handoffs` enforces before appending a
+        entry exists" guard `apply_queue` enforces before appending a
         child run that depends on it."""
         staged = self._artifacts.get((ticket_id, run_id), {})
         if rel_path in staged:
@@ -183,7 +183,7 @@ class Txn:
         """Current in-transaction view of the ticket doc (reflects any
         mutation already applied earlier this attempt) -- for guards that
         need to see runs appended earlier in the same transaction, e.g.
-        `apply_handoffs`'s loop/budget check."""
+        `apply_queue`'s loop/budget check."""
         return self._ticket(ticket_id)
 
     def upsert_work_repo(self, ticket_id: str, repo: str, **fields) -> None:

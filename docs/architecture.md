@@ -138,7 +138,7 @@ A ticket carries one of three lifecycle states (`engine.models.TicketStatus`):
 
 A ticket also reaches `BLOCKED` **today** whenever a run's own accounting
 says it must stop: a `blocked` control outcome, a rejected/expired gate, a
-failed `apply_handoffs` guard, retries exhausted, or a tripped loop guard/
+failed `apply_queue` guard, retries exhausted, or a tripped loop guard/
 budget cap (`engine.engine._block_ticket` and its callers). The edges below
 are the hardening plan's dedicated close/reopen machinery layered on top of
 that:
@@ -170,10 +170,15 @@ that:
   **unmerged**: a human declined the work, so the ticket blocks and
   escalates rather than completing silently. Checked before the merge case —
   one abandoned PR outweighs merged siblings.
-- **[live]** `AWAITING_MERGE` -> `ACTIVE` — an approver comments
-  `/agent-hq request-changes <reason>` on a work PR
-  (`engine.engine.poll_pr_feedback`): `projects.feedback_task` is enqueued
-  with the reason threaded into its prompt.
+- **[live]** `AWAITING_MERGE` -> `ACTIVE`, and `BLOCKED` -> `ACTIVE` — an
+  approver comments on the engine issue or a work PR
+  (`engine.engine.poll_comments`): the named task is enqueued at the FRONT of
+  the ticket's queue with the comment threaded into its prompt, and the
+  lifecycle-block fields are cleared. This is the only thing in the engine that
+  clears `BLOCKED`. `/agent-hq request-changes <reason>` selects
+  `projects.feedback_task`; `/agent-hq do <task> [reason]` selects any task in
+  the library; on the engine issue only, a bare comment selects
+  `projects.comment_default_task`.
 
 Both PR-driven edges are **polled from the sweep**, not event-driven: the
 engine repository's workflows cannot observe product-repo events at all, and
