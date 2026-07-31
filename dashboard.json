@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-31T10:53:58Z",
+  "generated_at": "2026-07-31T10:54:00Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -1393,7 +1393,8 @@
           "attempt_started_at": "2026-07-22T08:20:44Z",
           "base_commit": "dbd221992b4569412c1969bffff99f2642160205"
         }
-      ]
+      ],
+      "comments_polled_at": "2026-07-22T08:21:52Z"
     },
     {
       "ticket_id": "30",
