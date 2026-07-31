@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-31T10:59:08Z",
+  "generated_at": "2026-07-31T10:59:29Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -269,7 +269,7 @@
           "chain_depth": 0,
           "source_event_id": "issue-comment:5104732429",
           "enqueue_index": 0,
-          "queue_seq": 7
+          "queue_seq": 8
         }
       ],
       "work_repos": [
@@ -281,7 +281,7 @@
           "pr_ref": "agentalec/care_fe#1"
         }
       ],
-      "comments_polled_at": "2026-07-28T13:25:43Z"
+      "comments_polled_at": "2026-07-31T10:53:57Z"
     },
     {
       "ticket_id": "16",
