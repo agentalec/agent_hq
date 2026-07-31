@@ -113,8 +113,15 @@ class GithubIssuesTracker:
         if any(marker in c.get("body", "") for c in comments):
             self._applied_events.add(event_id)
             return
+        # Collapsed, the same way the gate comment collapses its artifacts
+        # (`github_issue_comment_gate._artifact_sections`): a summary is a few
+        # KB of prose landing on a thread a human scrolls for the outcome, and
+        # a ticket that re-runs `finalize` posts more than one of them. The
+        # blank lines are required -- GitHub renders markdown inside an
+        # unspaced <details> as raw text.
+        collapsed = f"<details><summary><b>Closing summary</b></summary>\n\n{body}\n\n</details>"
         self._client.post(
-            f"/repos/{repo}/issues/{ticket_id}/comments", json={"body": f"{marker}\n{body}"}
+            f"/repos/{repo}/issues/{ticket_id}/comments", json={"body": f"{marker}\n{collapsed}"}
         )
         self._applied_events.add(event_id)
 
