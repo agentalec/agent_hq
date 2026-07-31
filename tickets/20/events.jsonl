@@ -18,3 +18,4 @@
 {"event_id": "def8efb752ecfdec:blocked", "kind": "ticket.blocked", "ticket_id": "20", "run_id": "def8efb752ecfdec", "detail": "retries exhausted"}
 {"event_id": "526e764dc267a0c9:queued", "kind": "run.queued", "ticket_id": "20", "run_id": "526e764dc267a0c9", "task_id": "spec", "task_version": 1, "state": "QUEUED", "bindings": {}}
 {"event_id": "526e764dc267a0c9:collected", "kind": "run.collected", "ticket_id": "20", "run_id": "526e764dc267a0c9", "tokens": 261600, "cost_usd": 0.191}
+{"event_id": "526e764dc267a0c9:succeeded", "kind": "run.succeeded", "ticket_id": "20", "run_id": "526e764dc267a0c9", "state": "SUCCEEDED", "artifacts": ["specs/20/spec.md"]}
