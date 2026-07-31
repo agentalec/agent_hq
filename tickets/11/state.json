@@ -761,7 +761,7 @@
       "comments_polled_at": "2026-07-31T12:24:03Z"
     }
   ],
-  "comments_polled_at": "2026-07-31T12:32:07Z",
+  "comments_polled_at": "2026-07-31T12:37:22Z",
   "block_reason": "queue ran dry after `spec` without reaching `finalize`",
   "block_source": "engine",
   "interrupted_run_id": "58530fb88aa61bd0"
