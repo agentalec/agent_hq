@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-29T12:16:04Z",
+  "generated_at": "2026-07-31T10:53:53Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -221,6 +221,23 @@
           "base_commit": "6819a4f7730935bbb053d553c44426313f17fc43",
           "output_commit": "6819a4f7730935bbb053d553c44426313f17fc43",
           "pr_ref": "agentalec/care_fe#1"
+        },
+        {
+          "run_id": "2495fcb7b19ad24d",
+          "task_id": "triage",
+          "task_version": 1,
+          "ticket_id": "11",
+          "state": "QUEUED",
+          "attempt": 0,
+          "bindings": {},
+          "cost_usd": null,
+          "tokens": null,
+          "usage_known": false,
+          "artifacts": [],
+          "chain_depth": 0,
+          "source_event_id": "issue-comment:5104732429",
+          "enqueue_index": 0,
+          "queue_seq": 7
         }
       ],
       "work_repos": [
@@ -231,7 +248,8 @@
           "recorded_head": "6819a4f7730935bbb053d553c44426313f17fc43",
           "pr_ref": "agentalec/care_fe#1"
         }
-      ]
+      ],
+      "comments_polled_at": "2026-07-28T13:25:43Z"
     },
     {
       "ticket_id": "16",
