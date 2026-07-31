@@ -1319,6 +1319,7 @@ def intake_ticket(issue_ref: str, event_key: str, config, taskdefs, store, adapt
                 ),
             )
         )
+        eng.set_status_label(config, adapter_fn, ticket_id, "BLOCKED")
         return "blocked"
 
     if _has_injection(details):
@@ -1349,6 +1350,7 @@ def intake_ticket(issue_ref: str, event_key: str, config, taskdefs, store, adapt
                 ),
             )
         )
+        eng.set_status_label(config, adapter_fn, ticket_id, "BLOCKED")
         return "blocked"
 
     pinned_id = tracker.upsert_pinned_comment(
