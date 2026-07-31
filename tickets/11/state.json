@@ -308,6 +308,23 @@
       ],
       "output_commit": "6819a4f7730935bbb053d553c44426313f17fc43",
       "pr_ref": "agentalec/care_fe#1"
+    },
+    {
+      "run_id": "a87459ad6005560e",
+      "task_id": "spec",
+      "task_version": 1,
+      "ticket_id": "11",
+      "state": "QUEUED",
+      "attempt": 0,
+      "bindings": {},
+      "cost_usd": null,
+      "tokens": null,
+      "usage_known": false,
+      "artifacts": [],
+      "chain_depth": 0,
+      "source_event_id": "11:labeled:2026-07-31T11:08:25Z",
+      "enqueue_index": 0,
+      "queue_seq": 10
     }
   ],
   "work_repos": [
