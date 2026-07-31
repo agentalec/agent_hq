@@ -10,3 +10,4 @@
 {"event_id": "a84bd0bdb87ec1cc:rework", "kind": "run.rework", "ticket_id": "20", "run_id": "a84bd0bdb87ec1cc", "detail": "@gigincg: The FacilityServices is where Search is missing", "actor": "gigincg", "source": "issue-comment:5139358001"}
 {"event_id": "a84bd0bdb87ec1cc:collected", "kind": "run.collected", "ticket_id": "20", "run_id": "a84bd0bdb87ec1cc", "tokens": 852600, "cost_usd": 0.506}
 {"event_id": "a84bd0bdb87ec1cc:failed", "kind": "run.failed", "ticket_id": "20", "run_id": "a84bd0bdb87ec1cc", "state": "FAILED"}
+{"event_id": "a84bd0bdb87ec1cc:handoff_rejected", "kind": "handoff.rejected", "ticket_id": "20", "run_id": "a84bd0bdb87ec1cc", "detail": "control.json schema violation: <root>: 'outcome' is a required property"}
