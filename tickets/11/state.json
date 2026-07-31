@@ -416,7 +416,7 @@
       "task_id": "implement",
       "task_version": 1,
       "ticket_id": "11",
-      "state": "QUEUED",
+      "state": "RUNNING",
       "attempt": 0,
       "bindings": {
         "tracker": "github-issues",
@@ -436,7 +436,9 @@
         "specs/11/spec.md",
         "specs/11/plan.md",
         "specs/11/tasks.md"
-      ]
+      ],
+      "deadline": "2026-07-31T12:51:39Z",
+      "attempt_started_at": "2026-07-31T11:21:39Z"
     }
   ],
   "work_repos": [
