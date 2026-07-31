@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-31T11:28:56Z",
+  "generated_at": "2026-07-31T11:29:35Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -452,7 +452,7 @@
           "task_id": "review",
           "task_version": 1,
           "ticket_id": "11",
-          "state": "QUEUED",
+          "state": "RUNNING",
           "attempt": 0,
           "bindings": {
             "tracker": "github-issues",
@@ -472,7 +472,9 @@
             "specs/11/spec.md",
             "specs/11/plan.md",
             "specs/11/tasks.md"
-          ]
+          ],
+          "deadline": "2026-07-31T11:59:35Z",
+          "attempt_started_at": "2026-07-31T11:29:35Z"
         }
       ],
       "work_repos": [
