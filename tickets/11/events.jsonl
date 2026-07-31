@@ -54,3 +54,4 @@
 {"event_id": "1fd46895ed42efff:queued", "kind": "run.queued", "ticket_id": "11", "run_id": "1fd46895ed42efff", "task_id": "arch-plan", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment", "gate": "github-issue-comment"}}
 {"event_id": "a87459ad6005560e:arch-plan-care-fe:accepted", "kind": "handoff.accepted", "ticket_id": "11", "run_id": "a87459ad6005560e", "detail": "Spec approved; producing architecture plan and classification for frontend patient age display changes"}
 {"event_id": "a87459ad6005560e:succeeded", "kind": "run.succeeded", "ticket_id": "11", "run_id": "a87459ad6005560e", "state": "SUCCEEDED", "artifacts": ["specs/11/spec.md"]}
+{"event_id": "1fd46895ed42efff:collected", "kind": "run.collected", "ticket_id": "11", "run_id": "1fd46895ed42efff", "tokens": 407700, "cost_usd": 0.271}
