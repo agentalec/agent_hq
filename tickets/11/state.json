@@ -280,7 +280,7 @@
       "task_id": "spec",
       "task_version": 1,
       "ticket_id": "11",
-      "state": "RUNNING",
+      "state": "SUCCEEDED",
       "attempt": 0,
       "bindings": {
         "tracker": "github-issues",
@@ -291,7 +291,9 @@
       "cost_usd": 0.263,
       "tokens": 382700,
       "usage_known": true,
-      "artifacts": [],
+      "artifacts": [
+        "specs/11/spec.md"
+      ],
       "chain_depth": 0,
       "source_event_id": "11:labeled:2026-07-31T11:04:00Z",
       "enqueue_index": 0,
@@ -303,7 +305,9 @@
       "input_from_run_id": "0dfc7128660a8b91",
       "input_artifacts": [
         "specs/11/review.md"
-      ]
+      ],
+      "output_commit": "6819a4f7730935bbb053d553c44426313f17fc43",
+      "pr_ref": "agentalec/care_fe#1"
     }
   ],
   "work_repos": [
