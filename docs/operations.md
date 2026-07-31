@@ -308,3 +308,16 @@ only ever watches PRs it opened:
   Idempotency is the derived run id (`issue-comment:<id>` or
   `pr-comment:<id>`), not the watermark. The two prefixes differ because comment
   ids are unique per repository, not globally.
+
+  **Every comment the poller reads gets an outcome reaction**, so a human can
+  tell "acted on" from "not looked at yet" without waiting to see whether a run
+  appears: 🚀 (`rocket`) means this comment produced a run, 👀 (`eyes`) means it
+  was read and produced none — not an approver, no command with no
+  `comment_default_task` configured, an unknown task id, or refused by a
+  ceiling. The engine's own comments are skipped entirely and never reacted to.
+
+  Reactions rather than replies because they are idempotent at the API: the
+  watermark is inclusive at the boundary second, so a comment can be re-read,
+  and a reply would duplicate where a reaction cannot. Best-effort and last — a
+  tracker that rejects a reaction must not fail a poll whose run already
+  landed.

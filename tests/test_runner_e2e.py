@@ -194,9 +194,13 @@ class FakeMessaging:
         self.comments = list(comments or [])
         self.by_subject = {str(k): list(v) for k, v in (by_subject or {}).items()}
         self.listed: list[tuple] = []
+        self.reactions: list[tuple] = []
 
     def notify(self, audience, message, links, event_id):
         self.calls.append((audience, message, event_id))
+
+    def react(self, comment_id, content):
+        self.reactions.append((comment_id, content))
 
     def list_comments(self, subject_id, since=None):
         self.listed.append((subject_id, since))
@@ -1726,6 +1730,89 @@ def test_engine_never_acts_on_its_own_comment(config, taskdefs, store, tmp_path)
     assert state["status"] == "BLOCKED"  # not revived by its own escalation
     # Still watermarked: the engine's own comment must not be re-read forever.
     assert state["comments_polled_at"] == "2026-07-18T08:00:00Z"
+
+
+def test_every_read_comment_gets_an_outcome_reaction(config, taskdefs, store, tmp_path):
+    """Without this, a comment that queued work and one that was ignored look
+    identical from the issue -- and so does a thread the engine has not polled
+    at all. `gigincg` commenting while not an approver was exactly that: nothing
+    happened and nothing said so.
+
+    Reactions rather than replies because the watermark is inclusive at the
+    boundary second, so a comment can be re-read; a reply would duplicate where
+    a reaction is idempotent at the API.
+    """
+    _feedback_config(config)
+    # Command-only: with `comment_default_task` set, ANY approver comment is an
+    # instruction, so there would be no "approver said something that asked for
+    # nothing" case to test. That variant is covered below.
+    config.projects.pop("comment_default_task", None)
+    _with_pr(store, status="ACTIVE")
+    messaging = FakeMessaging(by_subject=_issue_comments(
+        # The engine's own pinned comment: skipped by the marker guard, and
+        # deliberately NOT reacted to -- it was not waiting for an answer.
+        _comment(400, "<!--hq:pinned--> Queue is empty."),
+        _comment(401, "just thinking out loud", author="example-alice"),
+        _comment(402, "not on the allowlist", author="random-drive-by"),
+        _comment(403, "/agent-hq do build please", author="example-alice"),
+    ))
+    adapters = _adapters(
+        tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    reacted = dict(messaging.reactions)
+    assert 400 not in reacted                 # engine's own comment, untouched
+    assert reacted[401] == "eyes"             # read, asked for nothing
+    assert reacted[402] == "eyes"             # read, not authorized -- the case that was silent
+    assert reacted[403] == "rocket"           # produced the run
+
+
+def test_with_a_default_task_a_bare_approver_comment_counts_as_an_instruction(
+    config, taskdefs, store, tmp_path
+):
+    """The pilot sets `comment_default_task: triage`, which means an approver
+    thinking out loud on the issue queues work. That is the intent -- the issue
+    thread is a control surface, not a discussion board -- but it is worth
+    pinning, because the reaction is what tells the commenter it happened."""
+    _feedback_config(config)
+    config.projects["comment_default_task"] = "build"
+    _with_pr(store, status="ACTIVE")
+    messaging = FakeMessaging(by_subject=_issue_comments(
+        _comment(405, "hmm, the search box is on the wrong page"),
+    ))
+    adapters = _adapters(
+        tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    assert dict(messaging.reactions)[405] == "rocket"
+    queued = [r for r in store.read_state("7")["runs"] if r["state"] == "QUEUED"]
+    assert len(queued) == 1
+
+
+def test_a_refused_comment_is_not_marked_as_queued(config, taskdefs, store, tmp_path):
+    """Over the comment-run ceiling the ticket blocks and escalates, so the
+    reaction must not claim the work was queued."""
+    _feedback_config(config)
+    config.budgets["max_comment_runs_per_ticket"] = 1
+    _with_pr(store, status="ACTIVE")
+    store.write(lambda txn: txn.put_run("7", _run_dict(
+        "spent", "build", state="SUCCEEDED", source_event_id="issue-comment:1",
+    )))
+    messaging = FakeMessaging(by_subject=_issue_comments(
+        _comment(404, "/agent-hq do build again"),
+    ))
+    adapters = _adapters(
+        tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    assert dict(messaging.reactions)[404] == "eyes"
+    assert store.read_state("7")["status"] == "BLOCKED"
 
 
 def test_comment_run_budget_refuses_and_blocks(config, taskdefs, store, tmp_path):

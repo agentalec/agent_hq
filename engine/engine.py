@@ -1098,6 +1098,14 @@ def _complete_if_queue_empty(store, config, adapter_fn, ticket_id, terminal_run:
 # know its own tracker identity.
 _HQ_COMMENT_MARKER = "<!--hq:"
 
+# What the poller leaves on a comment it read, so a human can tell "acted on"
+# from "not looked at yet" without waiting to see whether a run appears.
+# Reactions rather than replies because they are idempotent at the API -- the
+# watermark is inclusive at the boundary second, so a comment can be re-read,
+# and a reply would duplicate where a reaction cannot.
+REACTION_QUEUED = "rocket"   # this comment produced a run
+REACTION_IGNORED = "eyes"    # read, understood to ask for nothing, no run
+
 
 def _comment_intent(
     body: str, *, feedback_task: str | None, default_task: str | None
@@ -1195,6 +1203,20 @@ def poll_comments(store, config, taskdefs, adapter_fn, ticket_id: str, state: di
         )
 
 
+def _acknowledge(messaging, considered: list[dict], queued_ids: set) -> None:
+    """React to every comment the poller read, saying what became of it.
+
+    Best-effort and last: a reaction is feedback, never state, so a tracker that
+    rejects one must not fail a poll that already landed its run.
+    """
+    for comment in considered:
+        content = REACTION_QUEUED if comment["id"] in queued_ids else REACTION_IGNORED
+        try:
+            messaging.react(comment["id"], content)
+        except Exception:  # noqa: BLE001,S110 -- feedback, not state; see docstring
+            pass
+
+
 def _poll_comment_subject(
     store, config, taskdefs, adapter_fn, ticket_id: str, *,
     repo: str, number: str, source_prefix: str, watermark: str | None,
@@ -1216,6 +1238,7 @@ def _poll_comment_subject(
         return
 
     requests = []
+    considered = []
     for comment in comments:
         # Ordered cheapest-and-safest first. The marker check is what stops
         # `block -> _escalate posts a comment -> run -> block` from being an
@@ -1225,7 +1248,15 @@ def _poll_comment_subject(
         # engine's identity is not an approver), but that depends on config
         # hygiene and this does not.
         if _HQ_COMMENT_MARKER in (comment.get("body") or ""):
+            # The engine's own comment. Not acknowledged either -- reacting to
+            # itself would be noise, and it is the one thing that definitely
+            # was not waiting for an answer.
             continue
+        # Everything past here gets an outcome reaction, INCLUDING comments from
+        # non-approvers. "Read, not authorized" is exactly the signal that is
+        # otherwise invisible: without it a non-approver's comment and an
+        # unpolled thread look identical from the issue.
+        considered.append(comment)
         if comment["author"] not in members:
             continue
         intent = _comment_intent(
@@ -1241,6 +1272,7 @@ def _poll_comment_subject(
 
     if not requests:
         store.write(lambda txn, w=latest_read: save_watermark(txn, w))
+        _acknowledge(messaging, considered, set())
         return
 
     # One run for the whole window: three comments asking for three things are
@@ -1253,6 +1285,8 @@ def _poll_comment_subject(
     )
     source_event_id = f"{source_prefix}:{latest_comment['id']}"
 
+    qualifying_ids = {c["id"] for c, _ in requests}
+
     if task_id not in taskdefs:
         # A typo deserves an answer. Idempotent by comment id, so at most one
         # reply per comment however often the sweep re-reads it.
@@ -1261,6 +1295,10 @@ def _poll_comment_subject(
             f"`{task_id}` is not a task in this deployment, so nothing was queued.",
             f"{source_event_id}:unknown-task",
         )
+        # Named a task, so it was not ignored -- but nothing ran. The reply
+        # above carries the detail; the reaction just keeps every read comment
+        # accounted for.
+        _acknowledge(messaging, considered, set())
         return
 
     taskdef = taskdefs[task_id]
@@ -1329,9 +1367,13 @@ def _poll_comment_subject(
     store.write(apply)
 
     if result.get("refused"):
+        # Refused loudly: the ticket blocks and escalates, so the reaction says
+        # "no run" rather than pretending this was queued.
+        _acknowledge(messaging, considered, set())
         _block_ticket(store, config, adapter_fn, ticket_id, run_id, result["refused"])
         _escalate(store, config, adapter_fn, ticket_id, run_id, result["refused"])
         return
+    _acknowledge(messaging, considered, qualifying_ids)
     if result.get("enqueued"):
         set_status_label(config, adapter_fn, ticket_id, "ACTIVE")
         ack(f"Queued `{task_id}`.", f"{run_id}:ack")
