@@ -964,11 +964,19 @@ def _mark_gate_terminal(
 
 def _complete_if_queue_empty(store, config, adapter_fn, ticket_id, terminal_run: dict) -> None:
     """After a terminal SUCCEEDED with nothing else in flight and no pending
-    handoffs anywhere on the ticket: post the closing summary and mark every
-    recorded work PR ready -- but only if the TERMINAL run's own recorded
-    artifacts include the declared closing summary (so a reopened ticket
-    can't complete off a prior lifecycle's stale summary); else pin "awaiting
-    human input".
+    entries anywhere on the ticket: post the closing summary and mark every
+    recorded work PR ready -- but only if the terminal run IS the route's
+    designed end, meaning its task is `projects.final_task`. A queue that ran
+    dry anywhere else stopped early, which is a human's problem, so the ticket
+    BLOCKs with that reason instead of pinning a note nobody is paged for.
+
+    `final_task` is config, not a filename. This used to key off whether the
+    terminal run produced `specs/{ticket}/summary.md` -- a filename convention
+    the engine had to know, sitting oddly beside "the engine special-cases no
+    task name". Naming the task in `config/projects.yml` is the same shape as
+    `initial_task` and `feedback_task` already are, and it makes "the route
+    finished" and "someone wrote a file with the right name" stop being the
+    same question.
 
     The engine's work being finished is NOT the ticket being finished. With a
     work PR recorded, this stops at `AWAITING_MERGE` and leaves the issue
@@ -994,28 +1002,26 @@ def _complete_if_queue_empty(store, config, adapter_fn, ticket_id, terminal_run:
         return
 
     tracker = adapter_fn("tracker", config.components["tracker"]["adapter"], repo=intake_repo(config))
-    summary_path = subst("specs/{ticket}/summary.md", ticket_id)
     done_key = f"{ticket_id}:{terminal_run['run_id']}:done"
-    if summary_path not in (terminal_run.get("artifacts") or []):
-        # A terminal run that parks with a review.md (the review-park
-        # endpoint: rounds exhausted, no handoff) surfaces its accumulated
-        # findings to the thread before pinning awaiting-human -- the PR is
-        # deliberately left in draft. review.md is a filename convention,
-        # same as summary.md above; the engine special-cases no task name.
-        review_path = subst("specs/{ticket}/review.md", ticket_id)
-        if review_path in (terminal_run.get("artifacts") or []):
-            findings = store.read_artifact_text(ticket_id, terminal_run["run_id"], review_path) or ""
-            notify_ticket(
-                config, adapter_fn, ticket_id,
-                "Review rounds exhausted with unresolved findings; the PR is left in "
-                "draft for human review.\n\n" + findings,
-                f"{done_key}:review-findings",
-            )
-        tracker.upsert_pinned_comment(
-            ticket_id, "Queue is empty; awaiting human input.", f"{done_key}:awaiting"
+    final_task = config.projects.get("final_task")
+    if not final_task or terminal_run.get("task_id") != final_task:
+        # The queue drained somewhere other than the route's end. BLOCKED
+        # rather than a pinned note: this is the state that means "a human must
+        # act", it labels the issue `hq:blocked`, it escalates, and it is
+        # exitable -- where `hq:active` with nothing running told an operator
+        # the engine was still working.
+        reason = (
+            f"queue ran dry after `{terminal_run.get('task_id')}` without reaching "
+            f"`{final_task or '<no final_task configured>'}`"
+        )
+        _block_ticket(store, config, adapter_fn, ticket_id, terminal_run["run_id"], reason)
+        _escalate(
+            store, config, adapter_fn, ticket_id, terminal_run["run_id"],
+            f"{reason}; the ticket is blocked pending human review.",
         )
         return
 
+    summary_path = subst("specs/{ticket}/summary.md", ticket_id)
     summary = store.read_artifact_text(ticket_id, terminal_run["run_id"], summary_path) or ""
     tracker.post_closing_summary(ticket_id, summary, f"{done_key}:closing-summary")
     watched = [wr for wr in state.get("work_repos", []) if wr.get("pr_ref")]

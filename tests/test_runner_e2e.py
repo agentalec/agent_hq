@@ -702,6 +702,12 @@ def test_collect_reuses_stable_branch_and_pr_across_tasks(config, taskdefs, stor
     every task -- a second task on the same ticket/repo lands on the same
     branch and never opens a second PR."""
     _seed(store, _run_dict("buildrun", "build", state="RUNNING"))
+    # The next entry is already queued, so the first collect does not drain the
+    # queue -- a mid-route run whose queue ran dry would BLOCK the ticket, and
+    # then the second collect would (correctly) be a zombie.
+    store.write(lambda txn: txn.put_run(
+        "7", _run_dict("buildrun2", "build", state="QUEUED", parent_run_id="buildrun")
+    ))
     _stage(config, "buildrun", "impl/7.md", "the impl")
     _write_execute_result(config, "buildrun")
     _write_control(config, "buildrun", {"outcome": "queue", "queue": []})
@@ -710,9 +716,7 @@ def test_collect_reuses_stable_branch_and_pr_across_tasks(config, taskdefs, stor
     run_task("buildrun", "collect", config, taskdefs, store,
              now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
 
-    store.write(lambda txn: txn.put_run(
-        "7", _run_dict("buildrun2", "build", state="RUNNING", parent_run_id="buildrun")
-    ))
+    store.write(lambda txn: txn.update_run("7", "buildrun2", state="RUNNING"))
     _stage(config, "buildrun2", "impl/7.md", "more impl")
     _write_execute_result(config, "buildrun2")
     _write_control(config, "buildrun2", {"outcome": "queue", "queue": []})
@@ -878,10 +882,11 @@ def test_collect_completion_without_a_pr_closes_the_issue_immediately(
     assert store.read_state("7")["status"] == "DONE"
 
 
-def test_collect_completion_pins_awaiting_human_input_without_summary(config, taskdefs, store, tmp_path):
-    """A terminal SUCCEEDED run whose own artifacts don't include the
-    declared summary (e.g. an unwired terminal task) never auto-completes --
-    it pins "awaiting human input" instead."""
+def test_queue_running_dry_before_the_final_task_blocks(config, taskdefs, store, tmp_path):
+    """A run that queues nothing when it is NOT `projects.final_task` stopped the
+    route early. That blocks the ticket -- it used to pin "awaiting human input"
+    and leave the status ACTIVE, so the issue read `hq:active` with nothing
+    running and nobody was paged."""
     _seed(store, _run_dict("buildrun", "build", state="RUNNING"))
     _stage(config, "buildrun", "impl/7.md", "the impl")
     _write_execute_result(config, "buildrun")
@@ -891,31 +896,31 @@ def test_collect_completion_pins_awaiting_human_input_without_summary(config, ta
     run_task("buildrun", "collect", config, taskdefs, store,
              now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
 
-    assert store.read_state("7")["status"] == "ACTIVE"
-    assert any("awaiting human input" in body for _, body, _ in tracker.pinned)
+    state = store.read_state("7")
+    assert state["status"] == "BLOCKED"
+    assert "ran dry after `build`" in state["block_reason"]
+    assert state["block_source"] == "engine"
+    # And a human is actually told, rather than a pin nobody is paged for.
+    assert adapters.messaging.calls
 
 
-def test_review_park_posts_findings_comment_then_awaits_human(config, taskdefs, store):
-    """Review-park endpoint: a terminal run that parks (no summary artifact)
-    but recorded a review.md surfaces its accumulated findings as a ticket-
-    thread comment before pinning awaiting-human -- the PR is left in draft.
-    Keyed on the review.md filename, not a task name."""
-    review = _run_dict("revrun", "review", state="SUCCEEDED", artifacts=["specs/7/review.md"])
-    _seed(store, review)
+def test_completing_on_the_final_task_posts_the_summary(config, taskdefs, store):
+    """The positive case: the terminal run IS `projects.final_task`, so the
+    route reached its designed end and the ticket finishes. No PR recorded here,
+    so it closes to DONE."""
+    config.projects["final_task"] = "build"
+    final = _run_dict("buildrun", "build", state="SUCCEEDED", artifacts=["specs/7/summary.md"])
+    _seed(store, final)
     store.write(
-        lambda txn: txn.write_artifact(
-            "7", "revrun", "specs/7/review.md", b"## Round 3\n- blocker: auth check still missing\n"
-        )
+        lambda txn: txn.write_artifact("7", "buildrun", "specs/7/summary.md", b"all done\n")
     )
     tracker = FakeTracker(_details())
     adapters = _adapters(tracker=tracker)
-    _complete_if_queue_empty(store, config, adapters, "7", review)
 
-    findings = [c for c in adapters.messaging.calls if c[2] == "7:revrun:done:review-findings"]
-    assert len(findings) == 1
-    assert "auth check still missing" in findings[0][1]
-    assert any("awaiting human input" in body for _, body, _ in tracker.pinned)
-    assert store.read_state("7")["status"] == "ACTIVE"  # parked, not DONE; PR left in draft
+    _complete_if_queue_empty(store, config, adapters, "7", final)
+
+    assert store.read_state("7")["status"] == "DONE"
+    assert any("all done" in body for _, body, _ in tracker.closing_summaries)
 
 
 def test_collect_auto_approved_gate_never_waits(config, taskdefs, store, tmp_path):

@@ -42,7 +42,7 @@ Scaffold a new task definition in `tasks/<id>/` so it validates, wires into the 
 ## Hard rules
 
 - No concrete adapter names anywhere in `task.yml` — test-enforced (`test_no_concrete_adapter_name_leaks_into_task_defs`).
-- A route-terminal task must declare `specs/{ticket}/summary.md` in `outputs.artifacts` and emit `complete` — otherwise the ticket never closes (queue-empty completion checks that exact artifact).
+- Only the task named by `config/projects.yml` `final_task` finishes a ticket. It must declare `specs/{ticket}/summary.md` in `outputs.artifacts` (there has to be something to post) and its prompt must queue nothing. A queue that drains on any OTHER task blocks the ticket instead — so a new terminal-ish task needs `final_task` repointed via `hq-config`, not just a summary artifact.
 - Fan-out is a prompt decision now, capped globally by `budgets.max_queue_length`. A prompt that fans out per repo should say "one entry per affected repo", not a hardcoded count.
 - Schemas are `additionalProperties: false` everywhere — no invented keys in `task.yml` or control output.
 - `budget.retries` and `max_runtime_min` are the binding knobs; `max_cost_usd` does not bind under the default `copilot-cli` executor (cost unmetered, `docs/architecture.md` deviation 9). Size runtime to the real work (implement 90, documents 30, finalize 15).

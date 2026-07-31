@@ -110,34 +110,39 @@ Set `timeout_working_hours` deliberately. A gate past its timeout resolves
 `EXPIRED` at the next sweep, which blocks the ticket and escalates — an
 overly tight timeout turns a slow reviewer into a blocked ticket.
 
-## End every route the finalize way
+## End every route on `final_task`
 
-Queue-empty completion (`engine.engine._complete_if_queue_empty`) closes
-the issue only when the terminal run's own recorded artifacts include
-`specs/{ticket}/summary.md`. So every route must end with a task that:
+Queue-empty completion (`engine.engine._complete_if_queue_empty`) finishes a
+ticket only when the terminal run's task is the one named by
+`config/projects.yml` `final_task` (`finalize` in the pilot). That task must:
 
-- declares `specs/{ticket}/summary.md` in `outputs.artifacts`,
-- emits `{"outcome": "queue", "queue": []}` — i.e. queues nothing on the
-  terminal run.
+- declare `specs/{ticket}/summary.md` in `outputs.artifacts` — there has to be
+  something to post, and a required declared output means a run that skips it
+  fails rather than completing silently,
+- queue nothing, so the queue is actually empty when it finishes.
 
-Having the terminal task's prompt queue nothing is the recommended
-convention, but the engine never checks it — a task that declares handoffs
-yet emits `complete` closes the ticket identically.
+A queue that drains on any **other** task did not finish the route, it stopped
+early: the ticket goes `BLOCKED` with that reason and escalates. Naming the
+endpoint in config rather than checking for a filename is what makes those two
+outcomes distinguishable — before, a run that stopped halfway and a run that
+finished looked identical to the engine unless one happened to write a file
+called `summary.md`.
 
-That is the `finalize` pattern, and it's a convention, not a special case —
-any task shaped this way terminates a route the same way. A route that ends
-without it leaves the ticket pinned "awaiting human input" instead of
-closed.
+To move the endpoint, repoint `final_task` (via `hq-config`) — the engine still
+special-cases no task name.
+
+A task that *gives up* should emit `{"outcome": "blocked", "reason": "..."}`
+instead; `review` does this at its round cap. Queueing nothing would look like
+the route ending in the wrong place.
 
 ## Staged tasks are normal
 
 It is fine — expected, even — to define a task nobody hands off to yet.
 `clinical`, `poll`, `docs`, and `qa` are all valid library members that
-stay unqueued until some prompt names them; `agent-hq
-tasks validate` only requires that handoff *targets* resolve, not that
-every task is targeted. Record the activation edit as a header comment in
-the task's own `task.yml`, the way `clinical` does ("activate by pointing
-name it in a prompt"), so using it
+stay unqueued until some prompt names them; `agent-hq tasks validate` checks
+each task in isolation and never asks whether anything queues it. Record that
+it is staged as a header comment in the task's own `task.yml`, the way
+`clinical` does, so using it
 later is a documented one-liner rather than archaeology.
 
 ## Budgets and retries

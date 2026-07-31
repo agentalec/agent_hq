@@ -48,7 +48,8 @@ CI (`.github/workflows/ci.yml`) runs all five; a change isn't done until all pas
   but nothing queues them yet. `intake` is engine entry logic
   (`engine/runner.py:intake_ticket`), not a task file —
   `config.projects["initial_task"]` names what a newly accepted ticket
-  enqueues.
+  enqueues, and `final_task` names the run whose completion finishes the
+  ticket — a queue draining on any other task stopped early and BLOCKs.
 - `config/` — pilot config; ships `example-*` placeholders (see
   `docs/operations.md` §4). `projects.yml`'s `engine_repo` is the engine's
   own issue tracker (intake, pinned comments, escalations, gate comments) —
