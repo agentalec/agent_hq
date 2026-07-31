@@ -16,3 +16,4 @@
 {"event_id": "def8efb752ecfdec:failed", "kind": "run.failed", "ticket_id": "20", "run_id": "def8efb752ecfdec", "state": "FAILED"}
 {"event_id": "def8efb752ecfdec:handoff_rejected", "kind": "handoff.rejected", "ticket_id": "20", "run_id": "def8efb752ecfdec", "detail": "control.json schema violation: <root>: 'outcome' is a required property"}
 {"event_id": "def8efb752ecfdec:blocked", "kind": "ticket.blocked", "ticket_id": "20", "run_id": "def8efb752ecfdec", "detail": "retries exhausted"}
+{"event_id": "526e764dc267a0c9:queued", "kind": "run.queued", "ticket_id": "20", "run_id": "526e764dc267a0c9", "task_id": "spec", "task_version": 1, "state": "QUEUED", "bindings": {}}

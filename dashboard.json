@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-31T11:06:35Z",
+  "generated_at": "2026-07-31T11:06:37Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -1202,6 +1202,23 @@
           "input_artifacts": [
             "specs/20/spec.md"
           ]
+        },
+        {
+          "run_id": "526e764dc267a0c9",
+          "task_id": "spec",
+          "task_version": 1,
+          "ticket_id": "20",
+          "state": "QUEUED",
+          "attempt": 0,
+          "bindings": {},
+          "cost_usd": null,
+          "tokens": null,
+          "usage_known": false,
+          "artifacts": [],
+          "chain_depth": 0,
+          "source_event_id": "20:labeled:2026-07-31T11:06:10Z",
+          "enqueue_index": 0,
+          "queue_seq": 5
         }
       ],
       "work_repos": [
