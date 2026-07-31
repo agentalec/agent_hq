@@ -400,7 +400,9 @@
         "specs/20/review.md"
       ],
       "deadline": "2026-07-31T14:23:38Z",
-      "attempt_started_at": "2026-07-31T12:53:38Z"
+      "attempt_started_at": "2026-07-31T12:53:38Z",
+      "base_commit": "80f26d60ab3985e42db911e8d96bf59f545431c1",
+      "input_from_run_id": "a3246889df973077"
     }
   ],
   "work_repos": [
