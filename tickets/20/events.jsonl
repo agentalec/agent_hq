@@ -60,3 +60,4 @@
 {"event_id": "82f3111c45eb77be:queued", "kind": "run.queued", "ticket_id": "20", "run_id": "82f3111c45eb77be", "task_id": "qa", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "f87d399ae6f27567:qa-search-healthcare-services:accepted", "kind": "handoff.accepted", "ticket_id": "20", "run_id": "f87d399ae6f27567", "detail": "All blockers resolved. Verify search functionality with live app."}
 {"event_id": "f87d399ae6f27567:succeeded", "kind": "run.succeeded", "ticket_id": "20", "run_id": "f87d399ae6f27567", "state": "SUCCEEDED", "artifacts": ["specs/20/review.md"]}
+{"event_id": "82f3111c45eb77be:collected", "kind": "run.collected", "ticket_id": "20", "run_id": "82f3111c45eb77be", "tokens": 952400, "cost_usd": 0.578}
