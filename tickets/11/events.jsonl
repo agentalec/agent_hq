@@ -69,3 +69,4 @@
 {"event_id": "2395162e72b0ad84:queued", "kind": "run.queued", "ticket_id": "11", "run_id": "2395162e72b0ad84", "task_id": "review", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "c20c8734a7b92295:review-11:accepted", "kind": "handoff.accepted", "ticket_id": "11", "run_id": "c20c8734a7b92295", "detail": "Review the tooltip implementation against spec requirements"}
 {"event_id": "c20c8734a7b92295:succeeded", "kind": "run.succeeded", "ticket_id": "11", "run_id": "c20c8734a7b92295", "state": "SUCCEEDED", "artifacts": []}
+{"event_id": "2395162e72b0ad84:collected", "kind": "run.collected", "ticket_id": "11", "run_id": "2395162e72b0ad84", "tokens": 374300, "cost_usd": 0.265}
