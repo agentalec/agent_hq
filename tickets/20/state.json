@@ -90,7 +90,7 @@
       "task_id": "triage",
       "task_version": 1,
       "ticket_id": "20",
-      "state": "RUNNING",
+      "state": "FAILED",
       "attempt": 0,
       "bindings": {
         "tracker": "github-issues",
