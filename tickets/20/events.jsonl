@@ -27,3 +27,4 @@
 {"event_id": "f005ba4e3071c357:queued", "kind": "run.queued", "ticket_id": "20", "run_id": "f005ba4e3071c357", "task_id": "spec", "task_version": 1, "state": "QUEUED", "bindings": {}}
 {"event_id": "f005ba4e3071c357:collected", "kind": "run.collected", "ticket_id": "20", "run_id": "f005ba4e3071c357", "tokens": 351200, "cost_usd": 0.243}
 {"event_id": "f005ba4e3071c357:succeeded", "kind": "run.succeeded", "ticket_id": "20", "run_id": "f005ba4e3071c357", "state": "SUCCEEDED", "artifacts": ["specs/20/spec.md"]}
+{"event_id": "f005ba4e3071c357:blocked", "kind": "ticket.blocked", "ticket_id": "20", "run_id": "f005ba4e3071c357", "detail": "queue ran dry after `spec` without reaching `finalize`"}
