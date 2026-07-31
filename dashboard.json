@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-31T11:21:39Z",
+  "generated_at": "2026-07-31T11:21:41Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -441,7 +441,9 @@
             "specs/11/tasks.md"
           ],
           "deadline": "2026-07-31T12:51:39Z",
-          "attempt_started_at": "2026-07-31T11:21:39Z"
+          "attempt_started_at": "2026-07-31T11:21:39Z",
+          "base_commit": "6819a4f7730935bbb053d553c44426313f17fc43",
+          "input_from_run_id": "b51f267d0de78496"
         }
       ],
       "work_repos": [
