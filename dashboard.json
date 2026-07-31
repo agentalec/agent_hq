@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-31T11:47:37Z",
+  "generated_at": "2026-07-31T11:47:56Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -582,7 +582,7 @@
           "base_branch": "develop",
           "recorded_head": "eea55c54dc9727e9cfae743a6481faf30e564539",
           "pr_ref": "agentalec/care_fe#1",
-          "comments_polled_at": "2026-07-31T11:33:01Z"
+          "comments_polled_at": "2026-07-31T11:47:39Z"
         }
       ],
       "comments_polled_at": "2026-07-31T11:12:40Z",
