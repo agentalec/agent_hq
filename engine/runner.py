@@ -336,7 +336,13 @@ def _assemble_prompt(
     if run is not None:
         # Every task in the loaded library is queueable -- there is no per-task
         # allowlist any more, so the contract is the same text for every task.
-        queueable = sorted(taskdefs or {})
+        # Each id carries its task.yml `description` (a required field): the
+        # menu has to say what a task IS, or an agent picking off it is guessing
+        # from a name. Generated from the library, so adding a task lists it.
+        queueable = [
+            subst(f"`{tid}` -- {taskdefs[tid].get('description', '')}", details.ticket_id).rstrip(" -")
+            for tid in sorted(taskdefs or {})
+        ]
         max_entries = (config.budgets.get("max_queue_length", 8) if config else 8)
         control_lines = [
             "Before finishing, write `.agent-hq/control.json` -- exactly one JSON object:",
@@ -359,11 +365,11 @@ def _assemble_prompt(
             control_lines.append(
                 '- `{"outcome": "queue", "queue": [{"key": "...", "task": "...", '
                 '"reason": "...", "repo": "...", "artifacts": [...]}]}` to queue what the '
-                f"ticket should do next, up to {max_entries} entries, from: "
-                f"{', '.join(queueable)}. Entries run in the order you list them. Each "
-                "`artifacts` entry must be a file you produced (a required output above) or "
-                "were given (see Available inputs below) -- an unrelated worktree file is "
-                "rejected."
+                f"ticket should do next, up to {max_entries} entries. Entries run in "
+                "the order you list them. Each `artifacts` entry must be a file you "
+                "produced (a required output above) or were given (see Available inputs "
+                "below) -- an unrelated worktree file is rejected.\n"
+                "The tasks you may queue:\n" + "\n".join(f"  - {q}" for q in queueable)
             )
             control_lines.append(
                 'To drop work already queued on this ticket, add `"cancel": ["<key>"]`, or '

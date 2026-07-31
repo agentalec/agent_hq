@@ -6,3 +6,6 @@ site/
 _state/
 .pytest_cache/
 .ruff_cache/
+# macOS Finder droppings. Untracked, they show up in every `git status` and
+# are one stray `git add -A` away from being committed.
+.DS_Store

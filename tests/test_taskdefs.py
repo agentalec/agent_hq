@@ -47,6 +47,26 @@ def test_prompt_inlines_task_instructions_context_and_required_outputs():
     assert "{ticket}" not in prompt
 
 
+def test_queueable_menu_carries_each_task_description():
+    """With no `handoff.allowed` left, the runtime menu is the only thing that
+    tells an agent what it may queue -- ids alone would make it guess from a
+    name, so every entry carries its task.yml description."""
+    taskdefs = load_all(REPO_ROOT / "tasks", SCHEMAS_DIR)
+    details = TicketDetails("HQ-7", "Example", "A sufficiently detailed ticket.", [])
+
+    prompt = _assemble_prompt(
+        load_task(REPO_ROOT / "tasks" / "spec", SCHEMAS_DIR),
+        details,
+        None,
+        run={"run_id": "r1"},
+        taskdefs=taskdefs,
+    )
+
+    for task_id, taskdef in taskdefs.items():
+        assert f"`{task_id}` -- {taskdef['description']}".replace("{ticket}", "HQ-7") in prompt
+    assert "{ticket}" not in prompt
+
+
 def test_schema_violation_rejected_with_clear_error(tmp_path):
     taskdef = _minimal_taskdef(budget={"max_cost_usd": -1})
     _write_task(tmp_path / "bad", taskdef)
