@@ -334,6 +334,22 @@ def test_post_closing_summary_posts_once(monkeypatch):
     assert "<!--hq:evt:evt-close-->" in fake.calls[1]["json"]["body"]
 
 
+def test_post_closing_summary_collapses_the_body(monkeypatch):
+    """A summary is a few KB of prose on a thread scrolled for the outcome, so
+    it ships collapsed. The blank lines matter: GitHub renders markdown inside
+    an unspaced <details> as raw text."""
+    fake = _install(monkeypatch, [FakeResponse(200, []), FakeResponse(200, {"id": 1})])
+    tracker = GithubIssuesTracker({"repo": "o/r"})
+    tracker.post_closing_summary("123", "# Heading\n\nbody", "evt-close")
+    body = fake.calls[1]["json"]["body"]
+    assert "<details><summary><b>Closing summary</b></summary>\n\n# Heading" in body
+    assert body.endswith("\n\n</details>")
+    # The dedupe marker stays OUTSIDE the collapsed block -- a re-delivery scans
+    # comment bodies for it, and a marker only the reader can expand still
+    # matches, but keeping it visible in the raw body is what that scan reads.
+    assert body.startswith("<!--hq:evt:evt-close-->")
+
+
 def test_post_closing_summary_dedupes_by_event_marker(monkeypatch):
     fake = _install(
         monkeypatch,

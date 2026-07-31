@@ -1,14 +1,26 @@
-# Approvers config (§6). Pilot: agentalec decides every gate; add real
-# reviewers per group as the deployment grows.
+# Approvers config (§6). Add real reviewers per group as the deployment grows.
+#
+# `agentalec` is deliberately absent from every group: AGENT_HQ_TOKEN is that
+# account's PAT, so it is the identity the engine itself comments as. An
+# approver group containing the engine means the engine can authorize its own
+# spend -- `_poll_comment_subject` skips engine-authored comments by their
+# `<!--hq:` marker, but that guard is one bug away from being the only thing
+# standing between an escalation comment and the run it triggers. Membership is
+# the second, independent guard, and it only works if this file stays clean.
+#
+# Gates a task marks `auto_approve` are unaffected: both auto-approve paths
+# (`runner._collect` at collect time, `engine.handle_gate` for a run already
+# parked) decide without ever calling the gate adapter, so they never read
+# these groups.
 groups:
   product-owners:
-    members: [agentalec, gigincg]
+    members: [gigincg]
   architects:
-    members: [agentalec]
+    members: [gigincg]
   clinical-reviewers:
-    members: [agentalec]
+    members: [gigincg]
   escalation:
-    members: [agentalec, gigincg]
+    members: [gigincg]
 working_hours:
   timezone: Asia/Kolkata
   start: 9

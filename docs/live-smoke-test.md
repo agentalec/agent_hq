@@ -14,7 +14,7 @@ the bottom is the checklist to burn down. Complements `docs/local-testing.md`
 | Work repos | `agentalec/care` (`backend`, base `develop`), `agentalec/care_fe` (`frontend`, base `develop`), `agentalec/care_docs` (`docs`, base `main`) |
 | Route | intake → `spec` (product-owner gate; fans out ≤3 `implement`) → `implement` (draft PR) ↔ `review` (loops to `implement` on blockers, prompt-capped 3 rounds → park; else `finalize`) → `finalize` (summary, close) |
 | Executor | `copilot-cli`, `claude-sonnet-4.5`, billed via Copilot seat (`cost_usd` records 0.0 — deviation 9) |
-| Approver (all gates) | `agentalec` |
+| Approver (all gates) | `gigincg` — `agentalec` is the engine's own commenting identity (`AGENT_HQ_TOKEN`) and is deliberately in no approver group |
 
 ## Preconditions
 
