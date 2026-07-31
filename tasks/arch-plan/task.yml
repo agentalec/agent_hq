@@ -2,7 +2,7 @@
 # queueable, so this runs as soon as some run's control.json queues it (e.g.
 # clinical's prompt, or a triage entry). What is still missing is a prompt that
 # tells a run to queue it.
-# (the minimal route hands spec straight to implement).
+# (the pilot's spec prompt queues implement directly).
 id: arch-plan
 version: 1
 description: Produce an implementation plan and classify the ticket as crud or beyond-crud.

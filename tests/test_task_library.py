@@ -1,12 +1,14 @@
-"""Task library: schema/library validity, handoff-target resolution,
-gate-adapter resolvability, and no-concrete-adapter-name discipline. The
-static P0_CHAIN (on_success/on_failure) is gone with the atomic handoff
-cutover (Task 9) -- every enqueue is a validated handoff, so this file
-asserts the generic properties every task must hold, not one fixed chain.
+"""Task library: schema/library validity, gate-adapter resolvability,
+no-concrete-adapter-name discipline, and retired-vocabulary discipline in the
+agent-facing prompts. The static P0_CHAIN (on_success/on_failure) is gone, and
+so is the per-task `handoff.allowed` graph that replaced it -- the route is the
+queue a run declares, so this file asserts the generic properties every task
+must hold, not one fixed chain.
 """
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -101,3 +103,64 @@ def test_cli_tasks_validate_direct_call(capsys):
     args = parser.parse_args(["tasks", "validate", "--repo-root", str(REPO_ROOT)])
     args.func(args, REPO_ROOT)
     assert "tasks OK" in capsys.readouterr().out
+
+
+# Vocabulary the control schema no longer accepts. `outcome: "handoff"` and
+# `outcome: "complete"` are rejected outright, and `handoff.allowed`/`max` are
+# not schema fields any more -- a prompt naming any of them tells an agent to
+# emit a document that fails validation, which costs a run and its retries
+# before the ticket blocks.
+RETIRED_PROMPT_VOCABULARY = re.compile(
+    r'"outcome"\s*:\s*"(handoff|complete)"'
+    r"|handoff\.(allowed|max)"
+    r"|\bhand(s|ed)? off\b"
+    r"|\bhandoffs?\b",
+    re.IGNORECASE,
+)
+
+
+def _prompt_sources() -> list[Path]:
+    files = sorted(TASKS_DIR.glob("*/prompts/*.md")) + sorted(TASKS_DIR.glob("*/checklists/*.md"))
+    assert files, "task prompts not found"
+    return files
+
+
+def test_no_prompt_teaches_retired_control_vocabulary():
+    """Prompts are agent-facing contract, and nothing else checks them.
+
+    The engine never parses a prompt, so a prompt still saying "propose a
+    `review` handoff" passes every other check in CI and only fails against a
+    real ticket -- the agent emits `outcome: "handoff"`, the schema rejects it,
+    the run burns its retries and blocks. That is exactly what happened to
+    `implement` and `qa` when the queue cutover landed: the engine-injected
+    contract said `queue` while the task prompt said handoff, and the two
+    disagreed in the one place no test was looking.
+
+    Same discipline `test_no_task_yml_names_a_concrete_adapter` applies to
+    task.yml, applied to the text an agent actually reads.
+    """
+    offenders = {
+        str(path.relative_to(TASKS_DIR)): sorted({m.group(0) for m in
+                                                  RETIRED_PROMPT_VOCABULARY.finditer(path.read_text())})
+        for path in _prompt_sources()
+        if RETIRED_PROMPT_VOCABULARY.search(path.read_text())
+    }
+    assert not offenders, (
+        f"prompts teach vocabulary the control schema rejects: {offenders}. "
+        'A run declares `{"outcome": "queue", "queue": [...]}`; an empty queue '
+        "means nothing further. Say `queue`/`entry`, never `handoff`."
+    )
+
+
+def test_task_yml_headers_do_not_describe_the_retired_route_model():
+    """The same trap one file over: a `task.yml` header comment claiming a task
+    is activated by "pointing spec's handoff.allowed at it" sends whoever reads
+    it looking for a field that no longer exists."""
+    offenders = [
+        str(p.relative_to(TASKS_DIR)) for p in sorted(TASKS_DIR.glob("*/task.yml"))
+        if RETIRED_PROMPT_VOCABULARY.search(p.read_text())
+    ]
+    assert not offenders, (
+        f"task.yml headers describe the retired handoff model: {offenders}. "
+        'A task declares no route; "unwired" now means no prompt queues it.'
+    )

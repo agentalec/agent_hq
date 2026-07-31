@@ -1,6 +1,6 @@
 # P1: no activation edit needed any more -- any task in the library is
 # queueable. What is missing is a prompt that tells some run to queue it.
-# (spec hands off straight to implement until then). Uses the existing
+# (the pilot's spec prompt queues implement directly). Uses the existing
 # "default" gate adapter -- no new adapter needed.
 id: clinical
 version: 1

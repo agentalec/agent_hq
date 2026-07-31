@@ -1,5 +1,5 @@
-# Staged: activated with arch-plan (its only in-edge is arch-plan's handoff);
-# see arch-plan's header for the activation edit.
+# Staged: nothing queues it yet. `arch-plan`'s prompt is where it would be
+# named -- there is no activation edit, any task in the library is queueable.
 id: arch-approval
 version: 1
 description: Confirm the plan artifacts are in place; make no changes.

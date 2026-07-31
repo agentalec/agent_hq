@@ -40,7 +40,7 @@ findings.`
 
 Never edit the implementation — your tools are read-only.
 
-## Decide the handoff (see Control output below)
+## Decide what runs next (see Control output below)
 
 - **No blockers remain** (only should-fix / nits, or clean): queue `qa`,
   forwarding `specs/{ticket}/spec.md` and `specs/{ticket}/review.md`. QA

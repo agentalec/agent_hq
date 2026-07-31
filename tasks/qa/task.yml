@@ -1,5 +1,5 @@
-# Wired: `review` hands off here once no blockers remain; `qa` hands off to
-# `finalize`. It stands the app up with the repo's own tooling inside the
+# On the pilot route: `review`'s prompt queues it once no blockers remain, and
+# its own prompt queues `finalize`. It stands the app up with the repo's own tooling inside the
 # devcontainer (Node 22 + docker-in-docker) -- the compose-based `qa-env`
 # adapter stays deferred (docs/roadmap.md), so nothing here binds to it.
 # `screenshots/` is a DIRECTORY artifact (trailing slash): its contents cannot
