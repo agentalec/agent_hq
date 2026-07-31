@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-31T12:41:04Z",
+  "generated_at": "2026-07-31T12:41:23Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -1837,7 +1837,7 @@
           "artifacts": [],
           "chain_depth": 1,
           "parent_run_id": "1a0af9fcbda54d9e",
-          "queue_seq": 10,
+          "queue_seq": 11,
           "handoff_key": "implement-20-care-fe",
           "repo": "agentalec/care_fe",
           "input_artifacts": [
@@ -1854,7 +1854,7 @@
           "pr_ref": null
         }
       ],
-      "comments_polled_at": "2026-07-31T12:35:32Z",
+      "comments_polled_at": "2026-07-31T12:41:04Z",
       "block_reason": null,
       "block_source": null,
       "interrupted_run_id": null
