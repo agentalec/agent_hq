@@ -1,0 +1,4 @@
+{
+  "classification": "crud",
+  "reasoning": "This is a simple frontend UI change that adds a tooltip to existing age display. No data models, migrations, services, authorization changes, or FHIR/EMR model changes are involved. The change only updates a React component to wrap existing age text with a Tooltip component. All business logic already exists in utility functions. This is a pure UI enhancement without any backend or data layer changes."
+}

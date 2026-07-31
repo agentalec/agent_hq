@@ -55,3 +55,7 @@
 {"event_id": "a87459ad6005560e:arch-plan-care-fe:accepted", "kind": "handoff.accepted", "ticket_id": "11", "run_id": "a87459ad6005560e", "detail": "Spec approved; producing architecture plan and classification for frontend patient age display changes"}
 {"event_id": "a87459ad6005560e:succeeded", "kind": "run.succeeded", "ticket_id": "11", "run_id": "a87459ad6005560e", "state": "SUCCEEDED", "artifacts": ["specs/11/spec.md"]}
 {"event_id": "1fd46895ed42efff:collected", "kind": "run.collected", "ticket_id": "11", "run_id": "1fd46895ed42efff", "tokens": 407700, "cost_usd": 0.271}
+{"event_id": "1fd46895ed42efff:breakdown-1:proposed", "kind": "handoff.proposed", "ticket_id": "11", "run_id": "1fd46895ed42efff", "detail": "Plan completed and classified as CRUD. Ready to break down into implementation tasks."}
+{"event_id": "b51f267d0de78496:queued", "kind": "run.queued", "ticket_id": "11", "run_id": "b51f267d0de78496", "task_id": "breakdown", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
+{"event_id": "1fd46895ed42efff:breakdown-1:accepted", "kind": "handoff.accepted", "ticket_id": "11", "run_id": "1fd46895ed42efff", "detail": "Plan completed and classified as CRUD. Ready to break down into implementation tasks."}
+{"event_id": "1fd46895ed42efff:succeeded", "kind": "run.succeeded", "ticket_id": "11", "run_id": "1fd46895ed42efff", "state": "SUCCEEDED", "artifacts": ["specs/11/plan.md", "specs/11/classification.json"]}
