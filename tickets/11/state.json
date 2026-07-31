@@ -537,7 +537,9 @@
         "specs/11/review.md"
       ],
       "deadline": "2026-07-31T12:11:53Z",
-      "attempt_started_at": "2026-07-31T11:41:53Z"
+      "attempt_started_at": "2026-07-31T11:41:53Z",
+      "base_commit": "eea55c54dc9727e9cfae743a6481faf30e564539",
+      "input_from_run_id": "bcece127085b27d0"
     }
   ],
   "work_repos": [
