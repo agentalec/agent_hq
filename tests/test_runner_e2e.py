@@ -361,6 +361,10 @@ def test_intake_ineligible_blocks_with_pinned_reasons(config, taskdefs, store):
     assert state["block_source"] == "intake"
     blocked = [e for e in store.read_events("7") if e["kind"] == "intake.blocked"]
     assert blocked and blocked[0]["source"] == "intake:evt-1"
+    # A ticket rejected at intake is BLOCKED like any other; the issue list has
+    # to say so, or the only sign is a pinned comment nobody is paged for.
+    assert tracker.label_sets[-1][1] == "BLOCKED"
+    assert "hq:blocked" in tracker.label_sets[-1][2]
 
 
 def test_re_admitting_a_blocked_ticket_clears_the_block_fields(config, taskdefs, store):
@@ -427,6 +431,8 @@ def test_intake_injection_flag_blocks_and_skips_enqueue(config, taskdefs, store)
     assert not any(r["task_id"] == "spec" for r in state.get("runs", []))
     events = store.read_events("7")
     assert any(e["kind"] == "intake.injection_flag" for e in events)
+    assert tracker.label_sets[-1][1] == "BLOCKED"
+    assert "hq:blocked" in tracker.label_sets[-1][2]
 
 
 # --------------------------------------------------------------------------
