@@ -280,7 +280,7 @@
       "task_id": "spec",
       "task_version": 1,
       "ticket_id": "11",
-      "state": "QUEUED",
+      "state": "RUNNING",
       "attempt": 0,
       "bindings": {},
       "cost_usd": null,
@@ -291,7 +291,9 @@
       "source_event_id": "11:labeled:2026-07-31T11:04:00Z",
       "enqueue_index": 0,
       "queue_seq": 9,
-      "repo": "agentalec/care_fe"
+      "repo": "agentalec/care_fe",
+      "deadline": "2026-07-31T11:35:05Z",
+      "attempt_started_at": "2026-07-31T11:05:05Z"
     }
   ],
   "work_repos": [
