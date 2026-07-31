@@ -84,6 +84,23 @@
       "base_commit": "5466816828ba496f9d4e6099e77360eb516ece31",
       "output_commit": "5466816828ba496f9d4e6099e77360eb516ece31",
       "pr_ref": null
+    },
+    {
+      "run_id": "a84bd0bdb87ec1cc",
+      "task_id": "triage",
+      "task_version": 1,
+      "ticket_id": "20",
+      "state": "QUEUED",
+      "attempt": 0,
+      "bindings": {},
+      "cost_usd": null,
+      "tokens": null,
+      "usage_known": false,
+      "artifacts": [],
+      "chain_depth": 0,
+      "source_event_id": "issue-comment:5139358001",
+      "enqueue_index": 0,
+      "queue_seq": 3
     }
   ],
   "work_repos": [
@@ -94,5 +111,6 @@
       "recorded_head": "5466816828ba496f9d4e6099e77360eb516ece31",
       "pr_ref": null
     }
-  ]
+  ],
+  "comments_polled_at": "2026-07-31T04:45:13Z"
 }

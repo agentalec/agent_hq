@@ -6,3 +6,5 @@
 {"event_id": "f91ed4f6018552f8:queued", "kind": "run.queued", "ticket_id": "20", "run_id": "f91ed4f6018552f8", "task_id": "spec", "task_version": 1, "state": "QUEUED", "bindings": {}}
 {"event_id": "f91ed4f6018552f8:collected", "kind": "run.collected", "ticket_id": "20", "run_id": "f91ed4f6018552f8", "tokens": 458300, "cost_usd": 0.371}
 {"event_id": "f91ed4f6018552f8:succeeded", "kind": "run.succeeded", "ticket_id": "20", "run_id": "f91ed4f6018552f8", "state": "SUCCEEDED", "artifacts": ["specs/20/spec.md"]}
+{"event_id": "a84bd0bdb87ec1cc:queued", "kind": "run.queued", "ticket_id": "20", "run_id": "a84bd0bdb87ec1cc", "task_id": "triage", "task_version": 1, "state": "QUEUED", "bindings": {}}
+{"event_id": "a84bd0bdb87ec1cc:rework", "kind": "run.rework", "ticket_id": "20", "run_id": "a84bd0bdb87ec1cc", "detail": "@gigincg: The FacilityServices is where Search is missing", "actor": "gigincg", "source": "issue-comment:5139358001"}
