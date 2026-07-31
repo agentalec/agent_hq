@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-07-31T11:08:22Z",
+  "generated_at": "2026-07-31T11:08:23Z",
   "tickets": [
     {
       "ticket_id": "11",
       "pinned_comment_id": 5045843827,
-      "status": "ACTIVE",
+      "status": "BLOCKED",
       "runs": [
         {
           "run_id": "3060b51f6f0f917b",
@@ -323,9 +323,9 @@
         }
       ],
       "comments_polled_at": "2026-07-31T11:04:01Z",
-      "block_reason": null,
-      "block_source": null,
-      "interrupted_run_id": null
+      "block_reason": "queue ran dry after `spec` without reaching `finalize`",
+      "block_source": "engine",
+      "interrupted_run_id": "3c1a6da726192005"
     },
     {
       "ticket_id": "16",
