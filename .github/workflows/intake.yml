@@ -24,6 +24,25 @@ env:
 
 jobs:
   intake:
+    # The engine labels this issue itself -- `set_status_label` writes one of
+    # `engine.engine.STATUS_LABELS` on every status transition -- and it labels
+    # with AGENT_HQ_TOKEN, a PAT, which unlike the default GITHUB_TOKEN DOES
+    # re-trigger workflows. So the engine's own bookkeeping came back as an
+    # intake event: a `spec` run whose queue drained blocked the ticket, the
+    # block wrote `hq:blocked`, this workflow woke, and `intake_ticket` found
+    # `hq:intake` still on the issue with every run terminal -- its definition
+    # of "a human relabelled this, re-admit it" -- so it cleared the block and
+    # re-enqueued `spec`. Ticket #20 ran that circuit four times in 17 minutes
+    # before an unrelated state-push race broke it; nothing in the engine
+    # stopped it, and `loop_guard.max_runs` was 17 runs away.
+    #
+    # A status label is a VIEW of state, never the source of it, so an event
+    # announcing one can never be news to intake. Every other label -- a human
+    # adding `hq:intake`, `frontend`, `hq:public-safe` -- still wakes it, which
+    # is what keeps relabel-to-re-admit working. The list is pinned against
+    # STATUS_LABELS by `tests/test_workflows.py`.
+    if: >-
+      github.event.action != 'labeled' || !contains(fromJSON('["hq:active","hq:waiting-gate","hq:awaiting-merge","hq:blocked","hq:done"]'), github.event.label.name)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

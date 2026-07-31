@@ -3,7 +3,9 @@
 ## Flow
 
 1. A GitHub issue labeled `hq:intake` is the intended entry point. `intake.yml`
-   (triggered on issue open/label in the engine repo) calls
+   (triggered on issue open/label in the engine repo, minus the engine's own
+   `STATUS_LABELS` writes -- those are a view of state, and acting on them let
+   a blocked ticket re-admit itself) calls
    `engine.runner.intake_ticket` -- engine entry logic, not a task file. It
    reads the ticket via the `tracker` port, checks eligibility from
    `config.projects["intake"]`/`["public"]`/`["public_safe_label"]` (rejecting
