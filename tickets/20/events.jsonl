@@ -40,3 +40,4 @@
 {"event_id": "21e084c4f835f5c0:queued", "kind": "run.queued", "ticket_id": "20", "run_id": "21e084c4f835f5c0", "task_id": "implement", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment", "gate": "github-issue-comment"}}
 {"event_id": "1a0af9fcbda54d9e:implement-20-care-fe:accepted", "kind": "handoff.accepted", "ticket_id": "20", "run_id": "1a0af9fcbda54d9e", "detail": "Add search functionality to FacilityServices page per acceptance criteria"}
 {"event_id": "1a0af9fcbda54d9e:succeeded", "kind": "run.succeeded", "ticket_id": "20", "run_id": "1a0af9fcbda54d9e", "state": "SUCCEEDED", "artifacts": ["specs/20/spec.md"]}
+{"event_id": "21e084c4f835f5c0:collected", "kind": "run.collected", "ticket_id": "20", "run_id": "21e084c4f835f5c0", "tokens": 718800, "cost_usd": 0.44}
