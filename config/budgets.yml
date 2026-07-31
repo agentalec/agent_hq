@@ -1,6 +1,10 @@
 # Budgets config (§6). Pilot placeholder values only.
 ticket_cap_usd: 25
 in_flight_cap: 3
+# Most entries one run may declare at once. A sanity bound on a runaway
+# declaration, not a route: which task may follow which is the agent's call,
+# recorded in the queue and revisable by any later run.
+max_queue_length: 8
 loop_guard:
   # The only structural runaway ceiling. CANCELLED runs are excluded (they
   # never executed), and there is deliberately no depth ceiling -- see

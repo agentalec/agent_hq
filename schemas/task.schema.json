@@ -120,23 +120,6 @@
       "type": "boolean",
       "description": "Open (or reuse) a draft PR for agent-hq/<run_id> on success, independent of any approval gate."
     },
-    "handoff": {
-      "description": "Validated child-task handoffs this task may propose via control.json.",
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "allowed": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "max": {
-          "type": "integer",
-          "minimum": 0
-        }
-      }
-    },
     "tools": {
       "type": "array",
       "description": "Allowed tool names passed to the agent CLI as --allowedTools",

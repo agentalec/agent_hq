@@ -22,12 +22,6 @@ gates:
       # stays readable on the issue and staffing this gate later is deleting
       # this one line. Merge remains human either way.
       auto_approve: true
-handoff:
-  allowed:
-    - implement
-  # Fan-out point in the minimal route: one implement handoff per affected
-  # repo (config/repos.yml lists three).
-  max: 3
 budget:
   max_cost_usd: 5
   max_runtime_min: 30

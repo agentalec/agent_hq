@@ -35,13 +35,17 @@ CI (`.github/workflows/ci.yml`) runs all five; a change isn't done until all pas
   integrations).
 - `schemas/` — JSON Schemas (draft 2020-12), validated in CI.
 - `tasks/` — the task library, validated generically — no fixed chain, no
-  task-name special case. Each `task.yml` declares `handoff.allowed`/`max`;
-  what actually happens next is the agent's own `.agent-hq/control.json`
-  for that run, validated and applied by the engine
-  (`docs/task-authoring.md`). `spec`/`implement`/`review`/`qa`/`finalize` are
-  wired (the minimal route, with an `implement`↔`review` loop);
-  `arch-plan`/`arch-approval`/`breakdown`/`clinical`/`poll`/`docs` are
-  defined but unwired — each task.yml header names its activation edit. `intake` is engine entry logic
+  task-name special case, and **no declared route**: a `task.yml` says what a
+  task *is*, never what may follow it. What happens next is the queue a run
+  declares in its own `.agent-hq/control.json`, validated and applied by the
+  engine (`docs/task-authoring.md`), bounded only by
+  `budgets.max_queue_length`. Every task in the library is queueable, so a
+  task is "unwired" only in the sense that no prompt currently tells a run to
+  queue it — there is no activation edit. `spec`/`implement`/`review`/`qa`/
+  `finalize` are what the pilot's prompts actually route through (with an
+  `implement`↔`review` loop);
+  `arch-plan`/`arch-approval`/`breakdown`/`clinical`/`poll`/`docs` are defined
+  but nothing queues them yet. `intake` is engine entry logic
   (`engine/runner.py:intake_ticket`), not a task file —
   `config.projects["initial_task"]` names what a newly accepted ticket
   enqueues.

@@ -1,4 +1,5 @@
-# P1: activate by pointing tasks/spec/task.yml handoff.allowed at clinical
+# P1: no activation edit needed any more -- any task in the library is
+# queueable. What is missing is a prompt that tells some run to queue it.
 # (spec hands off straight to implement until then). Uses the existing
 # "default" gate adapter -- no new adapter needed.
 id: clinical
@@ -19,10 +20,6 @@ gates:
     - approvers: clinical-reviewers
       adapter: default
       timeout_working_hours: 48
-handoff:
-  allowed:
-    - arch-plan
-  max: 1
 budget:
   max_cost_usd: 5
   max_runtime_min: 30

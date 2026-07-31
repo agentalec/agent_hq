@@ -39,6 +39,11 @@
           "minimum": 1
         }
       }
+    },
+    "max_queue_length": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Most entries one run may declare in a single control.json. Replaces the former per-task handoff.max: a global sanity bound on a runaway declaration, not a task-by-task adjacency table."
     }
   }
 }

@@ -16,7 +16,6 @@ TICKET_ID = "T-1"
 SOURCE_TASKDEF = {
     "id": "spec",
     "outputs": {"artifacts": ["specs/{ticket}/spec.md"]},
-    "handoff": {"allowed": ["implement", "review"], "max": 2},
 }
 
 TASKDEFS = {
@@ -27,7 +26,8 @@ TASKDEFS = {
 }
 
 CONFIG = Config(
-    components={}, repos={"org/repo": {}}, projects={}, approvers={}, budgets={}
+    components={}, repos={"org/repo": {}}, projects={}, approvers={},
+    budgets={"max_queue_length": 2},
 )
 
 
@@ -173,14 +173,19 @@ def test_unknown_target_task_rejected(worktree):
     assert "not a known task" in reason
 
 
-def test_target_not_in_allowed_rejected(worktree):
+def test_any_task_in_the_library_may_be_queued(worktree):
+    """There is no per-task allowlist any more: the route is the queue, not a
+    static adjacency table across every task.yml. `finalize` was previously
+    unreachable from `spec` and is now a legitimate entry -- which is exactly
+    what lets a spec that finds nothing to build route straight to a closing
+    summary."""
     control = _handoff_doc(_valid_item(task="finalize", artifacts=[]))
     accepted, reason = validate_queue(
         control, taskdef=SOURCE_TASKDEF, taskdefs=TASKDEFS, config=CONFIG,
         worktree=worktree, run=_run(),
     )
-    assert accepted == []
-    assert "handoff.allowed" in reason
+    assert reason is None
+    assert [h.target_task for h in accepted] == ["finalize"]
 
 
 def test_unknown_repo_rejected(worktree):
@@ -193,7 +198,7 @@ def test_unknown_repo_rejected(worktree):
     assert "configured repo" in reason
 
 
-def test_over_max_handoffs_rejected(worktree):
+def test_over_max_queue_length_rejected(worktree):
     control = _handoff_doc(
         _valid_item(key="impl-1", task="implement", artifacts=[]),
         _valid_item(key="impl-2", task="implement", artifacts=[]),
@@ -204,7 +209,7 @@ def test_over_max_handoffs_rejected(worktree):
         worktree=worktree, run=_run(),
     )
     assert accepted == []
-    assert "handoff.max" in reason
+    assert "max_queue_length" in reason
 
 
 def test_duplicate_handoff_key_rejected(worktree):

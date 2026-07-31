@@ -38,14 +38,14 @@ that plus a checklist (see "Prompts are the behavior" below).
 
 ## Design the graph before the tasks
 
-A route is a graph whose edges are `handoff.allowed` entries; nothing else
+A route is what runs actually queue; nothing else
 wires tasks together. Sketch the edges first, then write the nodes.
 
 - Default to a linear chain with `max: 1`. Every wired task except
   `breakdown` is `max: 1`, and a linear chain is the easiest route to
   reason about, gate, and debug.
 - Fan out only where one run genuinely yields per-repo work. `breakdown` is
-  the model: `handoff.max: 2` because `config/repos.yml` configures two
+  the model: a prompt fans out per repo because `config/repos.yml` configures
   repos, and each `implement` handoff carries its `repo` field. Set `max`
   to the number of configured repos, not a round number.
 - Do not design for parallelism inside a ticket — it doesn't exist. The
@@ -62,7 +62,7 @@ actually does. Keep the yaml thin and put all the judgment in the prompt.
 Two things are injected into every prompt automatically by
 `engine.runner._assemble_prompt`: the control-output contract (the
 `.agent-hq/control.json` outcome shapes, this task's own
-`handoff.allowed`/`max`, and the output path) and the run's repo scoping.
+and the output path) and the run's repo scoping.
 Never restate either in a prompt — a stale restatement that drifts from the
 real contract is worse than silence.
 
@@ -120,7 +120,7 @@ the issue only when the terminal run's own recorded artifacts include
 - emits `{"outcome": "queue", "queue": []}` — i.e. queues nothing on the
   terminal run.
 
-Leaving `handoff.allowed` off the terminal task entirely is the recommended
+Having the terminal task's prompt queue nothing is the recommended
 convention, but the engine never checks it — a task that declares handoffs
 yet emits `complete` closes the ticket identically.
 
@@ -133,11 +133,11 @@ closed.
 
 It is fine — expected, even — to define a task nobody hands off to yet.
 `clinical`, `poll`, `docs`, and `qa` are all valid library members that
-stay unwired until some task's `handoff.allowed` names them; `agent-hq
+stay unqueued until some prompt names them; `agent-hq
 tasks validate` only requires that handoff *targets* resolve, not that
 every task is targeted. Record the activation edit as a header comment in
 the task's own `task.yml`, the way `clinical` does ("activate by pointing
-`tasks/spec/task.yml` `handoff.allowed` at clinical"), so wiring it in
+name it in a prompt"), so using it
 later is a documented one-liner rather than archaeology.
 
 ## Budgets and retries
@@ -163,7 +163,7 @@ that actually constrain a task:
 ## Testing a new task
 
 1. `agent-hq tasks validate` — schema, on-disk skill files, every
-   `handoff.allowed` target resolves, declared `components` ports exist in
+   declared `components` ports exist in
    `components.yml`.
 2. If the task introduces a new graph shape (a new fan-out, a new gate
    binding), extend `tests/test_task_library.py` — its checks are generic
@@ -180,7 +180,7 @@ that actually constrain a task:
 - Expecting engine behavior keyed to a task name — there is none; even
   `intake` and `finalize` are not special-cased
   (`test_no_intake_task_directory` pins it).
-- Handing off to a task not in your `handoff.allowed` — the entire handoff
+- Queueing a task id that is not in the loaded library — the entire declaration
   set is rejected (`engine.handoff.validate_queue`).
 - Absolute or `..` artifact paths — containment check rejects the set
   (`engine.handoff._check_containment`).

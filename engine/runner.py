@@ -40,9 +40,10 @@ write, and enqueues `config.projects["initial_task"]` with the root run's
 resolved repo on acceptance.
 
 A task's own transition is driven entirely by its `.agent-hq/control.json`
-outcome (`schemas/control.schema.json`) -- `handoff` (validate + apply/gate),
-`complete` (SUCCEEDED, feeds queue-empty completion), or `blocked` (ticket
-BLOCKED, escalate, no retry). See `engine.handoff.validate_queue` and
+outcome (`schemas/control.schema.json`) -- `queue` (validate + apply/gate; an
+empty queue is "nothing further", which feeds queue-empty completion) or
+`blocked` (ticket BLOCKED, escalate, no retry). A queue declaration may also
+cancel pending entries. See `engine.handoff.validate_queue` and
 `engine.engine.apply_queue`.
 """
 
@@ -265,7 +266,7 @@ def _write_parent_diff(worktree: Path, base: str | None, tip: str) -> bool:
 
 def _assemble_prompt(
     taskdef, details, rework: str | None, parent: dict | None = None, run: dict | None = None,
-    has_setup: bool = False,
+    has_setup: bool = False, taskdefs: dict | None = None, config: Config | None = None,
 ) -> str:
     parts = [
         f"# Task: {taskdef['id']}",
@@ -333,9 +334,10 @@ def _assemble_prompt(
     # Generic, task-agnostic control-output contract -- every task needs
     # this regardless of whether it includes constitution.md.
     if run is not None:
-        handoff_cfg = taskdef.get("handoff", {})
-        allowed = handoff_cfg.get("allowed", [])
-        max_handoffs = handoff_cfg.get("max", 0)
+        # Every task in the loaded library is queueable -- there is no per-task
+        # allowlist any more, so the contract is the same text for every task.
+        queueable = sorted(taskdefs or {})
+        max_entries = (config.budgets.get("max_queue_length", 8) if config else 8)
         control_lines = [
             "Before finishing, write `.agent-hq/control.json` -- exactly one JSON object:",
             (
@@ -353,14 +355,15 @@ def _assemble_prompt(
                 "description that survives. Describe the change, not the ticket."
             ),
         ]
-        if allowed and max_handoffs:
+        if queueable:
             control_lines.append(
                 '- `{"outcome": "queue", "queue": [{"key": "...", "task": "...", '
-                '"reason": "...", "repo": "...", "artifacts": [...]}]}` to queue up to '
-                f"{max_handoffs} of: {', '.join(allowed)}. Entries run in the order you "
-                "list them. Each `artifacts` entry must be a file you produced (a required "
-                "output above) or were given (see Available inputs below) -- an unrelated "
-                "worktree file is rejected."
+                '"reason": "...", "repo": "...", "artifacts": [...]}]}` to queue what the '
+                f"ticket should do next, up to {max_entries} entries, from: "
+                f"{', '.join(queueable)}. Entries run in the order you list them. Each "
+                "`artifacts` entry must be a file you produced (a required output above) or "
+                "were given (see Available inputs below) -- an unrelated worktree file is "
+                "rejected."
             )
             control_lines.append(
                 'To drop work already queued on this ticket, add `"cancel": ["<key>"]`, or '
@@ -579,7 +582,8 @@ def _prepare(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskd
     setup_cmd = eng.resolve_setup(config, repo, taskdef["id"])
     bundle = {
         "prompt": _assemble_prompt(
-            taskdef, details, rework, parent, run={**run, "repo": repo}, has_setup=bool(setup_cmd)
+            taskdef, details, rework, parent, run={**run, "repo": repo},
+            has_setup=bool(setup_cmd), taskdefs=taskdefs, config=config,
         ),
         "tools": taskdef.get("tools", []),
         "deadline": run.get("deadline"),
