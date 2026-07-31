@@ -274,6 +274,23 @@
       "input_artifacts": [
         "specs/11/review.md"
       ]
+    },
+    {
+      "run_id": "3c1a6da726192005",
+      "task_id": "spec",
+      "task_version": 1,
+      "ticket_id": "11",
+      "state": "QUEUED",
+      "attempt": 0,
+      "bindings": {},
+      "cost_usd": null,
+      "tokens": null,
+      "usage_known": false,
+      "artifacts": [],
+      "chain_depth": 0,
+      "source_event_id": "11:labeled:2026-07-31T11:04:00Z",
+      "enqueue_index": 0,
+      "queue_seq": 9
     }
   ],
   "work_repos": [
