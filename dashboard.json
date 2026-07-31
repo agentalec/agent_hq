@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-31T11:06:06Z",
+  "generated_at": "2026-07-31T11:06:07Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -1180,7 +1180,7 @@
           "task_id": "triage",
           "task_version": 1,
           "ticket_id": "20",
-          "state": "RUNNING",
+          "state": "FAILED",
           "attempt": 1,
           "bindings": {
             "tracker": "github-issues",
