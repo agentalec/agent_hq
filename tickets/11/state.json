@@ -697,7 +697,8 @@
       "chain_depth": 0,
       "source_event_id": "11:labeled:2026-07-31T12:27:50Z",
       "enqueue_index": 0,
-      "queue_seq": 21
+      "queue_seq": 21,
+      "repo": "agentalec/care_fe"
     }
   ],
   "work_repos": [
