@@ -51,3 +51,7 @@
 {"event_id": "a3246889df973077:implement-round-2:accepted", "kind": "handoff.accepted", "ticket_id": "20", "run_id": "a3246889df973077", "detail": "Fix blocker: restore line breaks in tests/PLAYWRIGHT_GUIDE.md:90-94 code block where URLs were concatenated without separators; also remove unrelated newline change in tests/README.md:95"}
 {"event_id": "a3246889df973077:succeeded", "kind": "run.succeeded", "ticket_id": "20", "run_id": "a3246889df973077", "state": "SUCCEEDED", "artifacts": ["specs/20/review.md"]}
 {"event_id": "b50b216c6db4f0ab:collected", "kind": "run.collected", "ticket_id": "20", "run_id": "b50b216c6db4f0ab", "tokens": 2211500, "cost_usd": 1.07}
+{"event_id": "b50b216c6db4f0ab:review-round-2:proposed", "kind": "handoff.proposed", "ticket_id": "20", "run_id": "b50b216c6db4f0ab", "detail": "Review the implementation fixes for Round 1 blockers"}
+{"event_id": "f87d399ae6f27567:queued", "kind": "run.queued", "ticket_id": "20", "run_id": "f87d399ae6f27567", "task_id": "review", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
+{"event_id": "b50b216c6db4f0ab:review-round-2:accepted", "kind": "handoff.accepted", "ticket_id": "20", "run_id": "b50b216c6db4f0ab", "detail": "Review the implementation fixes for Round 1 blockers"}
+{"event_id": "b50b216c6db4f0ab:succeeded", "kind": "run.succeeded", "ticket_id": "20", "run_id": "b50b216c6db4f0ab", "state": "SUCCEEDED", "artifacts": []}
