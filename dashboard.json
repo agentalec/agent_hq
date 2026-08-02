@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-02T18:30:24Z",
+  "generated_at": "2026-08-02T18:30:27Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -3007,7 +3007,7 @@
           "task_id": "spec",
           "task_version": 1,
           "ticket_id": "59",
-          "state": "QUEUED",
+          "state": "RUNNING",
           "attempt": 0,
           "bindings": {},
           "cost_usd": null,
@@ -3018,7 +3018,9 @@
           "source_event_id": "59:opened:2026-08-02T18:13:41Z",
           "enqueue_index": 0,
           "queue_seq": 0,
-          "repo": "agentalec/care_docs"
+          "repo": "agentalec/care_docs",
+          "deadline": "2026-08-02T19:00:27Z",
+          "attempt_started_at": "2026-08-02T18:30:27Z"
         }
       ],
       "block_reason": null,
