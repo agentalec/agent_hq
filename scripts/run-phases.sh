@@ -60,12 +60,7 @@ if [[ "$phase" == "collect" ]]; then
       "https://api.github.com/repos/$REPO/dispatches" \
       -d "{\"event_type\":\"agent-hq-dispatch\",\"client_payload\":{\"issue\":\"$ticket_id\"}}" || true
   fi
-
-  # Best-effort: refresh the dashboard. A failed/absent Pages workflow must
-  # not fail the run.
-  curl -s -X POST \
-    -H "Authorization: Bearer $AGENT_HQ_TOKEN" \
-    -H "Accept: application/vnd.github+json" \
-    "https://api.github.com/repos/$REPO/actions/workflows/pages.yml/dispatches" \
-    -d '{"ref":"main"}' || true
+  # No dashboard nudge here: the site is deployed from the `gh-pages` branch
+  # and reads state at view time, so a state write is not a reason to
+  # redeploy it (docs/architecture.md deviation 6).
 fi

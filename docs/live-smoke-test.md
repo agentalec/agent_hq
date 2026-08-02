@@ -166,4 +166,5 @@ gh variable set AGENT_HQ_KILL_SWITCH --repo agentalec/agent_hq --body "0"   # re
   (Tasks 14–16).
 - No `retry`/`unblock`/`reopen` operator commands yet (Tasks 16/18) — manual
   state repair only.
-- `pages.yml` (dashboard) fails until GitHub Pages is enabled / Task 17.
+- The dashboard 404s until Pages is enabled on the `gh-pages` branch and that
+  branch has been pushed (`docs/setup-new-repo.md` §2).

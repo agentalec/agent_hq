@@ -71,6 +71,11 @@ CI (`.github/workflows/ci.yml`) runs all five; a change isn't done until all pas
   command, `default` for the rest) is run in the worktree before the agent
   starts — structured setup is config, never a prompt (`docs/task-authoring.md`).
 - `.github/workflows/` + `scripts/` — the Actions surface (`docs/operations.md`).
+- `dashboard/` — the operator dashboard: static source, no build step, no
+  dependency. **No workflow deploys it.** Pages serves the orphan `gh-pages`
+  branch, whose root is a copy of this directory; state arrives at view time
+  from `dashboard.json` on the state branch. So a change here is live only
+  after the branch push in "Gotchas".
 
 ## Invariants (test-enforced — don't break them)
 
@@ -159,3 +164,12 @@ CI (`.github/workflows/ci.yml`) runs all five; a change isn't done until all pas
 - Never commit directly to `main`; work on a feature branch. Merge is a human
   action here too.
 - `git add -A` is safe only from a clean tree — check `git status` first.
+- **A `dashboard/` change is not live until `gh-pages` is pushed.** Nothing
+  automates it — merge to `main` first, then from an up-to-date `main`:
+
+  ```bash
+  git push -f origin "$(git subtree split --prefix dashboard main):refs/heads/gh-pages"
+  ```
+
+  `-f` is expected: the branch is derived output, never edited by hand. Say so
+  in the PR when you touch `dashboard/`, so whoever merges knows a push is owed.

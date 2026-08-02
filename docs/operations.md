@@ -155,9 +155,13 @@ enforcing intake-rejection logic lands in Task 9.
 
 Private deployments do not get a public dashboard: use the operator CLI
 (`agent-hq` commands, §2 and `docs/project-review.md`) instead of GitHub
-Pages. `pages.yml` gating on `public: false` (skip new deploys, and the
-one-time manual unpublish step for an install that was previously public)
-lands in Task 17.
+Pages. With the site served straight off the `gh-pages` branch there is no
+workflow left to gate on `public: false`, so this is a setup discipline, not
+an enforced one: on a private install leave Pages disabled and don't push the
+branch. An install that was previously public still needs the one-time manual
+unpublish (Settings > Pages > Unpublish site, then delete `gh-pages`) — and
+note the state branch stays readable over `raw.githubusercontent.com` while
+the repo is public, which is what the dashboard reads anyway.
 
 ## 10. Isolated prepare/execute/collect jobs (Task 12)
 
