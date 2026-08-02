@@ -31,18 +31,27 @@ links to it rather than restating it. For what a task definition is, see
 Create a new public repo in your org from this codebase (fork, template, or
 push a copy). Everything must land on the **default branch (`main`)**:
 
-- `intake.yml` (`issues: [labeled, opened]`), `dispatch.yml` (`schedule` +
-  `repository_dispatch`), and `pages.yml` (`schedule`) only trigger for
-  workflow files on the default branch — that's how GitHub resolves those
-  event types.
+- `intake.yml` (`issues: [labeled, opened]`) and `dispatch.yml` (`schedule` +
+  `repository_dispatch`) only trigger for workflow files on the default
+  branch — that's how GitHub resolves those event types.
 - The engine itself dispatches `run.yml` with a hardcoded `"ref": "main"`
   (`engine/runner.py`, `GithubWorkflowApi.trigger_run`).
 
 Nothing executes from a feature branch. A config change on a branch is
 inert until it merges to `main`.
 
-Enable GitHub Pages on the repo (Settings > Pages > Source: GitHub
-Actions) so `pages.yml` can deploy the dashboard.
+Publish the dashboard branch, then enable GitHub Pages on the repo
+(Settings > Pages > Source: **Deploy from a branch**, branch `gh-pages`,
+folder `/ (root)`):
+
+```bash
+git push -f origin "$(git subtree split --prefix dashboard main):refs/heads/gh-pages"
+```
+
+No workflow does this — repeat that push whenever `dashboard/` changes
+(`CLAUDE.md` "Gotchas"). A private install should leave Pages **disabled**:
+the branch is public state and there is no workflow left to gate on
+`projects.yml`'s `public` flag (`docs/operations.md` §9).
 
 ## 3. Configure `config/*.yml`
 
@@ -165,10 +174,11 @@ all five or the transition silently fails to label:
 - **The `agent-hq-state` branch**: `scripts/checkout-state.sh`
   self-bootstraps the orphan state branch on the first workflow run — no
   manual branch creation ([operations.md](operations.md) §3).
-- **The dashboard**: `pages.yml` deploys `dashboard/` when that directory
-  changes, once Pages is enabled (step 2). It is static source — state
-  reaches it at view time, by fetching `dashboard.json` off the state
-  branch, so a state write never triggers a deploy. Point
+- **The dashboard**: does *not* bootstrap itself — it is the one piece with a
+  manual publish step. Pages serves the `gh-pages` branch you pushed in step
+  2, and every later `dashboard/` change needs that push again. It is static
+  source — state reaches it at view time, by fetching `dashboard.json` off the
+  state branch, so a state write never triggers a deploy. Point
   `<meta name="agent-hq:engine-repo">` in `dashboard/index.html` at your
   engine repo; it must be public for the page to read anything.
 - **The execute environment**: `run.yml`'s `execute` job builds the engine

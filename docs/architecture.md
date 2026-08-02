@@ -59,9 +59,12 @@
    `dispatch.yml`'s sweep polls gate status, applies the stored handoffs on
    approval, and completes the run. Merge is always a human action — no task
    auto-merges a PR.
-6. The operator dashboard (`dashboard/`) is static source deployed by
-   `pages.yml` on a push that changes it — never on a schedule, and it never
-   reads the state branch at build time. Instead every
+6. The operator dashboard (`dashboard/`) is static source and no Actions
+   workflow deploys it: Pages serves the orphan `gh-pages` branch, whose root
+   is a copy of `dashboard/`, published by an explicit `git subtree split`
+   push when that directory changes (`CLAUDE.md` "Gotchas"). Nothing deploys
+   on a schedule, and nothing reads the state branch at publish time. Instead
+   every
    `GitJsonStateStore.write()` emits `dashboard.json` at the branch root
    (`engine/dashboard.py`) and the page fetches that one document from
    `raw.githubusercontent.com`, deriving the gate queue, board, run chains,
