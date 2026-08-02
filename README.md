@@ -14,6 +14,21 @@ No build step, no framework, no dependency. Four files ship:
 | `app.css` | component styles (the design carried these inline) |
 | `tokens.css` | **vendored verbatim** from the Claude Design project — re-import, don't hand-edit |
 | `fixture.json` | sample state for local development; it ships with the site but is only ever fetched on `localhost` |
+| `.nojekyll` | tells Pages to serve the branch as-is — no Jekyll build, nothing to compile |
+
+## Deploy
+
+Pages serves the orphan **`gh-pages`** branch (Settings > Pages > Deploy from
+a branch, `/ (root)`), whose root is a copy of this directory. No workflow
+does it. After your change is merged, from an up-to-date `main`:
+
+```bash
+git push -f origin "$(git subtree split --prefix dashboard main):refs/heads/gh-pages"
+```
+
+`-f` is expected — the branch is derived output and is never edited by hand,
+so a rewritten `main` should just re-derive it. Nothing else deploys: state
+arrives at view time, so a state write neither triggers nor needs a deploy.
 
 ## Configure per deployment
 
