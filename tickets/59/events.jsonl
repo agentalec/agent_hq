@@ -21,3 +21,4 @@
 {"event_id": "0f8ab33595bf15c3:finalize-59:accepted", "kind": "handoff.accepted", "ticket_id": "59", "run_id": "0f8ab33595bf15c3", "detail": "All acceptance criteria verified; documentation changes are accurate and complete"}
 {"event_id": "0f8ab33595bf15c3:succeeded", "kind": "run.succeeded", "ticket_id": "59", "run_id": "0f8ab33595bf15c3", "state": "SUCCEEDED", "artifacts": ["specs/59/qa.md"]}
 {"event_id": "4e58bc5b12e48a12:collected", "kind": "run.collected", "ticket_id": "59", "run_id": "4e58bc5b12e48a12", "tokens": 83200, "cost_usd": 0.0838}
+{"event_id": "4e58bc5b12e48a12:succeeded", "kind": "run.succeeded", "ticket_id": "59", "run_id": "4e58bc5b12e48a12", "state": "SUCCEEDED", "artifacts": ["specs/59/summary.md"]}
