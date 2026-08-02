@@ -5,3 +5,4 @@
 {"event_id": "28358cc81421a52d:queued", "kind": "run.queued", "ticket_id": "58", "run_id": "28358cc81421a52d", "task_id": "arch-plan", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment", "gate": "github-issue-comment"}}
 {"event_id": "d1f7ded9a22f7444:arch-plan-58:accepted", "kind": "handoff.accepted", "ticket_id": "58", "run_id": "d1f7ded9a22f7444", "detail": "Glossary page requires architecture plan for documentation structure and term selection"}
 {"event_id": "d1f7ded9a22f7444:succeeded", "kind": "run.succeeded", "ticket_id": "58", "run_id": "d1f7ded9a22f7444", "state": "SUCCEEDED", "artifacts": ["specs/58/spec.md"]}
+{"event_id": "28358cc81421a52d:collected", "kind": "run.collected", "ticket_id": "58", "run_id": "28358cc81421a52d", "tokens": 145200, "cost_usd": 0.124}
