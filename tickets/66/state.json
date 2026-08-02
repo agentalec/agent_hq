@@ -170,7 +170,7 @@
       "task_id": "qa",
       "task_version": 1,
       "ticket_id": "66",
-      "state": "RUNNING",
+      "state": "SUCCEEDED",
       "attempt": 0,
       "bindings": {
         "tracker": "github-issues",
@@ -180,7 +180,25 @@
       "cost_usd": 1.42,
       "tokens": 2727400,
       "usage_known": true,
-      "artifacts": [],
+      "artifacts": [
+        "specs/66/qa.md",
+        "specs/66/screenshots/ac1-initial-14-orders.png",
+        "specs/66/screenshots/ac1-initial-load-desktop.png",
+        "specs/66/screenshots/after-scroll-desktop.png",
+        "specs/66/screenshots/current-state.png",
+        "specs/66/screenshots/debug-structure.png",
+        "specs/66/screenshots/encounter-page.png",
+        "specs/66/screenshots/encounters-page.png",
+        "specs/66/screenshots/error-mobile.png",
+        "specs/66/screenshots/error-state.png",
+        "specs/66/screenshots/facility-page.png",
+        "specs/66/screenshots/homepage.png",
+        "specs/66/screenshots/initial-load.png",
+        "specs/66/screenshots/medicines-tab.png",
+        "specs/66/screenshots/mobile-encounter-page.png",
+        "specs/66/screenshots/mobile-no-medicines-tab.png",
+        "specs/66/screenshots/mobile-view.png"
+      ],
       "chain_depth": 5,
       "parent_run_id": "2f987db215102d23",
       "queue_seq": 5,
@@ -193,7 +211,36 @@
       "deadline": "2026-08-02T22:10:18Z",
       "attempt_started_at": "2026-08-02T21:10:18Z",
       "base_commit": "61c3216bc9ab3e932f5dfafaf198322e6969067e",
-      "input_from_run_id": "2f987db215102d23"
+      "input_from_run_id": "2f987db215102d23",
+      "output_commit": "61c3216bc9ab3e932f5dfafaf198322e6969067e",
+      "pr_ref": "agentalec/care_fe#8"
+    },
+    {
+      "run_id": "f570c55d396749d0",
+      "task_id": "finalize",
+      "task_version": 1,
+      "ticket_id": "66",
+      "state": "QUEUED",
+      "attempt": 0,
+      "bindings": {
+        "tracker": "github-issues",
+        "agent-session": "copilot-cli",
+        "messaging": "github-comment"
+      },
+      "cost_usd": null,
+      "tokens": null,
+      "usage_known": false,
+      "artifacts": [],
+      "chain_depth": 6,
+      "parent_run_id": "fcec5fd652526213",
+      "queue_seq": 6,
+      "handoff_key": "finalize-66",
+      "repo": "agentalec/care_fe",
+      "input_artifacts": [
+        "specs/66/spec.md",
+        "specs/66/review.md",
+        "specs/66/qa.md"
+      ]
     }
   ],
   "block_reason": null,
