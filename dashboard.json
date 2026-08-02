@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-02T18:29:55Z",
+  "generated_at": "2026-08-02T18:29:56Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -3126,6 +3126,28 @@
           "base_commit": "5466816828ba496f9d4e6099e77360eb516ece31",
           "input_from_run_id": null,
           "input_artifacts": []
+        },
+        {
+          "run_id": "545882e547a37cd6",
+          "task_id": "spec",
+          "task_version": 1,
+          "ticket_id": "64",
+          "state": "QUEUED",
+          "attempt": 1,
+          "bindings": {
+            "tracker": "github-issues",
+            "agent-session": "copilot-cli",
+            "messaging": "github-comment",
+            "gate": "github-issue-comment"
+          },
+          "cost_usd": null,
+          "tokens": null,
+          "usage_known": false,
+          "artifacts": [],
+          "chain_depth": 0,
+          "source_event_id": "64:opened:2026-08-02T18:13:59Z",
+          "enqueue_index": 0,
+          "queue_seq": 0
         }
       ],
       "block_reason": null,
