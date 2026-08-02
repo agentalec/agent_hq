@@ -35,3 +35,4 @@
 {"event_id": "a61cb2bd1fea6df6:queued", "kind": "run.queued", "ticket_id": "58", "run_id": "a61cb2bd1fea6df6", "task_id": "qa", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "635c631838387293:qa-glossary:accepted", "kind": "handoff.accepted", "ticket_id": "58", "run_id": "635c631838387293", "detail": "All acceptance criteria met; glossary page exists in both versions, terms in alphabetical order, all definitions 1-2 sentences, navigation link added, required terms present."}
 {"event_id": "635c631838387293:succeeded", "kind": "run.succeeded", "ticket_id": "58", "run_id": "635c631838387293", "state": "SUCCEEDED", "artifacts": ["specs/58/review.md"]}
+{"event_id": "a61cb2bd1fea6df6:collected", "kind": "run.collected", "ticket_id": "58", "run_id": "a61cb2bd1fea6df6", "tokens": 2619700, "cost_usd": 1.46}
