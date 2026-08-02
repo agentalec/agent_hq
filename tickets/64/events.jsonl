@@ -38,3 +38,4 @@
 {"event_id": "d0c9ce42032d413e:queued", "kind": "run.queued", "ticket_id": "64", "run_id": "d0c9ce42032d413e", "task_id": "implement", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "f7166baad7ee2a20:implement-3:accepted", "kind": "handoff.accepted", "ticket_id": "64", "run_id": "f7166baad7ee2a20", "detail": "Add tests for isNonStandardDosage() and fix string comparison to use numeric comparison for dosage values"}
 {"event_id": "f7166baad7ee2a20:succeeded", "kind": "run.succeeded", "ticket_id": "64", "run_id": "f7166baad7ee2a20", "state": "SUCCEEDED", "artifacts": ["specs/64/review.md"]}
+{"event_id": "d0c9ce42032d413e:collected", "kind": "run.collected", "ticket_id": "64", "run_id": "d0c9ce42032d413e", "tokens": 3419500, "cost_usd": 1.54}
