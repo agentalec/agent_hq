@@ -6,3 +6,7 @@
 {"event_id": "ba4832d9065cda4a:implement-60-care-fe:accepted", "kind": "handoff.accepted", "ticket_id": "60", "run_id": "ba4832d9065cda4a", "detail": "Implement clinical age format rules in formatPatientAge utility and add tooltip to encounter card patient age display"}
 {"event_id": "ba4832d9065cda4a:succeeded", "kind": "run.succeeded", "ticket_id": "60", "run_id": "ba4832d9065cda4a", "state": "SUCCEEDED", "artifacts": ["specs/60/spec.md"]}
 {"event_id": "18a1441607b57db1:collected", "kind": "run.collected", "ticket_id": "60", "run_id": "18a1441607b57db1", "tokens": 1510700, "cost_usd": 0.81}
+{"event_id": "18a1441607b57db1:review-60:proposed", "kind": "handoff.proposed", "ticket_id": "60", "run_id": "18a1441607b57db1", "detail": "Review implementation of clinical age-format rules against spec acceptance criteria"}
+{"event_id": "02984ea33192bafb:queued", "kind": "run.queued", "ticket_id": "60", "run_id": "02984ea33192bafb", "task_id": "review", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
+{"event_id": "18a1441607b57db1:review-60:accepted", "kind": "handoff.accepted", "ticket_id": "60", "run_id": "18a1441607b57db1", "detail": "Review implementation of clinical age-format rules against spec acceptance criteria"}
+{"event_id": "18a1441607b57db1:succeeded", "kind": "run.succeeded", "ticket_id": "60", "run_id": "18a1441607b57db1", "state": "SUCCEEDED", "artifacts": []}
