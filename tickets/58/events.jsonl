@@ -16,3 +16,7 @@
 {"event_id": "aefbe6876d2e827f:implement-glossary:accepted", "kind": "handoff.accepted", "ticket_id": "58", "run_id": "aefbe6876d2e827f", "detail": "Create glossary page with domain term definitions and add it to navigation in both versioned docs"}
 {"event_id": "aefbe6876d2e827f:succeeded", "kind": "run.succeeded", "ticket_id": "58", "run_id": "aefbe6876d2e827f", "state": "SUCCEEDED", "artifacts": ["specs/58/tasks.md"]}
 {"event_id": "9066613043959b2b:collected", "kind": "run.collected", "ticket_id": "58", "run_id": "9066613043959b2b", "tokens": 1009900, "cost_usd": 0.631}
+{"event_id": "9066613043959b2b:58-review-1:proposed", "kind": "handoff.proposed", "ticket_id": "58", "run_id": "9066613043959b2b", "detail": "Review glossary implementation against spec acceptance criteria"}
+{"event_id": "cad4136cf8912bd2:queued", "kind": "run.queued", "ticket_id": "58", "run_id": "cad4136cf8912bd2", "task_id": "review", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
+{"event_id": "9066613043959b2b:58-review-1:accepted", "kind": "handoff.accepted", "ticket_id": "58", "run_id": "9066613043959b2b", "detail": "Review glossary implementation against spec acceptance criteria"}
+{"event_id": "9066613043959b2b:succeeded", "kind": "run.succeeded", "ticket_id": "58", "run_id": "9066613043959b2b", "state": "SUCCEEDED", "artifacts": []}
