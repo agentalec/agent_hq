@@ -6,3 +6,7 @@
 {"event_id": "aec5241fda6eec36:implement-59-care-docs:accepted", "kind": "handoff.accepted", "ticket_id": "59", "run_id": "aec5241fda6eec36", "detail": "Update README.md to use npm instead of yarn, add Node.js prerequisite, and specify the local dev server URL."}
 {"event_id": "aec5241fda6eec36:succeeded", "kind": "run.succeeded", "ticket_id": "59", "run_id": "aec5241fda6eec36", "state": "SUCCEEDED", "artifacts": ["specs/59/spec.md"]}
 {"event_id": "a03f27be3f525a46:collected", "kind": "run.collected", "ticket_id": "59", "run_id": "a03f27be3f525a46", "tokens": 232700, "cost_usd": 0.163}
+{"event_id": "a03f27be3f525a46:review-59:proposed", "kind": "handoff.proposed", "ticket_id": "59", "run_id": "a03f27be3f525a46", "detail": "Review implementation against spec acceptance criteria"}
+{"event_id": "ef5dd8b85fbc5fc1:queued", "kind": "run.queued", "ticket_id": "59", "run_id": "ef5dd8b85fbc5fc1", "task_id": "review", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
+{"event_id": "a03f27be3f525a46:review-59:accepted", "kind": "handoff.accepted", "ticket_id": "59", "run_id": "a03f27be3f525a46", "detail": "Review implementation against spec acceptance criteria"}
+{"event_id": "a03f27be3f525a46:succeeded", "kind": "run.succeeded", "ticket_id": "59", "run_id": "a03f27be3f525a46", "state": "SUCCEEDED", "artifacts": []}
