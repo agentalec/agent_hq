@@ -1,0 +1,4 @@
+{
+  "classification": "crud",
+  "reasoning": "None of the beyond-crud criteria apply. This is a pure frontend UI enhancement that adds visual highlighting to existing dosage display components. There are no data model changes, migrations, field modifications, new services, external integrations, authorization changes, FHIR/EMR model changes, or non-CRUD endpoints. While it improves clinical safety by making non-standard dosages more visible, it does not change clinical behavior, medication logic, or data handling—it only changes how existing dosage data is styled and presented to users."
+}
