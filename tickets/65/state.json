@@ -1,7 +1,7 @@
 {
   "ticket_id": "65",
   "pinned_comment_id": 5159691920,
-  "status": "ACTIVE",
+  "status": "BLOCKED",
   "runs": [
     {
       "run_id": "b26698f02ed7bbbe",
@@ -36,9 +36,9 @@
       "pr_ref": null
     }
   ],
-  "block_reason": null,
-  "block_source": null,
-  "interrupted_run_id": null,
+  "block_reason": "queue ran dry after `spec` without reaching `finalize`",
+  "block_source": "engine",
+  "interrupted_run_id": "b26698f02ed7bbbe",
   "comments_polled_at": "2026-08-02T18:14:24Z",
   "work_repos": [
     {
