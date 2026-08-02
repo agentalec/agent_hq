@@ -168,7 +168,7 @@
       "task_id": "review",
       "task_version": 1,
       "ticket_id": "64",
-      "state": "QUEUED",
+      "state": "RUNNING",
       "attempt": 0,
       "bindings": {
         "tracker": "github-issues",
@@ -188,7 +188,9 @@
         "specs/64/spec.md",
         "specs/64/plan.md",
         "specs/64/tasks.md"
-      ]
+      ],
+      "deadline": "2026-08-02T21:54:28Z",
+      "attempt_started_at": "2026-08-02T21:24:28Z"
     }
   ],
   "block_reason": null,
