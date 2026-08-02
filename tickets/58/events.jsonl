@@ -30,3 +30,4 @@
 {"event_id": "635c631838387293:queued", "kind": "run.queued", "ticket_id": "58", "run_id": "635c631838387293", "task_id": "review", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "4de84333da4e4fe2:review-r2:accepted", "kind": "handoff.accepted", "ticket_id": "58", "run_id": "4de84333da4e4fe2", "detail": "Round 1 blockers resolved; facility definition condensed to 1 sentence in both versions"}
 {"event_id": "4de84333da4e4fe2:succeeded", "kind": "run.succeeded", "ticket_id": "58", "run_id": "4de84333da4e4fe2", "state": "SUCCEEDED", "artifacts": []}
+{"event_id": "635c631838387293:collected", "kind": "run.collected", "ticket_id": "58", "run_id": "635c631838387293", "tokens": 327000, "cost_usd": 0.221}
