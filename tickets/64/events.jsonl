@@ -8,3 +8,4 @@
 {"event_id": "b34d6e72a5956302:queued", "kind": "run.queued", "ticket_id": "64", "run_id": "b34d6e72a5956302", "task_id": "arch-plan", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment", "gate": "github-issue-comment"}}
 {"event_id": "545882e547a37cd6:arch-plan-64:accepted", "kind": "handoff.accepted", "ticket_id": "64", "run_id": "545882e547a37cd6", "detail": "Create implementation plan for medicine dosage highlighting feature"}
 {"event_id": "545882e547a37cd6:succeeded", "kind": "run.succeeded", "ticket_id": "64", "run_id": "545882e547a37cd6", "state": "SUCCEEDED", "artifacts": ["specs/64/spec.md"]}
+{"event_id": "b34d6e72a5956302:collected", "kind": "run.collected", "ticket_id": "64", "run_id": "b34d6e72a5956302", "tokens": 383800, "cost_usd": 0.283}
