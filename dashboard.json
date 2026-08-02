@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-02T18:14:48Z",
+  "generated_at": "2026-08-02T18:14:50Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -2858,7 +2858,12 @@
           "ticket_id": "58",
           "state": "RUNNING",
           "attempt": 0,
-          "bindings": {},
+          "bindings": {
+            "tracker": "github-issues",
+            "agent-session": "copilot-cli",
+            "messaging": "github-comment",
+            "gate": "github-issue-comment"
+          },
           "cost_usd": null,
           "tokens": null,
           "usage_known": false,
@@ -2869,7 +2874,10 @@
           "queue_seq": 0,
           "repo": "agentalec/care_docs",
           "deadline": "2026-08-02T18:44:48Z",
-          "attempt_started_at": "2026-08-02T18:14:48Z"
+          "attempt_started_at": "2026-08-02T18:14:48Z",
+          "base_commit": "dbd221992b4569412c1969bffff99f2642160205",
+          "input_from_run_id": null,
+          "input_artifacts": []
         }
       ],
       "block_reason": null,
