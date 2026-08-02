@@ -1,0 +1,4 @@
+{
+  "classification": "crud",
+  "reasoning": "This ticket involves adding a new documentation page with static content and updating a sidebar configuration file. It does not involve any of the beyond-crud criteria: no data models or migrations, no model field changes, no new services or infrastructure, no external integrations, no authorization changes, no FHIR/EMR model changes, no non-CRUD endpoints, and no clinical-safety-relevant behavior. This is purely a documentation enhancement."
+}
