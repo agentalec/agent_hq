@@ -25,3 +25,4 @@
 {"event_id": "4de84333da4e4fe2:queued", "kind": "run.queued", "ticket_id": "58", "run_id": "4de84333da4e4fe2", "task_id": "implement", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "cad4136cf8912bd2:implement-round-2:accepted", "kind": "handoff.accepted", "ticket_id": "58", "run_id": "cad4136cf8912bd2", "detail": "Fix facility definition length in both version 3.0 and 3.1 glossaries"}
 {"event_id": "cad4136cf8912bd2:succeeded", "kind": "run.succeeded", "ticket_id": "58", "run_id": "cad4136cf8912bd2", "state": "SUCCEEDED", "artifacts": ["specs/58/review.md"]}
+{"event_id": "4de84333da4e4fe2:collected", "kind": "run.collected", "ticket_id": "58", "run_id": "4de84333da4e4fe2", "tokens": 350700, "cost_usd": 0.23}
