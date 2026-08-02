@@ -8,7 +8,7 @@
       "task_id": "spec",
       "task_version": 1,
       "ticket_id": "65",
-      "state": "RUNNING",
+      "state": "SUCCEEDED",
       "attempt": 0,
       "bindings": {
         "tracker": "github-issues",
@@ -19,7 +19,9 @@
       "cost_usd": 0.313,
       "tokens": 422400,
       "usage_known": true,
-      "artifacts": [],
+      "artifacts": [
+        "specs/65/spec.md"
+      ],
       "chain_depth": 0,
       "source_event_id": "65:opened:2026-08-02T18:14:03Z",
       "enqueue_index": 0,
@@ -29,11 +31,22 @@
       "attempt_started_at": "2026-08-02T19:46:58Z",
       "base_commit": "5466816828ba496f9d4e6099e77360eb516ece31",
       "input_from_run_id": null,
-      "input_artifacts": []
+      "input_artifacts": [],
+      "output_commit": "5466816828ba496f9d4e6099e77360eb516ece31",
+      "pr_ref": null
     }
   ],
   "block_reason": null,
   "block_source": null,
   "interrupted_run_id": null,
-  "comments_polled_at": "2026-08-02T18:14:24Z"
+  "comments_polled_at": "2026-08-02T18:14:24Z",
+  "work_repos": [
+    {
+      "repo": "agentalec/care_fe",
+      "branch": "agent-hq/65",
+      "base_branch": "develop",
+      "recorded_head": "5466816828ba496f9d4e6099e77360eb516ece31",
+      "pr_ref": null
+    }
+  ]
 }
