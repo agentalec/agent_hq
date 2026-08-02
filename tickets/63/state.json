@@ -39,7 +39,7 @@
   "block_reason": "queue ran dry after `spec` without reaching `finalize`",
   "block_source": "engine",
   "interrupted_run_id": "9efebeb7a4e8a4c3",
-  "comments_polled_at": "2026-08-02T18:14:10Z",
+  "comments_polled_at": "2026-08-02T19:50:24Z",
   "work_repos": [
     {
       "repo": "agentalec/care_fe",
