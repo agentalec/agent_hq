@@ -172,7 +172,7 @@
   "block_reason": null,
   "block_source": null,
   "interrupted_run_id": null,
-  "comments_polled_at": "2026-08-02T18:44:31Z",
+  "comments_polled_at": "2026-08-02T18:59:04Z",
   "work_repos": [
     {
       "repo": "agentalec/care_docs",
