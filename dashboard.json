@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-02T18:14:28Z",
+  "generated_at": "2026-08-02T18:14:30Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -2899,6 +2899,15 @@
           "repo": "agentalec/care_docs"
         }
       ],
+      "block_reason": null,
+      "block_source": null,
+      "interrupted_run_id": null
+    },
+    {
+      "ticket_id": "60",
+      "pinned_comment_id": 5159690950,
+      "status": "ACTIVE",
+      "runs": [],
       "block_reason": null,
       "block_source": null,
       "interrupted_run_id": null
