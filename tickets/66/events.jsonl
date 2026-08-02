@@ -20,3 +20,4 @@
 {"event_id": "2f987db215102d23:queued", "kind": "run.queued", "ticket_id": "66", "run_id": "2f987db215102d23", "task_id": "review", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "f3357a40cb6f7b35:review-round-2:accepted", "kind": "handoff.accepted", "ticket_id": "66", "run_id": "f3357a40cb6f7b35", "detail": "Verify blocker fix and confirm infinite pagination implementation meets all acceptance criteria"}
 {"event_id": "f3357a40cb6f7b35:succeeded", "kind": "run.succeeded", "ticket_id": "66", "run_id": "f3357a40cb6f7b35", "state": "SUCCEEDED", "artifacts": []}
+{"event_id": "2f987db215102d23:collected", "kind": "run.collected", "ticket_id": "66", "run_id": "2f987db215102d23", "tokens": 692100, "cost_usd": 0.402}
