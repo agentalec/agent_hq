@@ -44,3 +44,4 @@
 {"event_id": "d0c9ce42032d413e:review-round-3:accepted", "kind": "handoff.accepted", "ticket_id": "64", "run_id": "d0c9ce42032d413e", "detail": "Implementation complete with Round 2 blockers resolved. Ready for review."}
 {"event_id": "d0c9ce42032d413e:succeeded", "kind": "run.succeeded", "ticket_id": "64", "run_id": "d0c9ce42032d413e", "state": "SUCCEEDED", "artifacts": []}
 {"event_id": "bacef332bbee8095:collected", "kind": "run.collected", "ticket_id": "64", "run_id": "bacef332bbee8095", "tokens": 598100, "cost_usd": 0.407}
+{"event_id": "bacef332bbee8095:blocked", "kind": "run.blocked", "ticket_id": "64", "run_id": "bacef332bbee8095", "state": "BLOCKED", "detail": "Blocker found: PrescriptionPreview print view uses only bold without amber color for non-standard dosages, inconsistent with other views (AC2-3) and potentially not meeting AC4's intent for print accessibility. Round limit (3) reached."}

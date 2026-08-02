@@ -1,7 +1,7 @@
 {
   "ticket_id": "64",
   "pinned_comment_id": 5159691402,
-  "status": "ACTIVE",
+  "status": "BLOCKED",
   "runs": [
     {
       "run_id": "001547e9ba511cdf",
@@ -301,7 +301,7 @@
       "task_id": "review",
       "task_version": 1,
       "ticket_id": "64",
-      "state": "RUNNING",
+      "state": "BLOCKED",
       "attempt": 0,
       "bindings": {
         "tracker": "github-issues",
@@ -327,9 +327,9 @@
       "input_from_run_id": "d0c9ce42032d413e"
     }
   ],
-  "block_reason": null,
-  "block_source": null,
-  "interrupted_run_id": null,
+  "block_reason": "Blocker found: PrescriptionPreview print view uses only bold without amber color for non-standard dosages, inconsistent with other views (AC2-3) and potentially not meeting AC4's intent for print accessibility. Round limit (3) reached.",
+  "block_source": "task",
+  "interrupted_run_id": "bacef332bbee8095",
   "comments_polled_at": "2026-08-02T20:59:51Z",
   "work_repos": [
     {
