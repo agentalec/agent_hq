@@ -1,1 +1,2 @@
 {"event_id": "ba4832d9065cda4a:queued", "kind": "run.queued", "ticket_id": "60", "run_id": "ba4832d9065cda4a", "task_id": "spec", "task_version": 1, "state": "QUEUED", "bindings": {}}
+{"event_id": "ba4832d9065cda4a:collected", "kind": "run.collected", "ticket_id": "60", "run_id": "ba4832d9065cda4a", "tokens": 572800, "cost_usd": 0.38}
