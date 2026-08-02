@@ -25,3 +25,4 @@
 {"event_id": "e47a37173ae38802:queued", "kind": "run.queued", "ticket_id": "60", "run_id": "e47a37173ae38802", "task_id": "qa", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "dea5a6076dcc4b3a:qa-patient-age:accepted", "kind": "handoff.accepted", "ticket_id": "60", "run_id": "dea5a6076dcc4b3a", "detail": "Round 2 blocker resolved; verifying clinical age format displays correctly for all age ranges (0-28d, 29d-1y, 1y-2y, 2y-18y, 18y+) with complete tooltip breakdown"}
 {"event_id": "dea5a6076dcc4b3a:succeeded", "kind": "run.succeeded", "ticket_id": "60", "run_id": "dea5a6076dcc4b3a", "state": "SUCCEEDED", "artifacts": ["specs/60/review.md"]}
+{"event_id": "e47a37173ae38802:collected", "kind": "run.collected", "ticket_id": "60", "run_id": "e47a37173ae38802", "tokens": 4742200, "cost_usd": 2.37}
