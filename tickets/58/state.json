@@ -195,7 +195,9 @@
         "specs/58/review.md"
       ],
       "deadline": "2026-08-02T20:08:27Z",
-      "attempt_started_at": "2026-08-02T18:38:27Z"
+      "attempt_started_at": "2026-08-02T18:38:27Z",
+      "base_commit": "4b455fa24494b1505cb9c9ee019ddd5e00859130",
+      "input_from_run_id": "cad4136cf8912bd2"
     }
   ],
   "block_reason": null,
