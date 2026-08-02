@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-02T21:57:26Z",
+  "generated_at": "2026-08-02T21:57:48Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -4019,7 +4019,7 @@
       "block_reason": "Blocker found: PrescriptionPreview print view uses only bold without amber color for non-standard dosages, inconsistent with other views (AC2-3) and potentially not meeting AC4's intent for print accessibility. Round limit (3) reached.",
       "block_source": "task",
       "interrupted_run_id": "bacef332bbee8095",
-      "comments_polled_at": "2026-08-02T20:59:51Z",
+      "comments_polled_at": "2026-08-02T21:57:29Z",
       "work_repos": [
         {
           "repo": "agentalec/care_fe",
