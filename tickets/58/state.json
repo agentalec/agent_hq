@@ -240,7 +240,7 @@
       "task_id": "qa",
       "task_version": 1,
       "ticket_id": "58",
-      "state": "RUNNING",
+      "state": "SUCCEEDED",
       "attempt": 0,
       "bindings": {
         "tracker": "github-issues",
@@ -250,7 +250,22 @@
       "cost_usd": 1.46,
       "tokens": 2619700,
       "usage_known": true,
-      "artifacts": [],
+      "artifacts": [
+        "specs/58/qa.md",
+        "specs/58/screenshots/ac1-navigation-link.png",
+        "specs/58/screenshots/ac2-alphabetical-order.png",
+        "specs/58/screenshots/ac3-plain-language.png",
+        "specs/58/screenshots/ac4-required-terms.png",
+        "specs/58/screenshots/ac5-version-3.0-glossary.png",
+        "specs/58/screenshots/ac5-version-3.0-sidebar.png",
+        "specs/58/screenshots/glossary-3.0.png",
+        "specs/58/screenshots/glossary-mobile.png",
+        "specs/58/screenshots/glossary-page-full.png",
+        "specs/58/screenshots/glossary-page-top.png",
+        "specs/58/screenshots/glossary-page.png",
+        "specs/58/screenshots/homepage-sidebar.png",
+        "specs/58/screenshots/navigation-link.png"
+      ],
       "chain_depth": 7,
       "parent_run_id": "635c631838387293",
       "queue_seq": 7,
@@ -263,7 +278,36 @@
       "deadline": "2026-08-02T19:47:18Z",
       "attempt_started_at": "2026-08-02T18:47:18Z",
       "base_commit": "10efcd7ca56dbc1481b4447756b13ee0a3c0c8e2",
-      "input_from_run_id": "635c631838387293"
+      "input_from_run_id": "635c631838387293",
+      "output_commit": "10efcd7ca56dbc1481b4447756b13ee0a3c0c8e2",
+      "pr_ref": "agentalec/care_docs#2"
+    },
+    {
+      "run_id": "68f46898eaf2de45",
+      "task_id": "finalize",
+      "task_version": 1,
+      "ticket_id": "58",
+      "state": "QUEUED",
+      "attempt": 0,
+      "bindings": {
+        "tracker": "github-issues",
+        "agent-session": "copilot-cli",
+        "messaging": "github-comment"
+      },
+      "cost_usd": null,
+      "tokens": null,
+      "usage_known": false,
+      "artifacts": [],
+      "chain_depth": 8,
+      "parent_run_id": "a61cb2bd1fea6df6",
+      "queue_seq": 8,
+      "handoff_key": "finalize-58",
+      "repo": "agentalec/care_docs",
+      "input_artifacts": [
+        "specs/58/spec.md",
+        "specs/58/review.md",
+        "specs/58/qa.md"
+      ]
     }
   ],
   "block_reason": null,
