@@ -10,3 +10,4 @@
 {"event_id": "02984ea33192bafb:queued", "kind": "run.queued", "ticket_id": "60", "run_id": "02984ea33192bafb", "task_id": "review", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "18a1441607b57db1:review-60:accepted", "kind": "handoff.accepted", "ticket_id": "60", "run_id": "18a1441607b57db1", "detail": "Review implementation of clinical age-format rules against spec acceptance criteria"}
 {"event_id": "18a1441607b57db1:succeeded", "kind": "run.succeeded", "ticket_id": "60", "run_id": "18a1441607b57db1", "state": "SUCCEEDED", "artifacts": []}
+{"event_id": "02984ea33192bafb:collected", "kind": "run.collected", "ticket_id": "60", "run_id": "02984ea33192bafb", "tokens": 201400, "cost_usd": 0.192}
