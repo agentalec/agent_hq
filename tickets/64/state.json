@@ -18,7 +18,8 @@
       "chain_depth": 0,
       "source_event_id": "64:opened:2026-08-02T18:13:59Z",
       "enqueue_index": 0,
-      "queue_seq": 0
+      "queue_seq": 0,
+      "repo": "agentalec/care_fe"
     }
   ],
   "block_reason": null,
