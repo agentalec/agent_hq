@@ -28,3 +28,4 @@
 {"event_id": "92595f82350f843f:queued", "kind": "run.queued", "ticket_id": "64", "run_id": "92595f82350f843f", "task_id": "implement", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "195f9801d28a226c:implement-2:accepted", "kind": "handoff.accepted", "ticket_id": "64", "run_id": "195f9801d28a226c", "detail": "Fix formatting issue in tests/PLAYWRIGHT_GUIDE.md where URLs were concatenated without proper separation"}
 {"event_id": "195f9801d28a226c:succeeded", "kind": "run.succeeded", "ticket_id": "64", "run_id": "195f9801d28a226c", "state": "SUCCEEDED", "artifacts": ["specs/64/review.md"]}
+{"event_id": "92595f82350f843f:collected", "kind": "run.collected", "ticket_id": "64", "run_id": "92595f82350f843f", "tokens": 1008200, "cost_usd": 0.552}
