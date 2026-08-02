@@ -95,7 +95,9 @@
         "specs/58/plan.md"
       ],
       "deadline": "2026-08-02T18:53:12Z",
-      "attempt_started_at": "2026-08-02T18:23:12Z"
+      "attempt_started_at": "2026-08-02T18:23:12Z",
+      "base_commit": "dbd221992b4569412c1969bffff99f2642160205",
+      "input_from_run_id": "28358cc81421a52d"
     }
   ],
   "block_reason": null,
