@@ -18,3 +18,4 @@
 {"event_id": "585d458b472d320e:queued", "kind": "run.queued", "ticket_id": "64", "run_id": "585d458b472d320e", "task_id": "implement", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "a7e14e3b922a6132:impl-care-fe:accepted", "kind": "handoff.accepted", "ticket_id": "64", "run_id": "a7e14e3b922a6132", "detail": "Implement visual highlighting for non-standard medicine dosages in frontend"}
 {"event_id": "a7e14e3b922a6132:succeeded", "kind": "run.succeeded", "ticket_id": "64", "run_id": "a7e14e3b922a6132", "state": "SUCCEEDED", "artifacts": ["specs/64/tasks.md"]}
+{"event_id": "585d458b472d320e:collected", "kind": "run.collected", "ticket_id": "64", "run_id": "585d458b472d320e", "tokens": 3722900, "cost_usd": 1.96}
