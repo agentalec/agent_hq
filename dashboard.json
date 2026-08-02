@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-02T18:44:53Z",
+  "generated_at": "2026-08-02T18:45:14Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -3137,7 +3137,7 @@
           "task_id": "implement",
           "task_version": 1,
           "ticket_id": "59",
-          "state": "QUEUED",
+          "state": "RUNNING",
           "attempt": 0,
           "bindings": {
             "tracker": "github-issues",
@@ -3156,7 +3156,9 @@
           "repo": "agentalec/care_docs",
           "input_artifacts": [
             "specs/59/spec.md"
-          ]
+          ],
+          "deadline": "2026-08-02T20:15:14Z",
+          "attempt_started_at": "2026-08-02T18:45:14Z"
         }
       ],
       "block_reason": null,
