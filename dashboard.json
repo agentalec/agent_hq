@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-02T18:18:32Z",
+  "generated_at": "2026-08-02T18:18:37Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -2856,7 +2856,7 @@
           "task_id": "spec",
           "task_version": 1,
           "ticket_id": "58",
-          "state": "RUNNING",
+          "state": "SUCCEEDED",
           "attempt": 0,
           "bindings": {
             "tracker": "github-issues",
@@ -2867,7 +2867,9 @@
           "cost_usd": 0.346,
           "tokens": 432600,
           "usage_known": true,
-          "artifacts": [],
+          "artifacts": [
+            "specs/58/spec.md"
+          ],
           "chain_depth": 0,
           "source_event_id": "58:labeled:2026-08-02T18:13:37Z",
           "enqueue_index": 0,
@@ -2877,13 +2879,50 @@
           "attempt_started_at": "2026-08-02T18:14:48Z",
           "base_commit": "dbd221992b4569412c1969bffff99f2642160205",
           "input_from_run_id": null,
-          "input_artifacts": []
+          "input_artifacts": [],
+          "output_commit": "dbd221992b4569412c1969bffff99f2642160205",
+          "pr_ref": null
+        },
+        {
+          "run_id": "28358cc81421a52d",
+          "task_id": "arch-plan",
+          "task_version": 1,
+          "ticket_id": "58",
+          "state": "QUEUED",
+          "attempt": 0,
+          "bindings": {
+            "tracker": "github-issues",
+            "agent-session": "copilot-cli",
+            "messaging": "github-comment",
+            "gate": "github-issue-comment"
+          },
+          "cost_usd": null,
+          "tokens": null,
+          "usage_known": false,
+          "artifacts": [],
+          "chain_depth": 1,
+          "parent_run_id": "d1f7ded9a22f7444",
+          "queue_seq": 1,
+          "handoff_key": "arch-plan-58",
+          "repo": "agentalec/care_docs",
+          "input_artifacts": [
+            "specs/58/spec.md"
+          ]
         }
       ],
       "block_reason": null,
       "block_source": null,
       "interrupted_run_id": null,
-      "comments_polled_at": "2026-08-02T18:13:56Z"
+      "comments_polled_at": "2026-08-02T18:13:56Z",
+      "work_repos": [
+        {
+          "repo": "agentalec/care_docs",
+          "branch": "agent-hq/58",
+          "base_branch": "main",
+          "recorded_head": "dbd221992b4569412c1969bffff99f2642160205",
+          "pr_ref": null
+        }
+      ]
     },
     {
       "ticket_id": "59",
