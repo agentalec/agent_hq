@@ -274,7 +274,9 @@ button { font: inherit; cursor: pointer; }
 }
 .repo-card .name { font-family: var(--font-mono); font-size: 13px; overflow-wrap: anywhere; }
 .repo-card .branch { font-family: var(--font-mono); font-size: 11px; color: var(--muted-foreground); overflow-wrap: anywhere; }
-.repo-card .pr {
+/* Also the detail head's "Open issue" link — an out-of-page link reads the
+   same wherever it sits. */
+.pr {
   display: inline-flex; align-items: center; gap: 6px;
   font-family: var(--font-mono); font-size: 12px; font-weight: 500;
   text-decoration: underline; text-underline-offset: 2px;
