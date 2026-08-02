@@ -553,6 +553,17 @@
     h2.id = 'hd-detail';
     title.appendChild(h2);
     title.appendChild(toned(el('span', 'chip-state', ticket.status), ticket.status));
+    /* The ticket issue is where every human decision is actually made, so the
+       detail view links to it. Null for a non-numeric id (see issueUrl), and
+       the heading stays plain text rather than becoming a dead link. */
+    var issueHref = issueUrl(m.repo, ticket.ticket_id);
+    if (issueHref) {
+      var issueLink = el('a', 'pr', 'Open issue');
+      issueLink.href = issueHref;
+      issueLink.rel = 'noopener';
+      issueLink.appendChild(icon(12, EXTERNAL));
+      title.appendChild(issueLink);
+    }
     titleRow.appendChild(title);
 
     var close = el('button', 'icon-btn');
