@@ -25,3 +25,4 @@
 {"event_id": "2da2cc19b5824154:queued", "kind": "run.queued", "ticket_id": "77", "run_id": "2da2cc19b5824154", "task_id": "implement", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "b3f15f2bea039c55:implement-r2:accepted", "kind": "handoff.accepted", "ticket_id": "77", "run_id": "b3f15f2bea039c55", "detail": "Fix documentation formatting corruption in PLAYWRIGHT_GUIDE.md where multiple paths were concatenated on single lines"}
 {"event_id": "b3f15f2bea039c55:succeeded", "kind": "run.succeeded", "ticket_id": "77", "run_id": "b3f15f2bea039c55", "state": "SUCCEEDED", "artifacts": ["specs/77/review.md"]}
+{"event_id": "2da2cc19b5824154:collected", "kind": "run.collected", "ticket_id": "77", "run_id": "2da2cc19b5824154", "tokens": 279400, "cost_usd": 0.191}
