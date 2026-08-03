@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-03T22:43:10Z",
+  "generated_at": "2026-08-03T22:43:17Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -6230,7 +6230,7 @@
           "task_id": "implement",
           "task_version": 1,
           "ticket_id": "77",
-          "state": "RUNNING",
+          "state": "SUCCEEDED",
           "attempt": 0,
           "bindings": {
             "tracker": "github-issues",
@@ -6253,7 +6253,35 @@
           "deadline": "2026-08-04T00:03:25Z",
           "attempt_started_at": "2026-08-03T22:33:25Z",
           "base_commit": "a3a5bc900064aea0461f309225d2af7a54bd9d96",
-          "input_from_run_id": "e6e3e8788d7aea08"
+          "input_from_run_id": "e6e3e8788d7aea08",
+          "output_commit": "1a0cd55cb75d561f6064797a21e2688ddb70fc5a",
+          "pr_ref": "agentalec/care_fe#15"
+        },
+        {
+          "run_id": "07843af569b38f3d",
+          "task_id": "review",
+          "task_version": 1,
+          "ticket_id": "77",
+          "state": "QUEUED",
+          "attempt": 0,
+          "bindings": {
+            "tracker": "github-issues",
+            "agent-session": "copilot-cli",
+            "messaging": "github-comment"
+          },
+          "cost_usd": null,
+          "tokens": null,
+          "usage_known": false,
+          "artifacts": [],
+          "chain_depth": 8,
+          "parent_run_id": "15314c732def68b2",
+          "queue_seq": 8,
+          "handoff_key": "review-77-round-3",
+          "repo": "agentalec/care_fe",
+          "input_artifacts": [
+            "specs/77/spec.md",
+            "specs/77/review.md"
+          ]
         }
       ],
       "block_reason": null,
@@ -6265,7 +6293,7 @@
           "repo": "agentalec/care_fe",
           "branch": "agent-hq/77",
           "base_branch": "develop",
-          "recorded_head": "a3a5bc900064aea0461f309225d2af7a54bd9d96",
+          "recorded_head": "1a0cd55cb75d561f6064797a21e2688ddb70fc5a",
           "pr_ref": "agentalec/care_fe#15",
           "comments_polled_at": "2026-08-03T22:32:43Z"
         }
