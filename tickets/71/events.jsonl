@@ -15,3 +15,4 @@
 {"event_id": "b534daa786798881:queued", "kind": "run.queued", "ticket_id": "71", "run_id": "b534daa786798881", "task_id": "implement", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "bc0f1f9a72a19e65:implement-71-care-fe:accepted", "kind": "handoff.accepted", "ticket_id": "71", "run_id": "bc0f1f9a72a19e65", "detail": "Update observation display components to hide SNOMED codes from primary UI while keeping them in popovers and data model"}
 {"event_id": "bc0f1f9a72a19e65:succeeded", "kind": "run.succeeded", "ticket_id": "71", "run_id": "bc0f1f9a72a19e65", "state": "SUCCEEDED", "artifacts": ["specs/71/tasks.md"]}
+{"event_id": "b534daa786798881:collected", "kind": "run.collected", "ticket_id": "71", "run_id": "b534daa786798881", "tokens": 1106500, "cost_usd": 0.581}
