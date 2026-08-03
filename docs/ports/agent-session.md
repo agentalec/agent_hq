@@ -63,7 +63,7 @@ it needs no push credential and belongs to no run.
 
 ## Control output and the four artifact payloads
 
-A run's outcome and its handoff proposals are never returned from `run()`
+A run's outcome and its queue declaration are never returned from `run()`
 directly -- the agent process itself writes them to disk inside the
 worktree, and execute reads them back to build its own transported output:
 

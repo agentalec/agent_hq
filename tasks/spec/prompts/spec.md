@@ -25,8 +25,10 @@ queue limit), each carrying that repo as the entry's `repo` and forwarding
 `specs/{ticket}/spec.md` in `artifacts` so the corresponding `implement` run
 can read it. A single-repo ticket queues just one entry.
 
-Queue nothing (`{"outcome": "queue", "queue": []}`) only when the ticket needs
-no change at all -- and say why in the spec.
+If the ticket needs no change at all, do not queue an empty queue -- an empty
+queue from you reads as "the route finished here", which only the route's
+final task may say. Emit `{"outcome": "blocked", "reason": "..."}` naming why
+no change is needed, and say the same in the spec. A human confirms it.
 
 Do not write outside `specs/{ticket}/`. Do not implement code -- this task
 only produces the spec.
