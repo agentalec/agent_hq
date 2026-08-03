@@ -40,7 +40,7 @@
       "task_id": "arch-plan",
       "task_version": 1,
       "ticket_id": "69",
-      "state": "QUEUED",
+      "state": "RUNNING",
       "attempt": 0,
       "bindings": {
         "tracker": "github-issues",
@@ -59,7 +59,9 @@
       "repo": "agentalec/care_fe",
       "input_artifacts": [
         "specs/69/spec.md"
-      ]
+      ],
+      "deadline": "2026-08-03T20:34:18Z",
+      "attempt_started_at": "2026-08-03T20:04:18Z"
     }
   ],
   "block_reason": null,
