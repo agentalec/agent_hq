@@ -1,2 +1,7 @@
 {"event_id": "1625e3993cd06ff7:queued", "kind": "run.queued", "ticket_id": "69", "run_id": "1625e3993cd06ff7", "task_id": "spec", "task_version": 1, "state": "QUEUED", "bindings": {}}
 {"event_id": "1625e3993cd06ff7:collected", "kind": "run.collected", "ticket_id": "69", "run_id": "1625e3993cd06ff7", "tokens": 697700, "cost_usd": 0.499}
+{"event_id": "1625e3993cd06ff7:auto_approval", "kind": "gate.decided", "ticket_id": "69", "run_id": "1625e3993cd06ff7", "detail": "auto-approved by task config (would have asked product-owners)", "actor": "engine"}
+{"event_id": "1625e3993cd06ff7:arch-plan-69:proposed", "kind": "handoff.proposed", "ticket_id": "69", "run_id": "1625e3993cd06ff7", "detail": "Specification complete; needs architecture plan and classification"}
+{"event_id": "b8c96710ef90fc33:queued", "kind": "run.queued", "ticket_id": "69", "run_id": "b8c96710ef90fc33", "task_id": "arch-plan", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment", "gate": "github-issue-comment"}}
+{"event_id": "1625e3993cd06ff7:arch-plan-69:accepted", "kind": "handoff.accepted", "ticket_id": "69", "run_id": "1625e3993cd06ff7", "detail": "Specification complete; needs architecture plan and classification"}
+{"event_id": "1625e3993cd06ff7:succeeded", "kind": "run.succeeded", "ticket_id": "69", "run_id": "1625e3993cd06ff7", "state": "SUCCEEDED", "artifacts": ["specs/69/spec.md"]}
