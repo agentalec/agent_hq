@@ -67,7 +67,7 @@
       "task_id": "implement",
       "task_version": 1,
       "ticket_id": "70",
-      "state": "QUEUED",
+      "state": "RUNNING",
       "attempt": 0,
       "bindings": {
         "tracker": "github-issues",
@@ -86,7 +86,9 @@
       "repo": "agentalec/care_fe",
       "input_artifacts": [
         "specs/70/spec.md"
-      ]
+      ],
+      "deadline": "2026-08-03T22:15:09Z",
+      "attempt_started_at": "2026-08-03T20:45:09Z"
     }
   ],
   "block_reason": null,
