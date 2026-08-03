@@ -57,10 +57,6 @@ gates:
       adapter: spec-approval      # LOGICAL name, resolved via components.yml
       timeout_working_hours: 48
       # auto_approve: true        # decide it without a human (default false)
-handoff:
-  allowed:
-    - implement               # the only task a spec run may hand off to
-  max: 3                      # fan-out cap: handoffs per run (one per repo)
 budget:
   max_cost_usd: 5
   max_runtime_min: 30
@@ -88,25 +84,31 @@ of the task a run executed. Bump it when the task's behavior changes.
 
 ### `description` (string, required)
 
-Injected verbatim as the prompt header for every run of the task
-(`engine/runner.py:_assemble_prompt`). Write it as the one-line mission
-statement the agent reads first.
+Used twice, both agent-facing (`engine/runner.py:_assemble_prompt`): injected
+verbatim as the prompt header for every run of the task, and as this task's
+entry in the queueable-task menu every *other* run reads when choosing what
+to queue. Since no task declares a route, that menu is the only thing telling
+an agent what this task is — write it as a one-line mission statement that
+reads correctly in both places.
 
 ### `trigger` (string, required)
 
 Currently always `enqueued_by`. No engine code path reads this field — who
-or what enqueues a run is decided by the handoff (or intake) that named the
-task, not by the task itself. Required by the schema; declarative.
+or what enqueues a run is decided by the queue entry (or intake) that named
+the task, not by the task itself. Required by the schema; declarative.
 
 ### `inputs` (object, optional)
 
 - `inputs.artifacts` (list of strings) — a **readiness gate**, not an input
   source: the dispatcher will not trigger this run until its parent run has
   recorded (a superset of) these artifact paths, `{ticket}` substituted
-  (`engine/engine.py:_inputs_ready`, checked at dispatch time). What files
-  a run actually receives is decided by the accepted handoff's
-  `artifacts[]`, restored from the parent run's ledger namespace — see
-  "Artifact namespace" in [task-authoring.md](task-authoring.md).
+  (`engine/engine.py:_inputs_ready`, checked at dispatch time). "Its parent"
+  here means the run it *reads from* (`input_from_run_id`, resolved by
+  `resolve_input_source`), not the run that enqueued it — with a multi-entry
+  queue those differ. What files a run actually receives is decided by the
+  accepted queue entry's `artifacts[]`, restored from that source run's
+  ledger namespace — see "Artifact namespace" in
+  [task-authoring.md](task-authoring.md).
 - `inputs.ticket_fields` (list of strings) — accepted by the schema but not
   currently read by any engine code path; reserved.
 
@@ -168,11 +170,13 @@ has one gate per task; `engine/runner.py:_prepare` and
   no decision resolves `EXPIRED` at the next sweep, blocking the ticket and
   escalating.
 
-Semantics: the gate fires only when the run's control outcome is
-`handoff` — it gates the **pending handoffs**, parking the run
-`WAITING_GATE` with the proposals stored until a decision
-(`engine/runner.py:_collect_success`). A gated task that emits `complete`
-proceeds straight to `SUCCEEDED` without a gate. Decisions are authorized
+Semantics: the gate fires only when the run declared a **non-empty** queue —
+it gates those entries, parking the run `WAITING_GATE` with them stored in
+`pending_handoffs` until a decision (`engine/runner.py:_collect_success`).
+There is nothing to gate on an empty queue, so a gated task that declares one
+proceeds straight to `SUCCEEDED`. `auto_approve: true` skips the *waiting*,
+not the comment: the request is still posted with the run's artifacts
+inlined, as a record rather than a request. Decisions are authorized
 issue comments on the engine-repo ticket, per
 `engine/adapters/github_issue_comment_gate.py`:
 
@@ -197,8 +201,12 @@ any is missing (`collect_outputs`); collect re-verifies them after the job
 boundary, persists them under `tickets/<id>/artifacts/<run_id>/` on the
 state branch (`engine/state.py:write_artifact`), and excludes them from the
 work patch that lands on the branch. Together with the run's inherited
-`input_artifacts` they form the **provenance set** — the only paths a
-handoff may forward (`engine/handoff.py:validate_queue`).
+`input_artifacts` they form the **provenance set** — the only paths a queue
+entry may forward (`engine/handoff.py:validate_queue`).
+
+An entry ending in `/` is a **directory artifact**: the engine collects
+whatever files it holds, zero or more, for output a task cannot name in
+advance (`engine/runner.py:_expand_declared`). Plain entries stay required.
 
 ### `opens_pr` (boolean, optional)
 
@@ -209,15 +217,26 @@ independent of any gate. Queue-empty completion marks recorded PRs ready
 for review (`engine/engine.py:_complete_if_queue_empty`). `implement` sets
 this.
 
-### `handoff` (object, optional)
+### `writes_code` (boolean, optional, default `true`)
 
-  a single `control.json`. Default when omitted: 0, i.e. the task may not
-  hand off at all.
+`false` means the task contributes no work patch at all — its worktree
+changes are scratch by definition and are discarded rather than landed
+(`engine/runner.py:_execute`). Declared outputs still reach the ledger. `qa`
+sets this; an instruction not to leave scratch behind is advisory where this
+is not.
 
-A proposed set violating either — or any other check — is rejected
+### Not a field: the route
+
+A task declares no successors. `handoff.allowed`/`handoff.max` were deleted
+in #47 and a leftover `handoff:` block is now a **hard load error**
+(`engine/taskdefs.py`), not a silently ignored key. Every task in the loaded
+library is queueable by every other; what bounds a declaration is the global
+`budgets.max_queue_length`, and what bounds a bad route is
+`loop_guard.max_runs`, the budget caps, and the fact that removing queued
+work is explicit and audited. A declaration violating any check is rejected
 whole (`engine/handoff.py:validate_queue`); see
-[task-authoring.md](task-authoring.md) "Handoffs" for the full validation
-pipeline and the handoff-spawned run's identity rules.
+[task-authoring.md](task-authoring.md) for the full validation pipeline and
+the spawned run's identity rules.
 
 ### `tools` (list of strings, optional)
 
@@ -251,28 +270,32 @@ empty meaning `--allow-all-tools`.
 
 Every completed run writes exactly one `.agent-hq/control.json` — a single
 JSON object validated against `schemas/control.schema.json`
-(`additionalProperties: false`, including inside each handoff item) by
+(`additionalProperties: false`, including inside each queue entry) by
 `engine/handoff.py:validate_queue` before anything in it is trusted. A
 schema-invalid document **fails the run** (retrying per its own
 `budget.retries`); it is never silently ignored.
 
-The three outcomes, with their exact field rules from the schema:
+The two outcomes, with their exact field rules from the schema:
 
 | `outcome` | Required | Forbidden | Effect |
 |---|---|---|---|
-| `complete` | — | `handoffs` | Run `SUCCEEDED`, no children; feeds queue-empty completion. |
-| `blocked` | `reason` | `handoffs` | Run and ticket `BLOCKED` with that reason; escalates; no retry. |
-| `handoff` | `handoffs` (non-empty) | — | Proposals validated, then gated (`WAITING_GATE`) or applied as `QUEUED` child runs; run `SUCCEEDED` once applied. |
+| `queue` | `queue` (may be empty) | — | Entries validated, then gated (`WAITING_GATE`) or applied as `QUEUED` runs in declared order; run `SUCCEEDED` once applied. Empty = "nothing further from me", which feeds queue-empty completion. |
+| `blocked` | `reason` | `queue`, `cancel`, `cancel_pending` | Run and ticket `BLOCKED` with that reason; escalates; no retry. |
 
-Each item in `handoffs` requires `key`, `task`, `reason`; optional `repo`
+Each entry in `queue` requires `key`, `task`, `reason`; optional `repo`
 (must be a configured repo) and `artifacts` (each path must be in the
-run's provenance set and containment-safe).
+run's provenance set and containment-safe). A `queue` outcome may also carry
+`cancel` (list of `QUEUED` keys to drop) or `cancel_pending` (clear the whole
+remaining queue first); omitting an entry never cancels it. Either outcome
+may carry `summary`, the Conventional Commits message the landed commit takes
+its subject from.
 
 The contract is injected into every prompt automatically
-(`engine/runner.py:_assemble_prompt`): the outcome shapes, this task's own
-the queueable task list and `max_queue_length`, and its required output paths. A task never
-spells this out in its own prompts, and the injection does not depend on
-the task including `constitution` in `context`.
+(`engine/runner.py:_assemble_prompt`): the outcome shapes, the queueable-task
+menu (every library task id with its `description`) and `max_queue_length`,
+and this task's own required output paths. A task never spells this out in
+its own prompts, and the injection does not depend on the task including
+`constitution` in `context`.
 
 ## What a task may NOT contain
 
@@ -283,12 +306,12 @@ the task including `constitution` in `context`.
   adapter reference in a task is a logical name resolved through
   `config/components.yml`.
 - **Engine special-casing expectations.** No task id is special-cased by
-  engine code; `intake` is engine entry logic, not a task, and `finalize`
-  is a convention (declare `specs/{ticket}/summary.md`, emit `complete`),
-  not a code path. A task that assumes the engine treats its name
-  specially is wrong by construction.
+  engine code; `intake` is engine entry logic, not a task, and which task
+  ends a route is named in `config/projects.yml` (`final_task`), not
+  recognized by the engine from a task id or a filename. A task that assumes
+  the engine treats its name specially is wrong by construction.
 - **Absolute or escaping artifact paths.** Every artifact path — declared
-  output or handoff-proposed — is containment-checked: no absolute path,
+  output or queue-proposed — is containment-checked: no absolute path,
   no `..` segment, no symlink escape from the worktree
   (`engine/handoff.py:_check_containment`).
 - **Unknown keys.** `additionalProperties: false` throughout the schema; a
@@ -315,6 +338,7 @@ a broken config fails this command too.
 (`engine/config.py:load_config`).
 
 Both run in CI, alongside the test suite —
-`tests/test_task_library.py` additionally pins the graph-level invariants
-(expected task set, handoff graph, constructible gate adapters, the
-concrete-adapter-name ban, no `tasks/intake/` directory).
+`tests/test_task_library.py` additionally pins the library-level invariants:
+no task declares a route, constructible gate adapters, the
+concrete-adapter-name ban, no `tasks/intake/` directory, and that neither a
+prompt nor a `task.yml` header teaches the retired handoff vocabulary.
