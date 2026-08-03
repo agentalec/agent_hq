@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-03T20:23:03Z",
+  "generated_at": "2026-08-03T20:23:28Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -4494,7 +4494,7 @@
           "task_id": "review",
           "task_version": 1,
           "ticket_id": "69",
-          "state": "QUEUED",
+          "state": "RUNNING",
           "attempt": 0,
           "bindings": {
             "tracker": "github-issues",
@@ -4512,7 +4512,9 @@
           "repo": "agentalec/care_fe",
           "input_artifacts": [
             "specs/69/spec.md"
-          ]
+          ],
+          "deadline": "2026-08-03T20:53:28Z",
+          "attempt_started_at": "2026-08-03T20:23:28Z"
         }
       ],
       "block_reason": null,
