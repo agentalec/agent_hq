@@ -34,3 +34,4 @@
 {"event_id": "0bb9276c011a7ffa:finalize-70:accepted", "kind": "handoff.accepted", "ticket_id": "70", "run_id": "0bb9276c011a7ffa", "detail": "QA complete - all acceptance criteria marked not-exercised due to inability to access Purchase Delivery form in running app. Code implementation verified as correct."}
 {"event_id": "0bb9276c011a7ffa:succeeded", "kind": "run.succeeded", "ticket_id": "70", "run_id": "0bb9276c011a7ffa", "state": "SUCCEEDED", "artifacts": ["specs/70/qa.md", "specs/70/screenshots/01-services-page.png", "specs/70/screenshots/02-service-locations.png", "specs/70/screenshots/03-deliveries-list.png"]}
 {"event_id": "2844b04eb1a1b081:collected", "kind": "run.collected", "ticket_id": "70", "run_id": "2844b04eb1a1b081", "tokens": 103900, "cost_usd": 0.121}
+{"event_id": "2844b04eb1a1b081:succeeded", "kind": "run.succeeded", "ticket_id": "70", "run_id": "2844b04eb1a1b081", "state": "SUCCEEDED", "artifacts": ["specs/70/summary.md"]}
