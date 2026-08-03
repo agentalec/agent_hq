@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-03T23:10:52Z",
+  "generated_at": "2026-08-03T23:10:59Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -6308,7 +6308,7 @@
           "task_id": "qa",
           "task_version": 1,
           "ticket_id": "77",
-          "state": "RUNNING",
+          "state": "SUCCEEDED",
           "attempt": 0,
           "bindings": {
             "tracker": "github-issues",
@@ -6318,7 +6318,12 @@
           "cost_usd": 1.84,
           "tokens": 3634500,
           "usage_known": true,
-          "artifacts": [],
+          "artifacts": [
+            "specs/77/qa.md",
+            "specs/77/screenshots/ac1-edit-with-section-desktop.png",
+            "specs/77/screenshots/ac1-edit-with-section-mobile.png",
+            "specs/77/screenshots/baseline-without-section-param.png"
+          ],
           "chain_depth": 9,
           "parent_run_id": "07843af569b38f3d",
           "queue_seq": 9,
@@ -6331,7 +6336,36 @@
           "deadline": "2026-08-03T23:49:18Z",
           "attempt_started_at": "2026-08-03T22:49:18Z",
           "base_commit": "1a0cd55cb75d561f6064797a21e2688ddb70fc5a",
-          "input_from_run_id": "07843af569b38f3d"
+          "input_from_run_id": "07843af569b38f3d",
+          "output_commit": "1a0cd55cb75d561f6064797a21e2688ddb70fc5a",
+          "pr_ref": "agentalec/care_fe#15"
+        },
+        {
+          "run_id": "8e23a33f496bfcac",
+          "task_id": "finalize",
+          "task_version": 1,
+          "ticket_id": "77",
+          "state": "QUEUED",
+          "attempt": 0,
+          "bindings": {
+            "tracker": "github-issues",
+            "agent-session": "copilot-cli",
+            "messaging": "github-comment"
+          },
+          "cost_usd": null,
+          "tokens": null,
+          "usage_known": false,
+          "artifacts": [],
+          "chain_depth": 10,
+          "parent_run_id": "315ce851fea3e95d",
+          "queue_seq": 10,
+          "handoff_key": "finalize-77",
+          "repo": "agentalec/care_fe",
+          "input_artifacts": [
+            "specs/77/spec.md",
+            "specs/77/review.md",
+            "specs/77/qa.md"
+          ]
         }
       ],
       "block_reason": null,
