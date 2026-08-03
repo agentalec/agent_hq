@@ -161,7 +161,9 @@
         "specs/69/spec.md"
       ],
       "deadline": "2026-08-03T20:53:28Z",
-      "attempt_started_at": "2026-08-03T20:23:28Z"
+      "attempt_started_at": "2026-08-03T20:23:28Z",
+      "base_commit": "84620fb97153d63a10ddf1807df6e42c5ce0e5c4",
+      "input_from_run_id": "5cc132dbafd73eef"
     }
   ],
   "block_reason": null,
