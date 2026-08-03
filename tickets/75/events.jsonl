@@ -21,3 +21,7 @@
 {"event_id": "0167d095287f5753:review-round-2:accepted", "kind": "handoff.accepted", "ticket_id": "75", "run_id": "0167d095287f5753", "detail": "Implementation complete, ready for review"}
 {"event_id": "0167d095287f5753:succeeded", "kind": "run.succeeded", "ticket_id": "75", "run_id": "0167d095287f5753", "state": "SUCCEEDED", "artifacts": []}
 {"event_id": "d5ea76b71cce3134:collected", "kind": "run.collected", "ticket_id": "75", "run_id": "d5ea76b71cce3134", "tokens": 297100, "cost_usd": 0.228}
+{"event_id": "d5ea76b71cce3134:qa-75:proposed", "kind": "handoff.proposed", "ticket_id": "75", "run_id": "d5ea76b71cce3134", "detail": "Round 1 blocker resolved; QA to verify untouched organisation selector passes validation on patient profile update"}
+{"event_id": "57d5301304209555:queued", "kind": "run.queued", "ticket_id": "75", "run_id": "57d5301304209555", "task_id": "qa", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
+{"event_id": "d5ea76b71cce3134:qa-75:accepted", "kind": "handoff.accepted", "ticket_id": "75", "run_id": "d5ea76b71cce3134", "detail": "Round 1 blocker resolved; QA to verify untouched organisation selector passes validation on patient profile update"}
+{"event_id": "d5ea76b71cce3134:succeeded", "kind": "run.succeeded", "ticket_id": "75", "run_id": "d5ea76b71cce3134", "state": "SUCCEEDED", "artifacts": ["specs/75/review.md"]}
