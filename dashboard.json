@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-03T20:11:47Z",
+  "generated_at": "2026-08-03T20:12:10Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -4893,7 +4893,8 @@
           "branch": "agent-hq/74",
           "base_branch": "develop",
           "recorded_head": "7fa917e0e5a966e584ba1a6e850e05935fb10285",
-          "pr_ref": "agentalec/care#1"
+          "pr_ref": "agentalec/care#1",
+          "comments_polled_at": "2026-08-03T20:11:49Z"
         }
       ]
     },
