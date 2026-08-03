@@ -98,7 +98,7 @@
       "task_id": "review",
       "task_version": 1,
       "ticket_id": "70",
-      "state": "QUEUED",
+      "state": "RUNNING",
       "attempt": 0,
       "bindings": {
         "tracker": "github-issues",
@@ -116,7 +116,9 @@
       "repo": "agentalec/care_fe",
       "input_artifacts": [
         "specs/70/spec.md"
-      ]
+      ],
+      "deadline": "2026-08-03T21:25:21Z",
+      "attempt_started_at": "2026-08-03T20:55:21Z"
     }
   ],
   "block_reason": null,
