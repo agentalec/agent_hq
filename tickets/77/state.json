@@ -74,7 +74,7 @@
       "task_id": "breakdown",
       "task_version": 1,
       "ticket_id": "77",
-      "state": "QUEUED",
+      "state": "RUNNING",
       "attempt": 0,
       "bindings": {
         "tracker": "github-issues",
@@ -93,7 +93,9 @@
       "input_artifacts": [
         "specs/77/spec.md",
         "specs/77/plan.md"
-      ]
+      ],
+      "deadline": "2026-08-03T22:39:04Z",
+      "attempt_started_at": "2026-08-03T22:09:04Z"
     }
   ],
   "block_reason": null,
