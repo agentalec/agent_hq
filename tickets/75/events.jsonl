@@ -6,3 +6,7 @@
 {"event_id": "a0a8cf84c147999b:implement-patient-org-validation:accepted", "kind": "handoff.accepted", "ticket_id": "75", "run_id": "a0a8cf84c147999b", "detail": "Fix patient profile organisation selector validation so unmodified selections pass depth requirements"}
 {"event_id": "a0a8cf84c147999b:succeeded", "kind": "run.succeeded", "ticket_id": "75", "run_id": "a0a8cf84c147999b", "state": "SUCCEEDED", "artifacts": ["specs/75/spec.md"]}
 {"event_id": "99b7c3cbd2a3384e:collected", "kind": "run.collected", "ticket_id": "75", "run_id": "99b7c3cbd2a3384e", "tokens": 1210300, "cost_usd": 0.714}
+{"event_id": "99b7c3cbd2a3384e:review-75:proposed", "kind": "handoff.proposed", "ticket_id": "75", "run_id": "99b7c3cbd2a3384e", "detail": "Review implementation against specification"}
+{"event_id": "d26470340908b6ba:queued", "kind": "run.queued", "ticket_id": "75", "run_id": "d26470340908b6ba", "task_id": "review", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
+{"event_id": "99b7c3cbd2a3384e:review-75:accepted", "kind": "handoff.accepted", "ticket_id": "75", "run_id": "99b7c3cbd2a3384e", "detail": "Review implementation against specification"}
+{"event_id": "99b7c3cbd2a3384e:succeeded", "kind": "run.succeeded", "ticket_id": "75", "run_id": "99b7c3cbd2a3384e", "state": "SUCCEEDED", "artifacts": []}
