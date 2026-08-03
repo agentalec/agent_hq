@@ -20,3 +20,4 @@
 {"event_id": "b3f15f2bea039c55:queued", "kind": "run.queued", "ticket_id": "77", "run_id": "b3f15f2bea039c55", "task_id": "review", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "332a33a4642daed9:review-77:accepted", "kind": "handoff.accepted", "ticket_id": "77", "run_id": "332a33a4642daed9", "detail": "Review the implementation of the geo_organization field fix against the spec"}
 {"event_id": "332a33a4642daed9:succeeded", "kind": "run.succeeded", "ticket_id": "77", "run_id": "332a33a4642daed9", "state": "SUCCEEDED", "artifacts": []}
+{"event_id": "b3f15f2bea039c55:collected", "kind": "run.collected", "ticket_id": "77", "run_id": "b3f15f2bea039c55", "tokens": 248900, "cost_usd": 0.174}
