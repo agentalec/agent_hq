@@ -9,12 +9,7 @@
 # every run should not cost agent requests to perform. A non-zero exit fails
 # the run through the ordinary retry path; leave the agent anything it needs
 # to know at `.agent-hq/setup-notes.md`.
-agentalec/care:
-  role: be
-  branch_prefix: agent-hq
-  product_area: backend
-  base_branch: develop
-agentalec/care_fe:
+yash-learner/care_fe_agent_hq:
   role: fe
   branch_prefix: agent-hq
   product_area: frontend
@@ -56,8 +51,3 @@ agentalec/care_fe:
       - Chromium is installed. Drive it with Playwright directly; you do not
         need to add tests to the repo's suite.
       NOTES
-agentalec/care_docs:
-  role: docs
-  branch_prefix: agent-hq
-  product_area: docs
-  base_branch: main
