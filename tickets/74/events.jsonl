@@ -20,3 +20,4 @@
 {"event_id": "7d9d852ae80fc7ad:queued", "kind": "run.queued", "ticket_id": "74", "run_id": "7d9d852ae80fc7ad", "task_id": "finalize", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "62c1cb1d5ddd3d1f:finalize-74:accepted", "kind": "handoff.accepted", "ticket_id": "74", "run_id": "62c1cb1d5ddd3d1f", "detail": "QA complete \u2014 all acceptance criteria not-exercised due to missing infrastructure (no running application). Code review confirms correct implementation with comprehensive test coverage."}
 {"event_id": "62c1cb1d5ddd3d1f:succeeded", "kind": "run.succeeded", "ticket_id": "74", "run_id": "62c1cb1d5ddd3d1f", "state": "SUCCEEDED", "artifacts": ["specs/74/qa.md"]}
+{"event_id": "7d9d852ae80fc7ad:collected", "kind": "run.collected", "ticket_id": "74", "run_id": "7d9d852ae80fc7ad", "tokens": 221300, "cost_usd": 0.164}
