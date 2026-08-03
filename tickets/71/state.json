@@ -108,7 +108,7 @@
       "task_id": "implement",
       "task_version": 1,
       "ticket_id": "71",
-      "state": "QUEUED",
+      "state": "RUNNING",
       "attempt": 0,
       "bindings": {
         "tracker": "github-issues",
@@ -128,7 +128,9 @@
         "specs/71/spec.md",
         "specs/71/plan.md",
         "specs/71/tasks.md"
-      ]
+      ],
+      "deadline": "2026-08-04T01:19:11Z",
+      "attempt_started_at": "2026-08-03T23:49:11Z"
     }
   ],
   "block_reason": null,
