@@ -18,3 +18,4 @@
 {"event_id": "5058889766dc03c9:queued", "kind": "run.queued", "ticket_id": "70", "run_id": "5058889766dc03c9", "task_id": "implement", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "c75178d9fc207f35:implement-r2:accepted", "kind": "handoff.accepted", "ticket_id": "70", "run_id": "c75178d9fc207f35", "detail": "Fix blocker: Plain Enter must explicitly move focus to next field per AC1/AC2, not just prevent default. Also remove unrelated PLAYWRIGHT_GUIDE.md and README.md formatting changes."}
 {"event_id": "c75178d9fc207f35:succeeded", "kind": "run.succeeded", "ticket_id": "70", "run_id": "c75178d9fc207f35", "state": "SUCCEEDED", "artifacts": ["specs/70/review.md"]}
+{"event_id": "5058889766dc03c9:collected", "kind": "run.collected", "ticket_id": "70", "run_id": "5058889766dc03c9", "tokens": 995800, "cost_usd": 0.533}
