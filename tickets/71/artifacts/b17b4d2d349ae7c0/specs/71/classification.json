@@ -1,0 +1,4 @@
+{
+  "classification": "crud",
+  "reasoning": "This is a presentation-layer change that modifies only the display logic in React components. No data models, migrations, service changes, authorization changes, FHIR/EMR model changes, or non-CRUD endpoints are affected. The underlying observation data structure remains unchanged—only the display fallback logic is updated to hide SNOMED codes from the UI. None of the beyond-crud criteria apply."
+}

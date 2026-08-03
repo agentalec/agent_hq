@@ -6,3 +6,7 @@
 {"event_id": "42808fb43d790a0e:arch-plan-71:accepted", "kind": "handoff.accepted", "ticket_id": "71", "run_id": "42808fb43d790a0e", "detail": "Specification complete; ready for architecture planning"}
 {"event_id": "42808fb43d790a0e:succeeded", "kind": "run.succeeded", "ticket_id": "71", "run_id": "42808fb43d790a0e", "state": "SUCCEEDED", "artifacts": ["specs/71/spec.md"]}
 {"event_id": "b17b4d2d349ae7c0:collected", "kind": "run.collected", "ticket_id": "71", "run_id": "b17b4d2d349ae7c0", "tokens": 139900, "cost_usd": 0.149}
+{"event_id": "b17b4d2d349ae7c0:breakdown-71:proposed", "kind": "handoff.proposed", "ticket_id": "71", "run_id": "b17b4d2d349ae7c0", "detail": "CRUD-classified ticket proceeds to implementation breakdown"}
+{"event_id": "bc0f1f9a72a19e65:queued", "kind": "run.queued", "ticket_id": "71", "run_id": "bc0f1f9a72a19e65", "task_id": "breakdown", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
+{"event_id": "b17b4d2d349ae7c0:breakdown-71:accepted", "kind": "handoff.accepted", "ticket_id": "71", "run_id": "b17b4d2d349ae7c0", "detail": "CRUD-classified ticket proceeds to implementation breakdown"}
+{"event_id": "b17b4d2d349ae7c0:succeeded", "kind": "run.succeeded", "ticket_id": "71", "run_id": "b17b4d2d349ae7c0", "state": "SUCCEEDED", "artifacts": ["specs/71/plan.md", "specs/71/classification.json"]}
