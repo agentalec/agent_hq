@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-03T22:19:05Z",
+  "generated_at": "2026-08-03T22:19:16Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -6055,7 +6055,7 @@
           "task_id": "implement",
           "task_version": 1,
           "ticket_id": "77",
-          "state": "RUNNING",
+          "state": "SUCCEEDED",
           "attempt": 0,
           "bindings": {
             "tracker": "github-issues",
@@ -6079,7 +6079,36 @@
           "deadline": "2026-08-03T23:42:27Z",
           "attempt_started_at": "2026-08-03T22:12:27Z",
           "base_commit": "5466816828ba496f9d4e6099e77360eb516ece31",
-          "input_from_run_id": "b3fd2c325accee2d"
+          "input_from_run_id": "b3fd2c325accee2d",
+          "output_commit": "e5184ad92cff71e17b984ee9b50f4570a4b2f022",
+          "pr_ref": "agentalec/care_fe#15"
+        },
+        {
+          "run_id": "b3f15f2bea039c55",
+          "task_id": "review",
+          "task_version": 1,
+          "ticket_id": "77",
+          "state": "QUEUED",
+          "attempt": 0,
+          "bindings": {
+            "tracker": "github-issues",
+            "agent-session": "copilot-cli",
+            "messaging": "github-comment"
+          },
+          "cost_usd": null,
+          "tokens": null,
+          "usage_known": false,
+          "artifacts": [],
+          "chain_depth": 4,
+          "parent_run_id": "332a33a4642daed9",
+          "queue_seq": 4,
+          "handoff_key": "review-77",
+          "repo": "agentalec/care_fe",
+          "input_artifacts": [
+            "specs/77/spec.md",
+            "specs/77/plan.md",
+            "specs/77/tasks.md"
+          ]
         }
       ],
       "block_reason": null,
@@ -6091,8 +6120,8 @@
           "repo": "agentalec/care_fe",
           "branch": "agent-hq/77",
           "base_branch": "develop",
-          "recorded_head": "5466816828ba496f9d4e6099e77360eb516ece31",
-          "pr_ref": null
+          "recorded_head": "e5184ad92cff71e17b984ee9b50f4570a4b2f022",
+          "pr_ref": "agentalec/care_fe#15"
         }
       ]
     },
