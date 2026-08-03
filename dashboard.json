@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-03T21:26:53Z",
+  "generated_at": "2026-08-03T21:27:01Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -5269,7 +5269,7 @@
           "task_id": "implement",
           "task_version": 1,
           "ticket_id": "72",
-          "state": "RUNNING",
+          "state": "SUCCEEDED",
           "attempt": 0,
           "bindings": {
             "tracker": "github-issues",
@@ -5292,7 +5292,35 @@
           "deadline": "2026-08-03T22:50:46Z",
           "attempt_started_at": "2026-08-03T21:20:46Z",
           "base_commit": "d9932d1d2661dbcdd9a4adb5d5cff31a41a22337",
-          "input_from_run_id": "bfaca9aee508422c"
+          "input_from_run_id": "bfaca9aee508422c",
+          "output_commit": "0e77f0e043572dbc7f3d0d7090be7377e5b91493",
+          "pr_ref": "agentalec/care_fe#12"
+        },
+        {
+          "run_id": "5cdcce991af7b49d",
+          "task_id": "review",
+          "task_version": 1,
+          "ticket_id": "72",
+          "state": "QUEUED",
+          "attempt": 0,
+          "bindings": {
+            "tracker": "github-issues",
+            "agent-session": "copilot-cli",
+            "messaging": "github-comment"
+          },
+          "cost_usd": null,
+          "tokens": null,
+          "usage_known": false,
+          "artifacts": [],
+          "chain_depth": 6,
+          "parent_run_id": "42c4cf1774285fcf",
+          "queue_seq": 6,
+          "handoff_key": "review-3",
+          "repo": "agentalec/care_fe",
+          "input_artifacts": [
+            "specs/72/spec.md",
+            "specs/72/review.md"
+          ]
         }
       ],
       "block_reason": null,
@@ -5304,7 +5332,7 @@
           "repo": "agentalec/care_fe",
           "branch": "agent-hq/72",
           "base_branch": "develop",
-          "recorded_head": "d9932d1d2661dbcdd9a4adb5d5cff31a41a22337",
+          "recorded_head": "0e77f0e043572dbc7f3d0d7090be7377e5b91493",
           "pr_ref": "agentalec/care_fe#12",
           "comments_polled_at": "2026-08-03T21:19:57Z"
         }
