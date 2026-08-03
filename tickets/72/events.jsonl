@@ -11,3 +11,7 @@
 {"event_id": "f7bf5ad58010e68d:review-72:accepted", "kind": "handoff.accepted", "ticket_id": "72", "run_id": "f7bf5ad58010e68d", "detail": "Review implementation against acceptance criteria"}
 {"event_id": "f7bf5ad58010e68d:succeeded", "kind": "run.succeeded", "ticket_id": "72", "run_id": "f7bf5ad58010e68d", "state": "SUCCEEDED", "artifacts": []}
 {"event_id": "501f2d1a751352ea:collected", "kind": "run.collected", "ticket_id": "72", "run_id": "501f2d1a751352ea", "tokens": 222500, "cost_usd": 0.176}
+{"event_id": "501f2d1a751352ea:implement-round-2:proposed", "kind": "handoff.proposed", "ticket_id": "72", "run_id": "501f2d1a751352ea", "detail": "Fix blocker: length of stay calculation off by one (medical convention requires inclusive counting)"}
+{"event_id": "cf52dbde9fa12425:queued", "kind": "run.queued", "ticket_id": "72", "run_id": "cf52dbde9fa12425", "task_id": "implement", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
+{"event_id": "501f2d1a751352ea:implement-round-2:accepted", "kind": "handoff.accepted", "ticket_id": "72", "run_id": "501f2d1a751352ea", "detail": "Fix blocker: length of stay calculation off by one (medical convention requires inclusive counting)"}
+{"event_id": "501f2d1a751352ea:succeeded", "kind": "run.succeeded", "ticket_id": "72", "run_id": "501f2d1a751352ea", "state": "SUCCEEDED", "artifacts": ["specs/72/review.md"]}
