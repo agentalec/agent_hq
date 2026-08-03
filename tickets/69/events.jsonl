@@ -30,3 +30,4 @@
 {"event_id": "0a5fbc4ffc5a597e:queued", "kind": "run.queued", "ticket_id": "69", "run_id": "0a5fbc4ffc5a597e", "task_id": "review", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "2ed8a8ca87294180:review-round-2:accepted", "kind": "handoff.accepted", "ticket_id": "69", "run_id": "2ed8a8ca87294180", "detail": "Review translation fixes and organization context tests"}
 {"event_id": "2ed8a8ca87294180:succeeded", "kind": "run.succeeded", "ticket_id": "69", "run_id": "2ed8a8ca87294180", "state": "SUCCEEDED", "artifacts": []}
+{"event_id": "0a5fbc4ffc5a597e:collected", "kind": "run.collected", "ticket_id": "69", "run_id": "0a5fbc4ffc5a597e", "tokens": 232500, "cost_usd": 0.185}
