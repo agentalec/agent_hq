@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-03T22:12:00Z",
+  "generated_at": "2026-08-03T22:12:25Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -6271,7 +6271,7 @@
       "block_reason": null,
       "block_source": null,
       "interrupted_run_id": null,
-      "comments_polled_at": "2026-08-03T19:59:14Z",
+      "comments_polled_at": "2026-08-03T22:11:59Z",
       "work_repos": [
         {
           "repo": "agentalec/care_fe",
