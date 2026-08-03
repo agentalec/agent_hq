@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-03T19:57:34Z",
+  "generated_at": "2026-08-03T19:57:37Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -4697,7 +4697,25 @@
       "ticket_id": "75",
       "pinned_comment_id": 5171072010,
       "status": "ACTIVE",
-      "runs": [],
+      "runs": [
+        {
+          "run_id": "a0a8cf84c147999b",
+          "task_id": "spec",
+          "task_version": 1,
+          "ticket_id": "75",
+          "state": "QUEUED",
+          "attempt": 0,
+          "bindings": {},
+          "cost_usd": null,
+          "tokens": null,
+          "usage_known": false,
+          "artifacts": [],
+          "chain_depth": 0,
+          "source_event_id": "75:labeled:2026-08-03T19:56:35Z",
+          "enqueue_index": 0,
+          "queue_seq": 0
+        }
+      ],
       "block_reason": null,
       "block_source": null,
       "interrupted_run_id": null
