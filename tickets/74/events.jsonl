@@ -1,2 +1,7 @@
 {"event_id": "40fb5cd2ea0f98af:queued", "kind": "run.queued", "ticket_id": "74", "run_id": "40fb5cd2ea0f98af", "task_id": "spec", "task_version": 1, "state": "QUEUED", "bindings": {}}
 {"event_id": "40fb5cd2ea0f98af:collected", "kind": "run.collected", "ticket_id": "74", "run_id": "40fb5cd2ea0f98af", "tokens": 568200, "cost_usd": 0.406}
+{"event_id": "40fb5cd2ea0f98af:auto_approval", "kind": "gate.decided", "ticket_id": "74", "run_id": "40fb5cd2ea0f98af", "detail": "auto-approved by task config (would have asked product-owners)", "actor": "engine"}
+{"event_id": "40fb5cd2ea0f98af:implement-74-care:proposed", "kind": "handoff.proposed", "ticket_id": "74", "run_id": "40fb5cd2ea0f98af", "detail": "Implement support for clearing patient deceased status"}
+{"event_id": "48ed9ad4ad0b9835:queued", "kind": "run.queued", "ticket_id": "74", "run_id": "48ed9ad4ad0b9835", "task_id": "implement", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment", "gate": "github-issue-comment"}}
+{"event_id": "40fb5cd2ea0f98af:implement-74-care:accepted", "kind": "handoff.accepted", "ticket_id": "74", "run_id": "40fb5cd2ea0f98af", "detail": "Implement support for clearing patient deceased status"}
+{"event_id": "40fb5cd2ea0f98af:succeeded", "kind": "run.succeeded", "ticket_id": "74", "run_id": "40fb5cd2ea0f98af", "state": "SUCCEEDED", "artifacts": ["specs/74/spec.md"]}
