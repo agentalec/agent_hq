@@ -40,3 +40,4 @@
 {"event_id": "07843af569b38f3d:queued", "kind": "run.queued", "ticket_id": "77", "run_id": "07843af569b38f3d", "task_id": "review", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "15314c732def68b2:review-77-round-3:accepted", "kind": "handoff.accepted", "ticket_id": "77", "run_id": "15314c732def68b2", "detail": "Verify organization field is now visible in edit flow when navigating from Demographics tab"}
 {"event_id": "15314c732def68b2:succeeded", "kind": "run.succeeded", "ticket_id": "77", "run_id": "15314c732def68b2", "state": "SUCCEEDED", "artifacts": []}
+{"event_id": "07843af569b38f3d:collected", "kind": "run.collected", "ticket_id": "77", "run_id": "07843af569b38f3d", "tokens": 726200, "cost_usd": 0.415}
