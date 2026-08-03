@@ -6,3 +6,7 @@
 {"event_id": "40fb5cd2ea0f98af:implement-74-care:accepted", "kind": "handoff.accepted", "ticket_id": "74", "run_id": "40fb5cd2ea0f98af", "detail": "Implement support for clearing patient deceased status"}
 {"event_id": "40fb5cd2ea0f98af:succeeded", "kind": "run.succeeded", "ticket_id": "74", "run_id": "40fb5cd2ea0f98af", "state": "SUCCEEDED", "artifacts": ["specs/74/spec.md"]}
 {"event_id": "48ed9ad4ad0b9835:collected", "kind": "run.collected", "ticket_id": "74", "run_id": "48ed9ad4ad0b9835", "tokens": 1211800, "cost_usd": 0.705}
+{"event_id": "48ed9ad4ad0b9835:review-74:proposed", "kind": "handoff.proposed", "ticket_id": "74", "run_id": "48ed9ad4ad0b9835", "detail": "Review implementation against spec"}
+{"event_id": "eec224d5463813ec:queued", "kind": "run.queued", "ticket_id": "74", "run_id": "eec224d5463813ec", "task_id": "review", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
+{"event_id": "48ed9ad4ad0b9835:review-74:accepted", "kind": "handoff.accepted", "ticket_id": "74", "run_id": "48ed9ad4ad0b9835", "detail": "Review implementation against spec"}
+{"event_id": "48ed9ad4ad0b9835:succeeded", "kind": "run.succeeded", "ticket_id": "74", "run_id": "48ed9ad4ad0b9835", "state": "SUCCEEDED", "artifacts": []}
