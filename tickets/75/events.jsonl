@@ -25,3 +25,4 @@
 {"event_id": "57d5301304209555:queued", "kind": "run.queued", "ticket_id": "75", "run_id": "57d5301304209555", "task_id": "qa", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "d5ea76b71cce3134:qa-75:accepted", "kind": "handoff.accepted", "ticket_id": "75", "run_id": "d5ea76b71cce3134", "detail": "Round 1 blocker resolved; QA to verify untouched organisation selector passes validation on patient profile update"}
 {"event_id": "d5ea76b71cce3134:succeeded", "kind": "run.succeeded", "ticket_id": "75", "run_id": "d5ea76b71cce3134", "state": "SUCCEEDED", "artifacts": ["specs/75/review.md"]}
+{"event_id": "57d5301304209555:collected", "kind": "run.collected", "ticket_id": "75", "run_id": "57d5301304209555", "tokens": 3324600, "cost_usd": 1.58}
