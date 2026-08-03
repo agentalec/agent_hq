@@ -25,3 +25,4 @@
 {"event_id": "2ed8a8ca87294180:queued", "kind": "run.queued", "ticket_id": "69", "run_id": "2ed8a8ca87294180", "task_id": "implement", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "696721b30e99e71f:implement-fix-org-roles:accepted", "kind": "handoff.accepted", "ticket_id": "69", "run_id": "696721b30e99e71f", "detail": "Fix blockers from round 1: add translation to organization user roles in OrganizationUsers.tsx:216 and FacilityOrganizationUsers.tsx:163 to satisfy AC4 and AC5"}
 {"event_id": "696721b30e99e71f:succeeded", "kind": "run.succeeded", "ticket_id": "69", "run_id": "696721b30e99e71f", "state": "SUCCEEDED", "artifacts": ["specs/69/review.md"]}
+{"event_id": "2ed8a8ca87294180:collected", "kind": "run.collected", "ticket_id": "69", "run_id": "2ed8a8ca87294180", "tokens": 1208200, "cost_usd": 0.667}
