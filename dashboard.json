@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-03T22:20:32Z",
+  "generated_at": "2026-08-03T22:20:34Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -6313,7 +6313,7 @@
           "task_id": "arch-plan",
           "task_version": 1,
           "ticket_id": "79",
-          "state": "RUNNING",
+          "state": "FAILED",
           "attempt": 1,
           "bindings": {
             "tracker": "github-issues",
