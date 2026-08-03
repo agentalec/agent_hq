@@ -14,3 +14,7 @@
 {"event_id": "b7d83a5f886ad5e5:handoff_rejected", "kind": "handoff.rejected", "ticket_id": "79", "run_id": "b7d83a5f886ad5e5", "detail": "queue entry repo 'care_fe' is not a configured repo"}
 {"event_id": "ca9152299be72f5a:queued", "kind": "run.queued", "ticket_id": "79", "run_id": "ca9152299be72f5a", "task_id": "arch-plan", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "ca9152299be72f5a:collected", "kind": "run.collected", "ticket_id": "79", "run_id": "ca9152299be72f5a", "tokens": 206400, "cost_usd": 0.162}
+{"event_id": "ca9152299be72f5a:arch-approval-79:proposed", "kind": "handoff.proposed", "ticket_id": "79", "run_id": "ca9152299be72f5a", "detail": "Authorization changes and data model modifications require architecture review"}
+{"event_id": "6bd9acfed7947dac:queued", "kind": "run.queued", "ticket_id": "79", "run_id": "6bd9acfed7947dac", "task_id": "arch-approval", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
+{"event_id": "ca9152299be72f5a:arch-approval-79:accepted", "kind": "handoff.accepted", "ticket_id": "79", "run_id": "ca9152299be72f5a", "detail": "Authorization changes and data model modifications require architecture review"}
+{"event_id": "ca9152299be72f5a:succeeded", "kind": "run.succeeded", "ticket_id": "79", "run_id": "ca9152299be72f5a", "state": "SUCCEEDED", "artifacts": ["specs/79/plan.md", "specs/79/classification.json"]}

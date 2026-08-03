@@ -1,0 +1,4 @@
+{
+  "classification": "beyond-crud",
+  "reasoning": "Authorization/access-control changes: requires extending permission checks to enforce encounter-level access restrictions. Also includes new data models or migrations: adds locked, locked_by, locked_at fields to Encounter model. Clinical-safety-relevant behavior: access control for sensitive psychiatric/mental health records."
+}
