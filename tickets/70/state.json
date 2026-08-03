@@ -36,7 +36,7 @@
       "task_id": "spec",
       "task_version": 1,
       "ticket_id": "70",
-      "state": "RUNNING",
+      "state": "SUCCEEDED",
       "attempt": 1,
       "bindings": {
         "tracker": "github-issues",
@@ -47,7 +47,9 @@
       "cost_usd": 0.445,
       "tokens": 705200,
       "usage_known": true,
-      "artifacts": [],
+      "artifacts": [
+        "specs/70/spec.md"
+      ],
       "chain_depth": 0,
       "source_event_id": "70:labeled:2026-08-03T19:56:20Z",
       "enqueue_index": 0,
@@ -56,11 +58,48 @@
       "attempt_started_at": "2026-08-03T20:40:08Z",
       "base_commit": "5466816828ba496f9d4e6099e77360eb516ece31",
       "input_from_run_id": null,
-      "input_artifacts": []
+      "input_artifacts": [],
+      "output_commit": "5466816828ba496f9d4e6099e77360eb516ece31",
+      "pr_ref": null
+    },
+    {
+      "run_id": "33cd8c9187ea662c",
+      "task_id": "implement",
+      "task_version": 1,
+      "ticket_id": "70",
+      "state": "QUEUED",
+      "attempt": 0,
+      "bindings": {
+        "tracker": "github-issues",
+        "agent-session": "copilot-cli",
+        "messaging": "github-comment",
+        "gate": "github-issue-comment"
+      },
+      "cost_usd": null,
+      "tokens": null,
+      "usage_known": false,
+      "artifacts": [],
+      "chain_depth": 1,
+      "parent_run_id": "f4a56fc06b8631c2",
+      "queue_seq": 1,
+      "handoff_key": "implement-70",
+      "repo": "agentalec/care_fe",
+      "input_artifacts": [
+        "specs/70/spec.md"
+      ]
     }
   ],
   "block_reason": null,
   "block_source": null,
   "interrupted_run_id": null,
-  "comments_polled_at": "2026-08-03T19:56:36Z"
+  "comments_polled_at": "2026-08-03T19:56:36Z",
+  "work_repos": [
+    {
+      "repo": "agentalec/care_fe",
+      "branch": "agent-hq/70",
+      "base_branch": "develop",
+      "recorded_head": "5466816828ba496f9d4e6099e77360eb516ece31",
+      "pr_ref": null
+    }
+  ]
 }
