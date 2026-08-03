@@ -15,3 +15,4 @@
 {"event_id": "332a33a4642daed9:queued", "kind": "run.queued", "ticket_id": "77", "run_id": "332a33a4642daed9", "task_id": "implement", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "b3fd2c325accee2d:impl-care-fe:accepted", "kind": "handoff.accepted", "ticket_id": "77", "run_id": "b3fd2c325accee2d", "detail": "Single-line fix to PatientRegistration.tsx to properly initialize geo_organization field for patient edit form"}
 {"event_id": "b3fd2c325accee2d:succeeded", "kind": "run.succeeded", "ticket_id": "77", "run_id": "b3fd2c325accee2d", "state": "SUCCEEDED", "artifacts": ["specs/77/tasks.md"]}
+{"event_id": "332a33a4642daed9:collected", "kind": "run.collected", "ticket_id": "77", "run_id": "332a33a4642daed9", "tokens": 689800, "cost_usd": 0.396}
