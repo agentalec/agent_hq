@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-02T21:57:48Z",
+  "generated_at": "2026-08-03T19:56:37Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -4512,6 +4512,15 @@
           "pr_ref": "agentalec/care_docs#1"
         }
       ]
+    },
+    {
+      "ticket_id": "70",
+      "pinned_comment_id": 5171067776,
+      "status": "ACTIVE",
+      "runs": [],
+      "block_reason": null,
+      "block_source": null,
+      "interrupted_run_id": null
     }
   ],
   "health": {
