@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-03T20:52:14Z",
+  "generated_at": "2026-08-03T20:52:41Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -4654,7 +4654,7 @@
       "block_reason": "Round 3 (cap reached): Blocker remains unfixed - tests/PLAYWRIGHT_GUIDE.md:90-94 has formatting issue where URL examples are concatenated on single lines instead of separate lines. The primary spec requirements (AC1-AC7) are all satisfied, but this test documentation formatting issue persists after three implement rounds.",
       "block_source": "task",
       "interrupted_run_id": "491d03cef2aea9be",
-      "comments_polled_at": "2026-08-03T20:03:32Z",
+      "comments_polled_at": "2026-08-03T20:52:17Z",
       "work_repos": [
         {
           "repo": "agentalec/care_fe",
