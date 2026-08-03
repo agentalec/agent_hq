@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-03T22:12:29Z",
+  "generated_at": "2026-08-03T22:12:47Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -6250,7 +6250,7 @@
           "task_id": "arch-plan",
           "task_version": 1,
           "ticket_id": "79",
-          "state": "QUEUED",
+          "state": "RUNNING",
           "attempt": 0,
           "bindings": {
             "tracker": "github-issues",
@@ -6269,7 +6269,9 @@
           "repo": "agentalec/care_fe",
           "input_artifacts": [
             "specs/79/spec.md"
-          ]
+          ],
+          "deadline": "2026-08-03T22:42:47Z",
+          "attempt_started_at": "2026-08-03T22:12:47Z"
         }
       ],
       "block_reason": null,
