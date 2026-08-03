@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-03T20:52:12Z",
+  "generated_at": "2026-08-03T20:52:14Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -4354,7 +4354,7 @@
     {
       "ticket_id": "69",
       "pinned_comment_id": 5171068201,
-      "status": "ACTIVE",
+      "status": "BLOCKED",
       "runs": [
         {
           "run_id": "1625e3993cd06ff7",
@@ -4625,7 +4625,7 @@
           "task_id": "review",
           "task_version": 1,
           "ticket_id": "69",
-          "state": "RUNNING",
+          "state": "BLOCKED",
           "attempt": 0,
           "bindings": {
             "tracker": "github-issues",
@@ -4651,9 +4651,9 @@
           "input_from_run_id": "98752558218bb4ae"
         }
       ],
-      "block_reason": null,
-      "block_source": null,
-      "interrupted_run_id": null,
+      "block_reason": "Round 3 (cap reached): Blocker remains unfixed - tests/PLAYWRIGHT_GUIDE.md:90-94 has formatting issue where URL examples are concatenated on single lines instead of separate lines. The primary spec requirements (AC1-AC7) are all satisfied, but this test documentation formatting issue persists after three implement rounds.",
+      "block_source": "task",
+      "interrupted_run_id": "491d03cef2aea9be",
       "comments_polled_at": "2026-08-03T20:03:32Z",
       "work_repos": [
         {
