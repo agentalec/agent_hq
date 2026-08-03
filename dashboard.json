@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-03T20:01:17Z",
+  "generated_at": "2026-08-03T20:01:39Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -4869,7 +4869,8 @@
       "runs": [],
       "block_reason": "no product area matches a configured repo",
       "block_source": "intake",
-      "interrupted_run_id": null
+      "interrupted_run_id": null,
+      "comments_polled_at": "2026-08-03T20:01:17Z"
     }
   ],
   "health": {
