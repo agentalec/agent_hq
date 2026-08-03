@@ -1,0 +1,9 @@
+{
+  "ticket_id": "80",
+  "pinned_comment_id": 5171109620,
+  "status": "BLOCKED",
+  "runs": [],
+  "block_reason": "no product area matches a configured repo",
+  "block_source": "intake",
+  "interrupted_run_id": null
+}

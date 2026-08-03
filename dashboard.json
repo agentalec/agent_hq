@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-03T19:59:54Z",
+  "generated_at": "2026-08-03T20:01:17Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -4861,6 +4861,15 @@
       "block_source": null,
       "interrupted_run_id": null,
       "comments_polled_at": "2026-08-03T19:59:14Z"
+    },
+    {
+      "ticket_id": "80",
+      "pinned_comment_id": 5171109620,
+      "status": "BLOCKED",
+      "runs": [],
+      "block_reason": "no product area matches a configured repo",
+      "block_source": "intake",
+      "interrupted_run_id": null
     }
   ],
   "health": {
