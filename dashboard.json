@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-03T20:39:34Z",
+  "generated_at": "2026-08-03T20:40:02Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -4896,7 +4896,7 @@
           "task_id": "spec",
           "task_version": 1,
           "ticket_id": "72",
-          "state": "QUEUED",
+          "state": "RUNNING",
           "attempt": 0,
           "bindings": {},
           "cost_usd": null,
@@ -4907,7 +4907,9 @@
           "source_event_id": "72:labeled:2026-08-03T19:56:23Z",
           "enqueue_index": 0,
           "queue_seq": 0,
-          "repo": "agentalec/care_fe"
+          "repo": "agentalec/care_fe",
+          "deadline": "2026-08-03T21:10:01Z",
+          "attempt_started_at": "2026-08-03T20:40:01Z"
         }
       ],
       "block_reason": null,
