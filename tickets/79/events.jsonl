@@ -5,3 +5,4 @@
 {"event_id": "73382a41e42c8479:queued", "kind": "run.queued", "ticket_id": "79", "run_id": "73382a41e42c8479", "task_id": "arch-plan", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment", "gate": "github-issue-comment"}}
 {"event_id": "7a1e5ca29ea46661:79-arch-plan:accepted", "kind": "handoff.accepted", "ticket_id": "79", "run_id": "7a1e5ca29ea46661", "detail": "Create implementation plan and classify ticket complexity. Spec has blocking open questions requiring product approval before detailed planning."}
 {"event_id": "7a1e5ca29ea46661:succeeded", "kind": "run.succeeded", "ticket_id": "79", "run_id": "7a1e5ca29ea46661", "state": "SUCCEEDED", "artifacts": ["specs/79/spec.md"]}
+{"event_id": "73382a41e42c8479:collected", "kind": "run.collected", "ticket_id": "79", "run_id": "73382a41e42c8479", "tokens": 139100, "cost_usd": 0.157}
