@@ -8,7 +8,7 @@
       "task_id": "spec",
       "task_version": 1,
       "ticket_id": "78",
-      "state": "QUEUED",
+      "state": "RUNNING",
       "attempt": 0,
       "bindings": {},
       "cost_usd": null,
@@ -19,7 +19,9 @@
       "source_event_id": "78:labeled:2026-08-03T19:58:20Z",
       "enqueue_index": 0,
       "queue_seq": 0,
-      "repo": "agentalec/care_fe"
+      "repo": "agentalec/care_fe",
+      "deadline": "2026-08-03T22:10:13Z",
+      "attempt_started_at": "2026-08-03T21:40:13Z"
     }
   ],
   "block_reason": null,
