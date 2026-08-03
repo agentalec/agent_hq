@@ -379,7 +379,7 @@
   "block_reason": null,
   "block_source": null,
   "interrupted_run_id": null,
-  "comments_polled_at": "2026-08-03T22:04:24Z",
+  "comments_polled_at": "2026-08-03T23:14:28Z",
   "work_repos": [
     {
       "repo": "agentalec/care_fe",
