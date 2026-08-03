@@ -132,7 +132,7 @@
       "task_id": "arch-approval",
       "task_version": 1,
       "ticket_id": "79",
-      "state": "QUEUED",
+      "state": "RUNNING",
       "attempt": 0,
       "bindings": {
         "tracker": "github-issues",
@@ -152,7 +152,9 @@
         "specs/79/spec.md",
         "specs/79/plan.md",
         "specs/79/classification.json"
-      ]
+      ],
+      "deadline": "2026-08-03T22:30:26Z",
+      "attempt_started_at": "2026-08-03T22:25:26Z"
     }
   ],
   "block_reason": null,
