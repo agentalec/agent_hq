@@ -1,0 +1,4 @@
+{
+  "classification": "crud",
+  "reasoning": "This ticket involves only UI display changes to show existing user role data in list cards. No new data models, migrations, model field changes, services, infrastructure, external integrations, authorization changes, FHIR/EMR changes, or non-CRUD endpoints are required. The role data already exists in the API responses and database. This is purely a frontend display restoration using existing components and data."
+}
