@@ -6,3 +6,7 @@
 {"event_id": "9f8e7dbc5335b0b7:arch-plan-77:accepted", "kind": "handoff.accepted", "ticket_id": "77", "run_id": "9f8e7dbc5335b0b7", "detail": "Produce implementation plan and classify ticket complexity"}
 {"event_id": "9f8e7dbc5335b0b7:succeeded", "kind": "run.succeeded", "ticket_id": "77", "run_id": "9f8e7dbc5335b0b7", "state": "SUCCEEDED", "artifacts": ["specs/77/spec.md"]}
 {"event_id": "bfa912766887eaf3:collected", "kind": "run.collected", "ticket_id": "77", "run_id": "bfa912766887eaf3", "tokens": 417400, "cost_usd": 0.28}
+{"event_id": "bfa912766887eaf3:breakdown-77:proposed", "kind": "handoff.proposed", "ticket_id": "77", "run_id": "bfa912766887eaf3", "detail": "CRUD-classified bug fix requires implementation breakdown"}
+{"event_id": "b3fd2c325accee2d:queued", "kind": "run.queued", "ticket_id": "77", "run_id": "b3fd2c325accee2d", "task_id": "breakdown", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
+{"event_id": "bfa912766887eaf3:breakdown-77:accepted", "kind": "handoff.accepted", "ticket_id": "77", "run_id": "bfa912766887eaf3", "detail": "CRUD-classified bug fix requires implementation breakdown"}
+{"event_id": "bfa912766887eaf3:succeeded", "kind": "run.succeeded", "ticket_id": "77", "run_id": "bfa912766887eaf3", "state": "SUCCEEDED", "artifacts": ["specs/77/plan.md", "specs/77/classification.json"]}

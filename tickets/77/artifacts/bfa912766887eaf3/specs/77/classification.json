@@ -1,0 +1,4 @@
+{
+  "classification": "crud",
+  "reasoning": "This is a bug fix to existing patient edit functionality. No new data models, migrations, model field changes, services, external integrations, authorization changes, FHIR/EMR model changes, or non-CRUD endpoints are involved. The fix is a one-line conditional change to properly initialize form state for an existing field (geo_organization) that already exists in the patient model and API. None of the beyond-crud criteria apply."
+}
