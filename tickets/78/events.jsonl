@@ -5,3 +5,4 @@
 {"event_id": "80fad28cfcc8b956:queued", "kind": "run.queued", "ticket_id": "78", "run_id": "80fad28cfcc8b956", "task_id": "arch-plan", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment", "gate": "github-issue-comment"}}
 {"event_id": "cf4e33ed33252214:arch-plan-78:accepted", "kind": "handoff.accepted", "ticket_id": "78", "run_id": "cf4e33ed33252214", "detail": "Classify the UI visibility fix and produce implementation plan"}
 {"event_id": "cf4e33ed33252214:succeeded", "kind": "run.succeeded", "ticket_id": "78", "run_id": "cf4e33ed33252214", "state": "SUCCEEDED", "artifacts": ["specs/78/spec.md"]}
+{"event_id": "80fad28cfcc8b956:collected", "kind": "run.collected", "ticket_id": "78", "run_id": "80fad28cfcc8b956", "tokens": 188000, "cost_usd": 0.183}
