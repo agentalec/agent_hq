@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-03T22:41:39Z",
+  "generated_at": "2026-08-03T22:41:48Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -5875,7 +5875,7 @@
           "task_id": "qa",
           "task_version": 1,
           "ticket_id": "75",
-          "state": "RUNNING",
+          "state": "SUCCEEDED",
           "attempt": 1,
           "bindings": {
             "tracker": "github-issues",
@@ -5885,7 +5885,15 @@
           "cost_usd": 1.34,
           "tokens": 2624700,
           "usage_known": true,
-          "artifacts": [],
+          "artifacts": [
+            "specs/75/qa.md",
+            "specs/75/screenshots/additional-details-org-selector.png",
+            "specs/75/screenshots/homepage.png",
+            "specs/75/screenshots/org-district-selected.png",
+            "specs/75/screenshots/org-state-selected.png",
+            "specs/75/screenshots/patient-search.png",
+            "specs/75/screenshots/registration-form-blank.png"
+          ],
           "chain_depth": 5,
           "parent_run_id": "d5ea76b71cce3134",
           "queue_seq": 5,
@@ -5898,7 +5906,36 @@
           "deadline": "2026-08-03T23:06:33Z",
           "attempt_started_at": "2026-08-03T22:06:33Z",
           "base_commit": "8579a763f8e44625e2c44d99bb9be0f189d55e12",
-          "input_from_run_id": "d5ea76b71cce3134"
+          "input_from_run_id": "d5ea76b71cce3134",
+          "output_commit": "8579a763f8e44625e2c44d99bb9be0f189d55e12",
+          "pr_ref": "agentalec/care_fe#14"
+        },
+        {
+          "run_id": "22603cfa90358fef",
+          "task_id": "finalize",
+          "task_version": 1,
+          "ticket_id": "75",
+          "state": "QUEUED",
+          "attempt": 0,
+          "bindings": {
+            "tracker": "github-issues",
+            "agent-session": "copilot-cli",
+            "messaging": "github-comment"
+          },
+          "cost_usd": null,
+          "tokens": null,
+          "usage_known": false,
+          "artifacts": [],
+          "chain_depth": 6,
+          "parent_run_id": "3f87f75cbfa042c0",
+          "queue_seq": 6,
+          "handoff_key": "finalize-75",
+          "repo": "agentalec/care_fe",
+          "input_artifacts": [
+            "specs/75/spec.md",
+            "specs/75/review.md",
+            "specs/75/qa.md"
+          ]
         }
       ],
       "block_reason": null,
