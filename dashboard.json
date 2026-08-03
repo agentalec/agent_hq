@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-03T22:20:35Z",
+  "generated_at": "2026-08-03T22:20:36Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -6336,6 +6336,31 @@
           "attempt_started_at": "2026-08-03T22:16:42Z",
           "base_commit": "5466816828ba496f9d4e6099e77360eb516ece31",
           "input_from_run_id": "7a1e5ca29ea46661"
+        },
+        {
+          "run_id": "ca9152299be72f5a",
+          "task_id": "arch-plan",
+          "task_version": 1,
+          "ticket_id": "79",
+          "state": "QUEUED",
+          "attempt": 2,
+          "bindings": {
+            "tracker": "github-issues",
+            "agent-session": "copilot-cli",
+            "messaging": "github-comment"
+          },
+          "cost_usd": null,
+          "tokens": null,
+          "usage_known": false,
+          "artifacts": [],
+          "chain_depth": 1,
+          "parent_run_id": "7a1e5ca29ea46661",
+          "queue_seq": 1,
+          "handoff_key": "79-arch-plan",
+          "repo": "agentalec/care_fe",
+          "input_artifacts": [
+            "specs/79/spec.md"
+          ]
         }
       ],
       "block_reason": null,
