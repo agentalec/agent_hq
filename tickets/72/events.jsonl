@@ -30,3 +30,4 @@
 {"event_id": "5cdcce991af7b49d:queued", "kind": "run.queued", "ticket_id": "72", "run_id": "5cdcce991af7b49d", "task_id": "review", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "42c4cf1774285fcf:review-3:accepted", "kind": "handoff.accepted", "ticket_id": "72", "run_id": "42c4cf1774285fcf", "detail": "Verify LOS tests pass and implementation meets all acceptance criteria"}
 {"event_id": "42c4cf1774285fcf:succeeded", "kind": "run.succeeded", "ticket_id": "72", "run_id": "42c4cf1774285fcf", "state": "SUCCEEDED", "artifacts": []}
+{"event_id": "5cdcce991af7b49d:collected", "kind": "run.collected", "ticket_id": "72", "run_id": "5cdcce991af7b49d", "tokens": 933800, "cost_usd": 0.522}
