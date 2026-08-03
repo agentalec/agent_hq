@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-03T19:56:44Z",
+  "generated_at": "2026-08-03T19:56:45Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -4561,7 +4561,8 @@
           "chain_depth": 0,
           "source_event_id": "71:opened:2026-08-03T19:56:21Z",
           "enqueue_index": 0,
-          "queue_seq": 0
+          "queue_seq": 0,
+          "repo": "agentalec/care_fe"
         }
       ],
       "block_reason": null,
