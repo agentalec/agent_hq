@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-03T22:03:43Z",
+  "generated_at": "2026-08-03T22:03:50Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -5377,7 +5377,7 @@
           "task_id": "qa",
           "task_version": 1,
           "ticket_id": "72",
-          "state": "RUNNING",
+          "state": "SUCCEEDED",
           "attempt": 0,
           "bindings": {
             "tracker": "github-issues",
@@ -5387,7 +5387,18 @@
           "cost_usd": 2.04,
           "tokens": 3235500,
           "usage_known": true,
-          "artifacts": [],
+          "artifacts": [
+            "specs/72/qa.md",
+            "specs/72/screenshots/criterion-1-2-details-notab-desktop.png",
+            "specs/72/screenshots/criterion-1-2-details-notab-mobile.png",
+            "specs/72/screenshots/criterion-6-card-desktop.png",
+            "specs/72/screenshots/criterion-6-card-mobile.png",
+            "specs/72/screenshots/criterion-7-header-desktop.png",
+            "specs/72/screenshots/criterion-7-header-mobile.png",
+            "specs/72/screenshots/error-state.png",
+            "specs/72/screenshots/initial-page-view-desktop.png",
+            "specs/72/screenshots/initial-page-view-mobile.png"
+          ],
           "chain_depth": 7,
           "parent_run_id": "5cdcce991af7b49d",
           "queue_seq": 7,
@@ -5400,7 +5411,36 @@
           "deadline": "2026-08-03T22:33:24Z",
           "attempt_started_at": "2026-08-03T21:33:24Z",
           "base_commit": "0e77f0e043572dbc7f3d0d7090be7377e5b91493",
-          "input_from_run_id": "5cdcce991af7b49d"
+          "input_from_run_id": "5cdcce991af7b49d",
+          "output_commit": "0e77f0e043572dbc7f3d0d7090be7377e5b91493",
+          "pr_ref": "agentalec/care_fe#12"
+        },
+        {
+          "run_id": "84e027b13e71e7ef",
+          "task_id": "finalize",
+          "task_version": 1,
+          "ticket_id": "72",
+          "state": "QUEUED",
+          "attempt": 0,
+          "bindings": {
+            "tracker": "github-issues",
+            "agent-session": "copilot-cli",
+            "messaging": "github-comment"
+          },
+          "cost_usd": null,
+          "tokens": null,
+          "usage_known": false,
+          "artifacts": [],
+          "chain_depth": 8,
+          "parent_run_id": "872a09675e13846d",
+          "queue_seq": 8,
+          "handoff_key": "finalize-72",
+          "repo": "agentalec/care_fe",
+          "input_artifacts": [
+            "specs/72/spec.md",
+            "specs/72/review.md",
+            "specs/72/qa.md"
+          ]
         }
       ],
       "block_reason": null,
