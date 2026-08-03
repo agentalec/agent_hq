@@ -23,3 +23,4 @@
 {"event_id": "a5c2cbd99974e047:queued", "kind": "run.queued", "ticket_id": "70", "run_id": "a5c2cbd99974e047", "task_id": "review", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "5058889766dc03c9:review-round-2:accepted", "kind": "handoff.accepted", "ticket_id": "70", "run_id": "5058889766dc03c9", "detail": "Implementation complete with fixes from round 1; verify AC1 and AC2 now properly move focus"}
 {"event_id": "5058889766dc03c9:succeeded", "kind": "run.succeeded", "ticket_id": "70", "run_id": "5058889766dc03c9", "state": "SUCCEEDED", "artifacts": []}
+{"event_id": "a5c2cbd99974e047:collected", "kind": "run.collected", "ticket_id": "70", "run_id": "a5c2cbd99974e047", "tokens": 296200, "cost_usd": 0.207}
