@@ -1,2 +1,7 @@
 {"event_id": "1820db18dc0217c8:queued", "kind": "run.queued", "ticket_id": "72", "run_id": "1820db18dc0217c8", "task_id": "spec", "task_version": 1, "state": "QUEUED", "bindings": {}}
 {"event_id": "1820db18dc0217c8:collected", "kind": "run.collected", "ticket_id": "72", "run_id": "1820db18dc0217c8", "tokens": 697200, "cost_usd": 0.441}
+{"event_id": "1820db18dc0217c8:auto_approval", "kind": "gate.decided", "ticket_id": "72", "run_id": "1820db18dc0217c8", "detail": "auto-approved by task config (would have asked product-owners)", "actor": "engine"}
+{"event_id": "1820db18dc0217c8:implement-72-care-fe:proposed", "kind": "handoff.proposed", "ticket_id": "72", "run_id": "1820db18dc0217c8", "detail": "Implement length of stay display in inpatient encounter views"}
+{"event_id": "f7bf5ad58010e68d:queued", "kind": "run.queued", "ticket_id": "72", "run_id": "f7bf5ad58010e68d", "task_id": "implement", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment", "gate": "github-issue-comment"}}
+{"event_id": "1820db18dc0217c8:implement-72-care-fe:accepted", "kind": "handoff.accepted", "ticket_id": "72", "run_id": "1820db18dc0217c8", "detail": "Implement length of stay display in inpatient encounter views"}
+{"event_id": "1820db18dc0217c8:succeeded", "kind": "run.succeeded", "ticket_id": "72", "run_id": "1820db18dc0217c8", "state": "SUCCEEDED", "artifacts": ["specs/72/spec.md"]}
