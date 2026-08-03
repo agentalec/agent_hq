@@ -6,3 +6,7 @@
 {"event_id": "cf4e33ed33252214:arch-plan-78:accepted", "kind": "handoff.accepted", "ticket_id": "78", "run_id": "cf4e33ed33252214", "detail": "Classify the UI visibility fix and produce implementation plan"}
 {"event_id": "cf4e33ed33252214:succeeded", "kind": "run.succeeded", "ticket_id": "78", "run_id": "cf4e33ed33252214", "state": "SUCCEEDED", "artifacts": ["specs/78/spec.md"]}
 {"event_id": "80fad28cfcc8b956:collected", "kind": "run.collected", "ticket_id": "78", "run_id": "80fad28cfcc8b956", "tokens": 188000, "cost_usd": 0.183}
+{"event_id": "80fad28cfcc8b956:breakdown-78:proposed", "kind": "handoff.proposed", "ticket_id": "78", "run_id": "80fad28cfcc8b956", "detail": "CRUD-classified UI visibility fix ready for implementation breakdown"}
+{"event_id": "ae72143b05b8a97a:queued", "kind": "run.queued", "ticket_id": "78", "run_id": "ae72143b05b8a97a", "task_id": "breakdown", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
+{"event_id": "80fad28cfcc8b956:breakdown-78:accepted", "kind": "handoff.accepted", "ticket_id": "78", "run_id": "80fad28cfcc8b956", "detail": "CRUD-classified UI visibility fix ready for implementation breakdown"}
+{"event_id": "80fad28cfcc8b956:succeeded", "kind": "run.succeeded", "ticket_id": "78", "run_id": "80fad28cfcc8b956", "state": "SUCCEEDED", "artifacts": ["specs/78/plan.md", "specs/78/classification.json"]}

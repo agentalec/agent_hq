@@ -1,0 +1,4 @@
+{
+  "classification": "crud",
+  "reasoning": "This is a frontend UI visibility fix with no backend impact. The change involves refactoring a React component to remove responsive display utilities that hide content on smaller screens. No data models, migrations, API endpoints, authorization rules, FHIR/EMR models, or clinical-safety-relevant behavior are affected. This is a pure presentation-layer change to improve user experience across screen sizes."
+}
