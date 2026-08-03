@@ -240,7 +240,7 @@
       "task_id": "finalize",
       "task_version": 1,
       "ticket_id": "75",
-      "state": "RUNNING",
+      "state": "SUCCEEDED",
       "attempt": 0,
       "bindings": {
         "tracker": "github-issues",
@@ -250,7 +250,9 @@
       "cost_usd": 0.145,
       "tokens": 143500,
       "usage_known": true,
-      "artifacts": [],
+      "artifacts": [
+        "specs/75/summary.md"
+      ],
       "chain_depth": 6,
       "parent_run_id": "3f87f75cbfa042c0",
       "queue_seq": 6,
@@ -264,7 +266,9 @@
       "deadline": "2026-08-03T22:57:31Z",
       "attempt_started_at": "2026-08-03T22:42:31Z",
       "base_commit": "8579a763f8e44625e2c44d99bb9be0f189d55e12",
-      "input_from_run_id": "3f87f75cbfa042c0"
+      "input_from_run_id": "3f87f75cbfa042c0",
+      "output_commit": "8579a763f8e44625e2c44d99bb9be0f189d55e12",
+      "pr_ref": "agentalec/care_fe#14"
     }
   ],
   "block_reason": null,
