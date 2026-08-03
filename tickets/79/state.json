@@ -140,9 +140,9 @@
         "messaging": "github-comment",
         "gate": "github-issue-comment"
       },
-      "cost_usd": null,
-      "tokens": null,
-      "usage_known": false,
+      "cost_usd": 0.114,
+      "tokens": 101300,
+      "usage_known": true,
       "artifacts": [],
       "chain_depth": 2,
       "parent_run_id": "ca9152299be72f5a",
