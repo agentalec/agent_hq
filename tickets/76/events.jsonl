@@ -5,3 +5,4 @@
 {"event_id": "5f629729eae83351:queued", "kind": "run.queued", "ticket_id": "76", "run_id": "5f629729eae83351", "task_id": "implement", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment", "gate": "github-issue-comment"}}
 {"event_id": "9afdd50d60ffd32e:implement-care-fe:accepted", "kind": "handoff.accepted", "ticket_id": "76", "run_id": "9afdd50d60ffd32e", "detail": "Implement facility-level auto-print toggle for invoices in care_fe frontend"}
 {"event_id": "9afdd50d60ffd32e:succeeded", "kind": "run.succeeded", "ticket_id": "76", "run_id": "9afdd50d60ffd32e", "state": "SUCCEEDED", "artifacts": ["specs/76/spec.md"]}
+{"event_id": "5f629729eae83351:collected", "kind": "run.collected", "ticket_id": "76", "run_id": "5f629729eae83351", "tokens": 2614000, "cost_usd": 1.22}
