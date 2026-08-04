@@ -172,7 +172,8 @@
       "branch": "agent-hq/71",
       "base_branch": "develop",
       "recorded_head": "6f85cb02f3364c67c4e108245abf2b330f66b4f6",
-      "pr_ref": "agentalec/care_fe#16"
+      "pr_ref": "agentalec/care_fe#16",
+      "comments_polled_at": "2026-08-04T00:00:06Z"
     }
   ]
 }
