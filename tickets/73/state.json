@@ -30,6 +30,28 @@
       "base_commit": "bb3f442e0a8e3901487965676dc17e04e012a0f8",
       "input_from_run_id": null,
       "input_artifacts": []
+    },
+    {
+      "run_id": "77e8425f6d3edb27",
+      "task_id": "spec",
+      "task_version": 1,
+      "ticket_id": "73",
+      "state": "QUEUED",
+      "attempt": 1,
+      "bindings": {
+        "tracker": "github-issues",
+        "agent-session": "copilot-cli",
+        "messaging": "github-comment",
+        "gate": "github-issue-comment"
+      },
+      "cost_usd": null,
+      "tokens": null,
+      "usage_known": false,
+      "artifacts": [],
+      "chain_depth": 0,
+      "source_event_id": "73:opened:2026-08-03T19:56:32Z",
+      "enqueue_index": 0,
+      "queue_seq": 0
     }
   ],
   "block_reason": null,
