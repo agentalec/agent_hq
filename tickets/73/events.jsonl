@@ -13,3 +13,7 @@
 {"event_id": "4ad41891b958661d:review-73:accepted", "kind": "handoff.accepted", "ticket_id": "73", "run_id": "4ad41891b958661d", "detail": "Review implementation against spec"}
 {"event_id": "4ad41891b958661d:succeeded", "kind": "run.succeeded", "ticket_id": "73", "run_id": "4ad41891b958661d", "state": "SUCCEEDED", "artifacts": []}
 {"event_id": "080778c14611176a:collected", "kind": "run.collected", "ticket_id": "73", "run_id": "080778c14611176a", "tokens": 90900, "cost_usd": 0.099}
+{"event_id": "080778c14611176a:qa-73:proposed", "kind": "handoff.proposed", "ticket_id": "73", "run_id": "080778c14611176a", "detail": "No blockers found; ready for QA verification"}
+{"event_id": "d126df6694774476:queued", "kind": "run.queued", "ticket_id": "73", "run_id": "d126df6694774476", "task_id": "qa", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
+{"event_id": "080778c14611176a:qa-73:accepted", "kind": "handoff.accepted", "ticket_id": "73", "run_id": "080778c14611176a", "detail": "No blockers found; ready for QA verification"}
+{"event_id": "080778c14611176a:succeeded", "kind": "run.succeeded", "ticket_id": "73", "run_id": "080778c14611176a", "state": "SUCCEEDED", "artifacts": ["specs/73/review.md"]}
