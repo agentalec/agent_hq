@@ -11,3 +11,4 @@
 {"event_id": "80fad28cfcc8b956:breakdown-78:accepted", "kind": "handoff.accepted", "ticket_id": "78", "run_id": "80fad28cfcc8b956", "detail": "CRUD-classified UI visibility fix ready for implementation breakdown"}
 {"event_id": "80fad28cfcc8b956:succeeded", "kind": "run.succeeded", "ticket_id": "78", "run_id": "80fad28cfcc8b956", "state": "SUCCEEDED", "artifacts": ["specs/78/plan.md", "specs/78/classification.json"]}
 {"event_id": "ae72143b05b8a97a:collected", "kind": "run.collected", "ticket_id": "78", "run_id": "ae72143b05b8a97a", "tokens": 174900, "cost_usd": 0.157}
+{"event_id": "ae72143b05b8a97a:failed", "kind": "run.failed", "ticket_id": "78", "run_id": "ae72143b05b8a97a", "state": "FAILED"}
