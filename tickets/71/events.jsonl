@@ -30,3 +30,4 @@
 {"event_id": "92f731022360eabd:queued", "kind": "run.queued", "ticket_id": "71", "run_id": "92f731022360eabd", "task_id": "review", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "25099306718f9210:review-round-2:accepted", "kind": "handoff.accepted", "ticket_id": "71", "run_id": "25099306718f9210", "detail": "Verify AC2 compliance after fixing observation display fallbacks"}
 {"event_id": "25099306718f9210:succeeded", "kind": "run.succeeded", "ticket_id": "71", "run_id": "25099306718f9210", "state": "SUCCEEDED", "artifacts": []}
+{"event_id": "92f731022360eabd:collected", "kind": "run.collected", "ticket_id": "71", "run_id": "92f731022360eabd", "tokens": 212200, "cost_usd": 0.161}
