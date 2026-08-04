@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-04T00:07:12Z",
+  "generated_at": "2026-08-04T00:07:21Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -5286,7 +5286,7 @@
           "task_id": "implement",
           "task_version": 1,
           "ticket_id": "71",
-          "state": "RUNNING",
+          "state": "SUCCEEDED",
           "attempt": 0,
           "bindings": {
             "tracker": "github-issues",
@@ -5309,7 +5309,35 @@
           "deadline": "2026-08-04T01:34:04Z",
           "attempt_started_at": "2026-08-04T00:04:04Z",
           "base_commit": "6f85cb02f3364c67c4e108245abf2b330f66b4f6",
-          "input_from_run_id": "772889d2ec41ae20"
+          "input_from_run_id": "772889d2ec41ae20",
+          "output_commit": "769408511856b440c62b6df97c490983f8045f42",
+          "pr_ref": "agentalec/care_fe#16"
+        },
+        {
+          "run_id": "92f731022360eabd",
+          "task_id": "review",
+          "task_version": 1,
+          "ticket_id": "71",
+          "state": "QUEUED",
+          "attempt": 0,
+          "bindings": {
+            "tracker": "github-issues",
+            "agent-session": "copilot-cli",
+            "messaging": "github-comment"
+          },
+          "cost_usd": null,
+          "tokens": null,
+          "usage_known": false,
+          "artifacts": [],
+          "chain_depth": 6,
+          "parent_run_id": "25099306718f9210",
+          "queue_seq": 6,
+          "handoff_key": "review-round-2",
+          "repo": "agentalec/care_fe",
+          "input_artifacts": [
+            "specs/71/spec.md",
+            "specs/71/review.md"
+          ]
         }
       ],
       "block_reason": null,
@@ -5321,7 +5349,7 @@
           "repo": "agentalec/care_fe",
           "branch": "agent-hq/71",
           "base_branch": "develop",
-          "recorded_head": "6f85cb02f3364c67c4e108245abf2b330f66b4f6",
+          "recorded_head": "769408511856b440c62b6df97c490983f8045f42",
           "pr_ref": "agentalec/care_fe#16",
           "comments_polled_at": "2026-08-04T00:03:33Z"
         }

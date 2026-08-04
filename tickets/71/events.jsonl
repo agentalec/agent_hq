@@ -26,3 +26,7 @@
 {"event_id": "772889d2ec41ae20:implement-round-2:accepted", "kind": "handoff.accepted", "ticket_id": "71", "run_id": "772889d2ec41ae20", "detail": "Fix AC2 violations: restore code as fallback when display is absent in ObservationHistoryTable.tsx:127 and observations.tsx:161"}
 {"event_id": "772889d2ec41ae20:succeeded", "kind": "run.succeeded", "ticket_id": "71", "run_id": "772889d2ec41ae20", "state": "SUCCEEDED", "artifacts": ["specs/71/review.md"]}
 {"event_id": "25099306718f9210:collected", "kind": "run.collected", "ticket_id": "71", "run_id": "25099306718f9210", "tokens": 279500, "cost_usd": 0.197}
+{"event_id": "25099306718f9210:review-round-2:proposed", "kind": "handoff.proposed", "ticket_id": "71", "run_id": "25099306718f9210", "detail": "Verify AC2 compliance after fixing observation display fallbacks"}
+{"event_id": "92f731022360eabd:queued", "kind": "run.queued", "ticket_id": "71", "run_id": "92f731022360eabd", "task_id": "review", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
+{"event_id": "25099306718f9210:review-round-2:accepted", "kind": "handoff.accepted", "ticket_id": "71", "run_id": "25099306718f9210", "detail": "Verify AC2 compliance after fixing observation display fallbacks"}
+{"event_id": "25099306718f9210:succeeded", "kind": "run.succeeded", "ticket_id": "71", "run_id": "25099306718f9210", "state": "SUCCEEDED", "artifacts": []}
