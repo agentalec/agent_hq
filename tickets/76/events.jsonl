@@ -11,3 +11,7 @@
 {"event_id": "5f629729eae83351:review-implementation:accepted", "kind": "handoff.accepted", "ticket_id": "76", "run_id": "5f629729eae83351", "detail": "Review implementation against spec acceptance criteria"}
 {"event_id": "5f629729eae83351:succeeded", "kind": "run.succeeded", "ticket_id": "76", "run_id": "5f629729eae83351", "state": "SUCCEEDED", "artifacts": []}
 {"event_id": "2aee5eef4ee010e8:collected", "kind": "run.collected", "ticket_id": "76", "run_id": "2aee5eef4ee010e8", "tokens": 181200, "cost_usd": 0.159}
+{"event_id": "2aee5eef4ee010e8:qa-76:proposed", "kind": "handoff.proposed", "ticket_id": "76", "run_id": "2aee5eef4ee010e8", "detail": "Implementation complete with no blockers; ready for QA verification of facility-level auto-print toggle"}
+{"event_id": "923b9e398521540a:queued", "kind": "run.queued", "ticket_id": "76", "run_id": "923b9e398521540a", "task_id": "qa", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
+{"event_id": "2aee5eef4ee010e8:qa-76:accepted", "kind": "handoff.accepted", "ticket_id": "76", "run_id": "2aee5eef4ee010e8", "detail": "Implementation complete with no blockers; ready for QA verification of facility-level auto-print toggle"}
+{"event_id": "2aee5eef4ee010e8:succeeded", "kind": "run.succeeded", "ticket_id": "76", "run_id": "2aee5eef4ee010e8", "state": "SUCCEEDED", "artifacts": ["specs/76/review.md"]}
