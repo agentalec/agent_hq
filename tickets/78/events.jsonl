@@ -38,3 +38,4 @@
 {"event_id": "2b18856f2a3b7aee:queued", "kind": "run.queued", "ticket_id": "78", "run_id": "2b18856f2a3b7aee", "task_id": "qa", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "ce188f97deed1454:qa-location-switcher:accepted", "kind": "handoff.accepted", "ticket_id": "78", "run_id": "ce188f97deed1454", "detail": "Implementation verified against spec. All acceptance criteria met: location name now visible on all screen sizes, truncates properly, tooltip shows only on large screens."}
 {"event_id": "ce188f97deed1454:succeeded", "kind": "run.succeeded", "ticket_id": "78", "run_id": "ce188f97deed1454", "state": "SUCCEEDED", "artifacts": ["specs/78/review.md"]}
+{"event_id": "2b18856f2a3b7aee:collected", "kind": "run.collected", "ticket_id": "78", "run_id": "2b18856f2a3b7aee", "tokens": 2118700, "cost_usd": 1.21}
