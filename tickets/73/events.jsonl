@@ -22,3 +22,4 @@
 {"event_id": "633b86a03171b5e7:queued", "kind": "run.queued", "ticket_id": "73", "run_id": "633b86a03171b5e7", "task_id": "finalize", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "d126df6694774476:finalize-73:accepted", "kind": "handoff.accepted", "ticket_id": "73", "run_id": "d126df6694774476", "detail": "QA complete - all acceptance criteria marked not-exercised due to backend-only repository with no user-facing interface available for screenshot testing"}
 {"event_id": "d126df6694774476:succeeded", "kind": "run.succeeded", "ticket_id": "73", "run_id": "d126df6694774476", "state": "SUCCEEDED", "artifacts": ["specs/73/qa.md"]}
+{"event_id": "633b86a03171b5e7:collected", "kind": "run.collected", "ticket_id": "73", "run_id": "633b86a03171b5e7", "tokens": 178800, "cost_usd": 0.132}
