@@ -28,3 +28,4 @@
 {"event_id": "9a9f5f7141dff64c:queued", "kind": "run.queued", "ticket_id": "78", "run_id": "9a9f5f7141dff64c", "task_id": "implement", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "8a69a117a94b7eb2:implement-round-2:accepted", "kind": "handoff.accepted", "ticket_id": "78", "run_id": "8a69a117a94b7eb2", "detail": "Fix unintentional test documentation formatting damage in tests/PLAYWRIGHT_GUIDE.md and tests/README.md"}
 {"event_id": "8a69a117a94b7eb2:succeeded", "kind": "run.succeeded", "ticket_id": "78", "run_id": "8a69a117a94b7eb2", "state": "SUCCEEDED", "artifacts": ["specs/78/review.md"]}
+{"event_id": "9a9f5f7141dff64c:collected", "kind": "run.collected", "ticket_id": "78", "run_id": "9a9f5f7141dff64c", "tokens": 2110900, "cost_usd": 0.936}
