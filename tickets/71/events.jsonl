@@ -40,3 +40,4 @@
 {"event_id": "59d3c06b75a1d9eb:queued", "kind": "run.queued", "ticket_id": "71", "run_id": "59d3c06b75a1d9eb", "task_id": "finalize", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
 {"event_id": "bad27fd0d146ac66:finalize-71:accepted", "kind": "handoff.accepted", "ticket_id": "71", "run_id": "bad27fd0d146ac66", "detail": "QA completed - 4 ACs passed, 3 not-exercised due to missing test data"}
 {"event_id": "bad27fd0d146ac66:succeeded", "kind": "run.succeeded", "ticket_id": "71", "run_id": "bad27fd0d146ac66", "state": "SUCCEEDED", "artifacts": ["specs/71/qa.md", "specs/71/screenshots/ac1-ac2-observations-tab.png", "specs/71/screenshots/ac3-vitals-popover.png", "specs/71/screenshots/ac4-vitals-table-header.png"]}
+{"event_id": "59d3c06b75a1d9eb:collected", "kind": "run.collected", "ticket_id": "71", "run_id": "59d3c06b75a1d9eb", "tokens": 250300, "cost_usd": 0.181}
