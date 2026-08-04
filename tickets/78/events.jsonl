@@ -29,3 +29,7 @@
 {"event_id": "8a69a117a94b7eb2:implement-round-2:accepted", "kind": "handoff.accepted", "ticket_id": "78", "run_id": "8a69a117a94b7eb2", "detail": "Fix unintentional test documentation formatting damage in tests/PLAYWRIGHT_GUIDE.md and tests/README.md"}
 {"event_id": "8a69a117a94b7eb2:succeeded", "kind": "run.succeeded", "ticket_id": "78", "run_id": "8a69a117a94b7eb2", "state": "SUCCEEDED", "artifacts": ["specs/78/review.md"]}
 {"event_id": "9a9f5f7141dff64c:collected", "kind": "run.collected", "ticket_id": "78", "run_id": "9a9f5f7141dff64c", "tokens": 2110900, "cost_usd": 0.936}
+{"event_id": "9a9f5f7141dff64c:review-2:proposed", "kind": "handoff.proposed", "ticket_id": "78", "run_id": "9a9f5f7141dff64c", "detail": "Review the implementation against the spec after fixing blocker issues"}
+{"event_id": "ce188f97deed1454:queued", "kind": "run.queued", "ticket_id": "78", "run_id": "ce188f97deed1454", "task_id": "review", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
+{"event_id": "9a9f5f7141dff64c:review-2:accepted", "kind": "handoff.accepted", "ticket_id": "78", "run_id": "9a9f5f7141dff64c", "detail": "Review the implementation against the spec after fixing blocker issues"}
+{"event_id": "9a9f5f7141dff64c:succeeded", "kind": "run.succeeded", "ticket_id": "78", "run_id": "9a9f5f7141dff64c", "state": "SUCCEEDED", "artifacts": []}
