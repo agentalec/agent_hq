@@ -19,3 +19,7 @@
 {"event_id": "8e3e402cf07734f5:implement-care-fe:accepted", "kind": "handoff.accepted", "ticket_id": "78", "run_id": "8e3e402cf07734f5", "detail": "Refactor LocationSwitcher component to remove responsive tooltip wrapper and ensure location name is visible at all screen sizes"}
 {"event_id": "8e3e402cf07734f5:succeeded", "kind": "run.succeeded", "ticket_id": "78", "run_id": "8e3e402cf07734f5", "state": "SUCCEEDED", "artifacts": ["specs/78/tasks.md"]}
 {"event_id": "b62531f56924f158:collected", "kind": "run.collected", "ticket_id": "78", "run_id": "b62531f56924f158", "tokens": 604400, "cost_usd": 0.401}
+{"event_id": "b62531f56924f158:review-78-1:proposed", "kind": "handoff.proposed", "ticket_id": "78", "run_id": "b62531f56924f158", "detail": "Review implementation against spec acceptance criteria"}
+{"event_id": "8a69a117a94b7eb2:queued", "kind": "run.queued", "ticket_id": "78", "run_id": "8a69a117a94b7eb2", "task_id": "review", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
+{"event_id": "b62531f56924f158:review-78-1:accepted", "kind": "handoff.accepted", "ticket_id": "78", "run_id": "b62531f56924f158", "detail": "Review implementation against spec acceptance criteria"}
+{"event_id": "b62531f56924f158:succeeded", "kind": "run.succeeded", "ticket_id": "78", "run_id": "b62531f56924f158", "state": "SUCCEEDED", "artifacts": []}

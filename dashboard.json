@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-04T04:40:47Z",
+  "generated_at": "2026-08-04T04:40:57Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -7063,7 +7063,7 @@
           "task_id": "implement",
           "task_version": 1,
           "ticket_id": "78",
-          "state": "RUNNING",
+          "state": "SUCCEEDED",
           "attempt": 0,
           "bindings": {
             "tracker": "github-issues",
@@ -7087,7 +7087,36 @@
           "deadline": "2026-08-04T06:06:03Z",
           "attempt_started_at": "2026-08-04T04:36:03Z",
           "base_commit": "5466816828ba496f9d4e6099e77360eb516ece31",
-          "input_from_run_id": "8e3e402cf07734f5"
+          "input_from_run_id": "8e3e402cf07734f5",
+          "output_commit": "1a7462d1fcccaeb7bde67f3d7ab7c88563e1f8bd",
+          "pr_ref": "agentalec/care_fe#17"
+        },
+        {
+          "run_id": "8a69a117a94b7eb2",
+          "task_id": "review",
+          "task_version": 1,
+          "ticket_id": "78",
+          "state": "QUEUED",
+          "attempt": 0,
+          "bindings": {
+            "tracker": "github-issues",
+            "agent-session": "copilot-cli",
+            "messaging": "github-comment"
+          },
+          "cost_usd": null,
+          "tokens": null,
+          "usage_known": false,
+          "artifacts": [],
+          "chain_depth": 4,
+          "parent_run_id": "b62531f56924f158",
+          "queue_seq": 4,
+          "handoff_key": "review-78-1",
+          "repo": "agentalec/care_fe",
+          "input_artifacts": [
+            "specs/78/spec.md",
+            "specs/78/plan.md",
+            "specs/78/tasks.md"
+          ]
         }
       ],
       "block_reason": null,
@@ -7099,8 +7128,8 @@
           "repo": "agentalec/care_fe",
           "branch": "agent-hq/78",
           "base_branch": "develop",
-          "recorded_head": "5466816828ba496f9d4e6099e77360eb516ece31",
-          "pr_ref": null
+          "recorded_head": "1a7462d1fcccaeb7bde67f3d7ab7c88563e1f8bd",
+          "pr_ref": "agentalec/care_fe#17"
         }
       ]
     },
