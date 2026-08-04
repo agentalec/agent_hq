@@ -23,3 +23,4 @@
 {"event_id": "d126df6694774476:finalize-73:accepted", "kind": "handoff.accepted", "ticket_id": "73", "run_id": "d126df6694774476", "detail": "QA complete - all acceptance criteria marked not-exercised due to backend-only repository with no user-facing interface available for screenshot testing"}
 {"event_id": "d126df6694774476:succeeded", "kind": "run.succeeded", "ticket_id": "73", "run_id": "d126df6694774476", "state": "SUCCEEDED", "artifacts": ["specs/73/qa.md"]}
 {"event_id": "633b86a03171b5e7:collected", "kind": "run.collected", "ticket_id": "73", "run_id": "633b86a03171b5e7", "tokens": 178800, "cost_usd": 0.132}
+{"event_id": "633b86a03171b5e7:succeeded", "kind": "run.succeeded", "ticket_id": "73", "run_id": "633b86a03171b5e7", "state": "SUCCEEDED", "artifacts": ["specs/73/summary.md"]}
