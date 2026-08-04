@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-04T01:15:20Z",
+  "generated_at": "2026-08-04T01:15:27Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -5831,7 +5831,7 @@
           "task_id": "implement",
           "task_version": 1,
           "ticket_id": "73",
-          "state": "RUNNING",
+          "state": "SUCCEEDED",
           "attempt": 0,
           "bindings": {
             "tracker": "github-issues",
@@ -5853,7 +5853,34 @@
           "deadline": "2026-08-04T02:41:31Z",
           "attempt_started_at": "2026-08-04T01:11:31Z",
           "base_commit": "bb3f442e0a8e3901487965676dc17e04e012a0f8",
-          "input_from_run_id": "77e8425f6d3edb27"
+          "input_from_run_id": "77e8425f6d3edb27",
+          "output_commit": "4d9084e390b8155fd440a20e475df9e0f67f8c0e",
+          "pr_ref": "agentalec/care#2"
+        },
+        {
+          "run_id": "080778c14611176a",
+          "task_id": "review",
+          "task_version": 1,
+          "ticket_id": "73",
+          "state": "QUEUED",
+          "attempt": 0,
+          "bindings": {
+            "tracker": "github-issues",
+            "agent-session": "copilot-cli",
+            "messaging": "github-comment"
+          },
+          "cost_usd": null,
+          "tokens": null,
+          "usage_known": false,
+          "artifacts": [],
+          "chain_depth": 2,
+          "parent_run_id": "4ad41891b958661d",
+          "queue_seq": 2,
+          "handoff_key": "review-73",
+          "repo": "agentalec/care",
+          "input_artifacts": [
+            "specs/73/spec.md"
+          ]
         }
       ],
       "block_reason": null,
@@ -5865,8 +5892,8 @@
           "repo": "agentalec/care",
           "branch": "agent-hq/73",
           "base_branch": "develop",
-          "recorded_head": "bb3f442e0a8e3901487965676dc17e04e012a0f8",
-          "pr_ref": null
+          "recorded_head": "4d9084e390b8155fd440a20e475df9e0f67f8c0e",
+          "pr_ref": "agentalec/care#2"
         }
       ]
     },

@@ -8,3 +8,7 @@
 {"event_id": "77e8425f6d3edb27:implement-73-care:accepted", "kind": "handoff.accepted", "ticket_id": "73", "run_id": "77e8425f6d3edb27", "detail": "Add prefix and suffix fields to user search_fields in UserViewSet and expand test coverage for multi-field search queries"}
 {"event_id": "77e8425f6d3edb27:succeeded", "kind": "run.succeeded", "ticket_id": "73", "run_id": "77e8425f6d3edb27", "state": "SUCCEEDED", "artifacts": ["specs/73/spec.md"]}
 {"event_id": "4ad41891b958661d:collected", "kind": "run.collected", "ticket_id": "73", "run_id": "4ad41891b958661d", "tokens": 501100, "cost_usd": 0.325}
+{"event_id": "4ad41891b958661d:review-73:proposed", "kind": "handoff.proposed", "ticket_id": "73", "run_id": "4ad41891b958661d", "detail": "Review implementation against spec"}
+{"event_id": "080778c14611176a:queued", "kind": "run.queued", "ticket_id": "73", "run_id": "080778c14611176a", "task_id": "review", "task_version": 1, "state": "QUEUED", "bindings": {"tracker": "github-issues", "agent-session": "copilot-cli", "messaging": "github-comment"}}
+{"event_id": "4ad41891b958661d:review-73:accepted", "kind": "handoff.accepted", "ticket_id": "73", "run_id": "4ad41891b958661d", "detail": "Review implementation against spec"}
+{"event_id": "4ad41891b958661d:succeeded", "kind": "run.succeeded", "ticket_id": "73", "run_id": "4ad41891b958661d", "state": "SUCCEEDED", "artifacts": []}
