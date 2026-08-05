@@ -10,7 +10,7 @@ on 2026-08-05.
 | Per-task model selection | Valid enhancement |
 | QA passed unexercised flows | Confirmed QA-quality defect |
 | Durable agent-run observability | Valid decision/spike, not a bug |
-| QA video evidence | Valid enhancement; already listed as P2 roadmap work |
+| QA video evidence | Shipped as default WebM evidence + collect-derived GIF PR embeds |
 | Retry loses malformed-control feedback | Confirmed bug |
 | Workflow-dispatch command injection | Confirmed security bug |
 | Deleted `pages.yml` still dispatched | Confirmed bug |

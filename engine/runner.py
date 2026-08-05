@@ -49,10 +49,12 @@ cancel pending entries. See `engine.handoff.validate_queue` and
 
 from __future__ import annotations
 
+import html
 import json
 import os
 import re
 import subprocess
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -173,6 +175,72 @@ def _ledger_raw_url(engine_repo: str, ticket_id: str, run_id: str, rel: str) -> 
     return f"https://raw.githubusercontent.com/{engine_repo}/{_STATE_BRANCH}/{path}"
 
 
+def _sibling_gif_path(video_rel: str) -> str:
+    """Filename convention: `flow.webm` → `flow.gif` (presentation sibling)."""
+    lower = video_rel.lower()
+    if lower.endswith(".webm"):
+        return video_rel[: -len(".webm")] + ".gif"
+    if lower.endswith(".mp4"):
+        return video_rel[: -len(".mp4")] + ".gif"
+    return video_rel + ".gif"
+
+
+def _webm_to_gif(webm: bytes, max_seconds: int) -> bytes | None:
+    """Best-effort lite GIF for PR embeds. Missing ffmpeg / conversion failure
+    returns None — never fails the QA run (WebM remains the pass evidence)."""
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            inp = Path(tmp) / "in.webm"
+            out = Path(tmp) / "out.gif"
+            inp.write_bytes(webm)
+            # Palettegen + bayer dither keeps size small enough for raw.gh embeds.
+            vf = (
+                "fps=12,scale=960:-1:flags=lanczos,"
+                "split[s0][s1];[s0]palettegen=stats_mode=diff[p];"
+                "[s1][p]paletteuse=dither=bayer:bayer_scale=5"
+            )
+            result = subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    str(inp),
+                    "-t",
+                    str(max(1, int(max_seconds))),
+                    "-vf",
+                    vf,
+                    "-loop",
+                    "0",
+                    str(out),
+                ],
+                capture_output=True,
+                check=False,
+                timeout=180,
+            )
+            if result.returncode != 0 or not out.is_file() or out.stat().st_size == 0:
+                return None
+            return out.read_bytes()
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def _derive_qa_gifs(artifact_contents: dict[str, bytes], max_seconds: int) -> dict[str, bytes]:
+    """Derive sibling `.gif` files for every `.webm` in the ledger (filename
+    convention — no task-id special case). Skips paths that already have a
+    gif; conversion failures are omitted, not raised."""
+    derived: dict[str, bytes] = {}
+    for rel, content in list(artifact_contents.items()):
+        if not rel.lower().endswith(".webm"):
+            continue
+        gif_rel = _sibling_gif_path(rel)
+        if gif_rel in artifact_contents or gif_rel in derived:
+            continue
+        gif = _webm_to_gif(content, max_seconds)
+        if gif is not None:
+            derived[gif_rel] = gif
+    return derived
+
+
 def _ledger_image_urls(
     md: str, engine_repo: str, ticket_id: str, run_id: str, ledger: set[str]
 ) -> str:
@@ -194,6 +262,11 @@ def _ledger_image_urls(
     broken-image icon would read as an infrastructure glitch rather than as
     what it is: evidence that was never captured.
 
+    When a sibling `.gif` exists for a referenced `.webm` (collect-derived
+    presentation copy), the rewrite emits a collapsed `<details>` block with
+    an inline GIF plus a full-fidelity WebM link. Without the gif, today's
+    plain WebM markdown link is kept (degraded, still usable).
+
     ponytail: assumes a public engine repo -- raw URLs on a private one need a
     token GitHub's image proxy doesn't have."""
 
@@ -207,7 +280,20 @@ def _ledger_image_urls(
         rel = m[2]
         if rel not in ledger:
             return f"_[missing video: `{rel}` — referenced but never produced]_"
-        return f"{m[1]}{_ledger_raw_url(engine_repo, ticket_id, run_id, rel)}{m[3]}"
+        webm_url = _ledger_raw_url(engine_repo, ticket_id, run_id, rel)
+        gif_rel = _sibling_gif_path(rel)
+        if gif_rel in ledger:
+            label = html.escape(m[1][1:-2] or Path(rel).stem)
+            slug = html.escape(Path(rel).stem)
+            gif_url = _ledger_raw_url(engine_repo, ticket_id, run_id, gif_rel)
+            return (
+                f"<details>\n"
+                f"<summary><b>Evidence: {label}</b> (click to expand)</summary>\n\n"
+                f'<img width="960" alt="{slug}" src="{gif_url}" />\n\n'
+                f"[Full recording (webm)]({webm_url})\n\n"
+                f"</details>"
+            )
+        return f"{m[1]}{webm_url}{m[3]}"
 
     out = _IMG_LINK.sub(rewrite_img, md)
     return _VIDEO_LINK.sub(rewrite_video, out)
@@ -1076,8 +1162,8 @@ def _collect_success(
     # qa-report.json, collect refuses a dishonest report before anything is
     # marked SUCCEEDED or posted to the PR.
     qa_report_path = subst("specs/{ticket}/qa-report.json", ticket_id)
+    media = resolve_qa_media(config.repos.get(repo, {}))
     if qa_report_path in artifact_contents:
-        media = resolve_qa_media(config.repos.get(repo, {}))
         bad_report = validate_qa_report(
             artifact_contents[qa_report_path],
             ledger=set(artifact_contents),
@@ -1095,6 +1181,16 @@ def _collect_success(
                 bad_report,
             )
             return
+
+    # Filename convention: any `.webm` in the ledger gets a lite sibling `.gif`
+    # for PR embeds (GitHub raw image proxy animates GIF reliably; WebM stays
+    # the pass evidence). Best-effort — missing ffmpeg must not fail the run.
+    for gif_rel, gif_bytes in _derive_qa_gifs(
+        artifact_contents, media["video_max_seconds"]
+    ).items():
+        artifact_contents[gif_rel] = gif_bytes
+        if gif_rel not in declared:
+            declared.append(gif_rel)
 
     # -- Land the work patch on the ticket's stable per-issue branch. This
     # is the ONLY place a work-repo clone/push happens (Task 12: execute

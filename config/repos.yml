@@ -55,8 +55,14 @@ yash-learner/care_fe_agent_hq:
         `browser.newContext({ storageState: 'tests/.auth/user.json',
           recordVideo: { dir: '.agent-hq/pw-videos', size: { width: 1440, height: 900 } } })`
         -- the login and a seeded facility/patient/questionnaire already exist.
-        After each criterion, copy the finished `.webm` into
-        `specs/<ticket>/videos/<short-slug>.webm` (keep clips under ~30s).
+        After `page = await context.newPage()`, and **before driving** each
+        recorded flow, enable the native cursor/click overlay (Playwright
+        1.61+; this repo resolves 1.61.1):
+          `await page.screencast.showActions({ cursor: "pointer" });`
+        Do not inject a custom DOM cursor. After each criterion, copy the
+        finished `.webm` into `specs/<ticket>/videos/<short-slug>.webm`
+        (keep clips under ~30s). Collect may derive a sibling lite `.gif`
+        for the PR comment; you only need the WebM.
       - Chromium is installed. Drive it with Playwright directly; you do not
         need to add tests to the repo's suite. Screenshots are optional; video
         is the required pass evidence unless the repo disables it.
