@@ -175,6 +175,14 @@ Actions artifacts transport prepare's manifest and execute's output between
 jobs; both are pruned (`retention-days: 1`) since they're single-use
 transport, not durable state.
 
+**`ffmpeg` on collect.** Collect may derive lite GIFs from QA WebM ledger
+artifacts so PR comments can embed motion via GitHub's image proxy
+(`engine.runner._derive_qa_gifs`). `run.yml`'s collect job installs
+`ffmpeg` via apt before the phase runs. Local collect against a worktree
+with WebMs needs `ffmpeg` on `PATH` for the same happy path; if it is
+missing, the run still succeeds and the PR comment degrades to a plain
+WebM link (pass validation continues to require WebM, never GIF).
+
 **`branch_conflict` recovery.** Collect lands each task's work on the
 ticket's stable `agent-hq/<issue-number>` branch with a plain fast-forward
 push (`docs/architecture.md` "Work branches"). If that push is rejected and

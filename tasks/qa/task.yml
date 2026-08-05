@@ -7,8 +7,9 @@
 # there, zero or more. They are ledger artifacts like every other output --
 # kept out of the work repo, which is for product code -- and the engine
 # rewrites qa.md's relative media links to their ledger URLs when it posts
-# qa.md to the PR. `qa-report.json` is required; collect validates honesty
-# (filename convention, no task-id special case).
+# qa.md to the PR (WebM + sibling collect-derived GIF → collapsed details
+# preview). `qa-report.json` is required; collect validates honesty
+# (filename convention, no task-id special case). Pass still requires WebM.
 id: qa
 version: 1
 description: Verify the change in a running app with live-flow video evidence and reflect it onto the PR.

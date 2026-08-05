@@ -29,8 +29,9 @@ GitHub issue (hq:intake label, in config.projects["engine_repo"])
   -> implement          code + tests, opens a draft PR
   -> review             writes specs/<ticket>/review.md; loops back to
                         `implement` while blockers remain
-  -> qa                 runs the app per qa-plan.md with live-flow video
-                        evidence onto the PR; writes qa.md + qa-report.json
+  -> qa                 runs the app per qa-plan.md with live-flow WebM
+                        evidence (+ collect-derived GIF PR previews);
+                        writes qa.md + qa-report.json
   -> finalize           posts closing summary, undrafts PR, requests reviewers
   -> human merge                                                [gate: always human]
 ```

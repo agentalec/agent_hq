@@ -15,6 +15,9 @@ confirm:
       is the product? Page chrome — navigation, header, surrounding layout —
       has to be visible. A harness, story, demo page, or reimplementation of
       the spec is not evidence.
+- [ ] Before driving each recorded flow you called
+      `page.screencast.showActions({ cursor: "pointer" })` so clicks and the
+      pointer are visible in the WebM (no custom DOM cursor overlay).
 - [ ] Screenshots (if any) are optional extras unless the media policy has
       `video: false`; they never substitute for video when video is on.
 - [ ] `qa-report.json` summary counts match the criteria; `all_passed` is

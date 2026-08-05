@@ -17,10 +17,14 @@ code under test is there, and you have Bash, Node 22, and Docker.
    `missing-facility-context`.
 3. **Execute steps with Playwright.** Default evidence is **video**
    (`recordVideo`); copy finished clips into
-   `specs/{ticket}/videos/<short-slug>.webm`. Optional stills only when the
-   Evidence media policy (injected above) has `screenshots: true`, or as
-   extras that do not count for pass. Prefer `getByRole` / exact i18n labels
-   from the plan's research map — never invent button names.
+   `specs/{ticket}/videos/<short-slug>.webm`. Before driving each recorded
+   flow, enable the native cursor/click overlay:
+   `await page.screencast.showActions({ cursor: "pointer" })`
+   (Playwright ≥ 1.61). Do not invent a custom DOM cursor. Optional stills
+   only when the Evidence media policy (injected above) has
+   `screenshots: true`, or as extras that do not count for pass. Prefer
+   `getByRole` / exact i18n labels from the plan's research map — never
+   invent button names.
 4. **Validate success signals** from the plan (toast, URL, visible state).
 5. **Write `qa.md` + `qa-report.json`.** Live evidence is primary; code
    inspection belongs only in notes / Limits — never as a `pass`.
@@ -53,6 +57,9 @@ Evidence media is the exception:
 - screenshots → `specs/{ticket}/screenshots/<short-slug>.png` (optional unless
   the media policy disables video)
 
+You write WebM only. Collect may derive a sibling lite `.gif` for the PR
+comment embed — do not spend the run producing GIFs yourself.
+
 Do not commit anything.
 
 ## Live-flow evidence (not code inspection)
@@ -65,8 +72,11 @@ session the setup step left you. A reviewer must recognise the product in the
 recording; if it could be any web page, it is not evidence.
 
 Enable Playwright `recordVideo` on the browser context (respect
-`video_max_seconds` from the media policy). One clip per criterion is enough
-when it includes the interactions the plan marked **Record through**.
+`video_max_seconds` from the media policy). On each page used for a clip,
+call `page.screencast.showActions({ cursor: "pointer" })` **before** the
+interactions so the recording (and any derived GIF) shows pointer and clicks.
+One clip per criterion is enough when it includes the interactions the plan
+marked **Record through**.
 
 Do **not**, under any circumstances:
 
@@ -121,7 +131,9 @@ One subsection per acceptance criterion, each with:
   `![…](specs/{ticket}/screenshots/….png)`
 
 Keep those links repo-relative. The engine rewrites them to ledger URLs when
-it posts this file as a PR comment.
+it posts this file as a PR comment — WebM links with a sibling `.gif` in the
+ledger become a collapsed `<details>` preview; missing GIF degrades to the
+WebM link alone.
 
 Every media path you link must be a file you actually saved.
 

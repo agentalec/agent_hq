@@ -32,6 +32,7 @@ Everything intentionally not in P0, with its restore trigger. Sources: the P0 sc
 - `jira-direct` and `slack-buttons` (relay-based; only on measured mirror/reaction shortfall).
 - `prebuilt-image` / `remote-preview-env` qa-env adapters.
 - ~~Demo-video task (QA video artifacts as raw material).~~ Activated as default evidence on the existing `qa` task (`qa.video: true`, `specs/{ticket}/videos/`, collect-time `qa-report.json` honesty checks) — not a separate task.
+- ~~Playwright user-attachments / release-asset / S3 hosting for inline QA video.~~ Cancelled: PR embeds use collect-derived lite GIF via existing ledger raw URLs + `<details>`; WebM stays fidelity evidence. No attach session.
 - OTEL export.
 - Self-hosted runners (if GitHub-hosted limits bite).
 - Packaging task definitions for reuse by other organizations.

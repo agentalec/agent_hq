@@ -20,6 +20,7 @@ the prior single-job model.
 """
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -35,11 +36,14 @@ from engine.engine import (
 )
 from engine.models import GateDecision, GateRequest, GateStatus, TicketDetails
 from engine.runner import (
+    _derive_qa_gifs,
     _expand_declared,
     _latest_review_round,
     _ledger_image_urls,
     _rework_comments,
     _run_setup,
+    _sibling_gif_path,
+    _webm_to_gif,
     execute_dir_for,
     intake_ticket,
     prepare_dir_for,
@@ -1453,7 +1457,8 @@ def test_ledger_image_urls_rewrites_only_relative_images():
 
 def test_ledger_image_urls_rewrites_relative_video_links():
     """Video evidence is linked as ordinary markdown; collect rewrites to the
-    ledger raw URL (GitHub will not inline-play webm in a PR comment)."""
+    ledger raw URL (GitHub will not inline-play webm in a PR comment).
+    Without a sibling gif this is the degraded (webm-only) path."""
     ledger = {"specs/42/videos/flow.webm"}
     md = (
         "[flow](specs/42/videos/flow.webm)\n"
@@ -1465,6 +1470,88 @@ def test_ledger_image_urls_rewrites_relative_video_links():
     assert f"[flow]({prefix}/tickets/42/artifacts/run7/specs/42/videos/flow.webm)" in out
     assert "_[missing video: `specs/42/videos/gone.webm`" in out
     assert "[remote](https://example.com/x.webm)" in out
+    assert "<details>" not in out
+
+
+def test_ledger_image_urls_wraps_webm_with_sibling_gif_in_details():
+    """When collect derived a sibling .gif, the PR comment gets a collapsed
+    details block with an inline GIF plus a full-fidelity webm link."""
+    ledger = {"specs/42/videos/flow.webm", "specs/42/videos/flow.gif"}
+    md = "[dropdown open — desktop](specs/42/videos/flow.webm)\n"
+    out = _ledger_image_urls(md, "agentalec/agent_hq", "42", "run7", ledger)
+    prefix = "https://raw.githubusercontent.com/agentalec/agent_hq/agent-hq-state"
+    gif_url = f"{prefix}/tickets/42/artifacts/run7/specs/42/videos/flow.gif"
+    webm_url = f"{prefix}/tickets/42/artifacts/run7/specs/42/videos/flow.webm"
+    assert "<details>" in out
+    assert "<summary><b>Evidence: dropdown open — desktop</b> (click to expand)</summary>" in out
+    assert f'<img width="960" alt="flow" src="{gif_url}" />' in out
+    assert f"[Full recording (webm)]({webm_url})" in out
+    assert "</details>" in out
+    # The bare markdown webm link must not remain (replaced by the details block).
+    assert f"[dropdown open — desktop]({webm_url})" not in out
+
+
+def test_sibling_gif_path_filename_convention():
+    assert _sibling_gif_path("specs/7/videos/a.webm") == "specs/7/videos/a.gif"
+    assert _sibling_gif_path("specs/7/videos/a.mp4") == "specs/7/videos/a.gif"
+
+
+def test_derive_qa_gifs_adds_missing_siblings_only(monkeypatch):
+    monkeypatch.setattr("engine.runner._webm_to_gif", lambda _content, _max: b"GIF89a-fake")
+    contents = {
+        "specs/7/videos/a.webm": b"webm-a",
+        "specs/7/videos/b.webm": b"webm-b",
+        "specs/7/videos/b.gif": b"already",
+        "specs/7/qa.md": b"# qa",
+    }
+    derived = _derive_qa_gifs(contents, 30)
+    assert derived == {"specs/7/videos/a.gif": b"GIF89a-fake"}
+
+
+def test_derive_qa_gifs_omits_failures_without_raising(monkeypatch):
+    monkeypatch.setattr("engine.runner._webm_to_gif", lambda _c, _m: None)
+    derived = _derive_qa_gifs({"specs/7/videos/a.webm": b"x"}, 30)
+    assert derived == {}
+
+
+def test_webm_to_gif_roundtrip_with_ffmpeg(tmp_path):
+    """Smoke: real ffmpeg produces a GIF header from a tiny synthetic webm."""
+    webm = tmp_path / "t.webm"
+    proc = subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=blue:s=320x240:d=0.5",
+            "-c:v",
+            "libvpx",
+            "-deadline",
+            "realtime",
+            str(webm),
+        ],
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        pytest.skip(f"ffmpeg cannot encode libvpx here: {proc.stderr[:200]!r}")
+    gif = _webm_to_gif(webm.read_bytes(), max_seconds=5)
+    assert gif is not None
+    assert gif[:6] in (b"GIF89a", b"GIF87a")
+
+
+def test_qa_setup_notes_and_prompt_require_screencast_show_actions():
+    """Cursor/click overlay is Playwright's showActions — not a custom DOM
+    overlay — and must be called out in both the FE setup-notes and the QA
+    prompt so agents cannot skip it."""
+    repos = Path("config/repos.yml").read_text()
+    prompt = Path("tasks/qa/prompts/qa.md").read_text()
+    needle = 'page.screencast.showActions({ cursor: "pointer" })'
+    assert needle in repos or "screencast.showActions" in repos
+    assert 'cursor: "pointer"' in repos
+    assert "screencast.showActions" in prompt
+    assert 'cursor: "pointer"' in prompt
 
 
 def test_collect_rejects_a_dishonest_qa_report(config, taskdefs, store, tmp_path):
