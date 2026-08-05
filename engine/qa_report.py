@@ -1,0 +1,183 @@
+"""Collect-time honesty checks for `specs/{ticket}/qa-report.json`.
+
+Filename convention only — the engine does not special-case the `qa` task id.
+When that path is among a run's ledger artifacts, collect validates schema +
+media policy and refuses a dishonest report (retry via ordinary failure path).
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+from jsonschema import Draft202012Validator
+
+_SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schemas" / "qa-report.schema.json"
+
+_DEFAULT_MEDIA = {
+    "video": True,
+    "screenshots": False,
+    "video_max_seconds": 30,
+}
+
+
+def resolve_qa_media(repo_meta: dict | None) -> dict:
+    """Per-repo evidence policy with defaults (video on, screenshots optional)."""
+    qa = (repo_meta or {}).get("qa") or {}
+    return {
+        "video": qa.get("video", _DEFAULT_MEDIA["video"]),
+        "screenshots": qa.get("screenshots", _DEFAULT_MEDIA["screenshots"]),
+        "video_max_seconds": qa.get("video_max_seconds", _DEFAULT_MEDIA["video_max_seconds"]),
+    }
+
+
+def validate_qa_media_combo(repo: str, repo_meta: dict | None) -> str | None:
+    """Reject a repo that disables every evidence mode after defaults apply."""
+    media = resolve_qa_media(repo_meta)
+    if not media["video"] and not media["screenshots"]:
+        return (
+            f"repos.yml: {repo}/qa: at least one of video or screenshots must be true "
+            "(defaults are video=true, screenshots=false)"
+        )
+    return None
+
+
+def _load_schema() -> dict:
+    return json.loads(_SCHEMA_PATH.read_text())
+
+
+def validate_qa_report(
+    raw: bytes | str,
+    *,
+    ledger: set[str],
+    media: dict | None = None,
+) -> str | None:
+    """None if the report is honest and consistent; else a rejection reason.
+
+    `media` is the resolved policy from `resolve_qa_media`. Default policy:
+    `pass` requires `evidence_kind: live-flow`, empty blocker fields, and ≥1
+    video path present in the ledger. Escape hatch (`video: false`,
+    `screenshots: true`): ≥1 screenshot in the ledger instead.
+    """
+    media = media or dict(_DEFAULT_MEDIA)
+    try:
+        if isinstance(raw, bytes):
+            text = raw.decode("utf-8")
+        else:
+            text = raw
+        doc: dict[str, Any] = json.loads(text)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return f"qa-report.json: not valid JSON: {exc}"
+
+    validator = Draft202012Validator(_load_schema())
+    errors = sorted(validator.iter_errors(doc), key=lambda e: list(e.path))
+    if errors:
+        first = errors[0]
+        json_path = "/".join(str(p) for p in first.path) or "<root>"
+        return f"qa-report.json schema violation: {json_path}: {first.message}"
+
+    criteria = doc["criteria"]
+    counts = {"pass": 0, "fail": 0, "not-exercised": 0}
+    for c in criteria:
+        counts[c["verdict"]] += 1
+
+    summary = doc["summary"]
+    if (
+        summary["pass"] != counts["pass"]
+        or summary["fail"] != counts["fail"]
+        or summary["not_exercised"] != counts["not-exercised"]
+    ):
+        return (
+            "qa-report.json: summary counts do not match criteria verdicts "
+            f"(got pass={summary['pass']} fail={summary['fail']} "
+            f"not_exercised={summary['not_exercised']}; "
+            f"criteria have pass={counts['pass']} fail={counts['fail']} "
+            f"not_exercised={counts['not-exercised']})"
+        )
+
+    # all_passed means every criterion passed. Zero criteria → false (nothing proven).
+    if criteria:
+        expected_all = counts["fail"] == 0 and counts["not-exercised"] == 0
+    else:
+        expected_all = False
+    if summary["all_passed"] != expected_all:
+        return (
+            "qa-report.json: summary.all_passed is inconsistent with criteria "
+            f"(all_passed={summary['all_passed']}, expected {expected_all})"
+        )
+
+    for c in criteria:
+        cid = c["id"]
+        if c["verdict"] == "pass":
+            if c["evidence_kind"] != "live-flow":
+                return (
+                    f"qa-report.json: criterion '{cid}': pass requires "
+                    f"evidence_kind live-flow, got {c['evidence_kind']}"
+                )
+            if c["blocker"] is not None or c["blocker_category"] is not None:
+                return (
+                    f"qa-report.json: criterion '{cid}': pass must have "
+                    "blocker and blocker_category null"
+                )
+            if media.get("video", True):
+                videos = c.get("videos") or []
+                if not videos:
+                    return (
+                        f"qa-report.json: criterion '{cid}': pass requires ≥1 video "
+                        "when qa.video is true"
+                    )
+                missing = [v for v in videos if v not in ledger]
+                if missing:
+                    return f"qa-report.json: criterion '{cid}': video not in ledger: " + ", ".join(
+                        missing
+                    )
+            else:
+                # Escape hatch: screenshots-only mode.
+                shots = c.get("screenshots") or []
+                if not shots:
+                    return (
+                        f"qa-report.json: criterion '{cid}': pass requires ≥1 screenshot "
+                        "when qa.video is false and qa.screenshots is true"
+                    )
+                missing = [s for s in shots if s not in ledger]
+                if missing:
+                    return (
+                        f"qa-report.json: criterion '{cid}': screenshot not in ledger: "
+                        + ", ".join(missing)
+                    )
+        else:
+            # not-exercised, or fail (including a live-flow assertion failure).
+            if not (c.get("blocker") or "").strip():
+                return (
+                    f"qa-report.json: criterion '{cid}': {c['verdict']} requires "
+                    "a non-empty blocker"
+                )
+            if c.get("blocker_category") is None:
+                return (
+                    f"qa-report.json: criterion '{cid}': {c['verdict']} requires blocker_category"
+                )
+
+    return None
+
+
+def format_qa_summary_footer(raw: bytes | str | None) -> str | None:
+    """PR comment footer like `3 pass / 2 not-exercised`, or None if unreadable."""
+    if raw is None:
+        return None
+    try:
+        if isinstance(raw, bytes):
+            doc = json.loads(raw.decode("utf-8"))
+        else:
+            doc = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError):
+        return None
+    summary = doc.get("summary") or {}
+    try:
+        n_pass = int(summary["pass"])
+        n_fail = int(summary["fail"])
+        n_ne = int(summary["not_exercised"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    parts = [f"{n_pass} pass", f"{n_fail} fail", f"{n_ne} not-exercised"]
+    return " / ".join(parts)

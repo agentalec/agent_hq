@@ -13,6 +13,8 @@ from pathlib import Path
 import yaml
 from jsonschema import Draft202012Validator
 
+from engine.qa_report import validate_qa_media_combo
+
 REGISTRIES = ("components", "repos", "projects", "approvers", "budgets")
 
 
@@ -55,6 +57,13 @@ def load_config(config_dir: str | Path, schemas_dir: str | Path) -> Config:
             json_path = "/".join(str(p) for p in error.path) or "<root>"
             errors.append(f"{yml_path.name}: {json_path}: {error.message}")
         loaded[name] = instance
+
+    # Media-policy defaults apply when keys are omitted; reject a combo that
+    # leaves every evidence mode off (schema alone cannot see defaults).
+    for repo, meta in (loaded.get("repos") or {}).items():
+        reason = validate_qa_media_combo(repo, meta if isinstance(meta, dict) else None)
+        if reason:
+            errors.append(reason)
 
     if errors:
         raise ConfigError(errors)
@@ -109,7 +118,5 @@ def validate_task_bindings(taskdefs: dict, config: Config) -> list[str]:
                 )
     initial_task = config.projects.get("initial_task")
     if initial_task not in taskdefs:
-        errors.append(
-            f"projects.yml: initial_task: '{initial_task}' is not a loaded task"
-        )
+        errors.append(f"projects.yml: initial_task: '{initial_task}' is not a loaded task")
     return errors

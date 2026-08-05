@@ -14,6 +14,12 @@ yash-learner/care_fe_agent_hq:
   branch_prefix: agent-hq
   product_area: frontend
   base_branch: develop
+  # Evidence media for QA (defaults if omitted: video true, screenshots false).
+  # Escape hatch for stills-only: video: false, screenshots: true.
+  qa:
+    video: true
+    screenshots: false
+    video_max_seconds: 120
   setup:
     # Mirrors care_fe's own .github/workflows/playwright.yaml -- the recipe
     # the repo already maintains for E2E, not one invented here. Everything
@@ -46,8 +52,12 @@ yash-learner/care_fe_agent_hq:
       - Start the frontend with `npm run preview` -> http://localhost:4000
         (already built; do NOT point it at any non-localhost API)
       - Signed-in browser state: `tests/.auth/user.json`. Load it with
-        `browser.newContext({ storageState: 'tests/.auth/user.json' })` --
-        the login and a seeded facility/patient/questionnaire already exist.
+        `browser.newContext({ storageState: 'tests/.auth/user.json',
+          recordVideo: { dir: '.agent-hq/pw-videos', size: { width: 1440, height: 900 } } })`
+        -- the login and a seeded facility/patient/questionnaire already exist.
+        After each criterion, copy the finished `.webm` into
+        `specs/<ticket>/videos/<short-slug>.webm` (keep clips under ~30s).
       - Chromium is installed. Drive it with Playwright directly; you do not
-        need to add tests to the repo's suite.
+        need to add tests to the repo's suite. Screenshots are optional; video
+        is the required pass evidence unless the repo disables it.
       NOTES

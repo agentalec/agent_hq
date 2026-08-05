@@ -74,6 +74,7 @@ from engine.engine import (
 )
 from engine.handoff import _check_containment, validate_queue
 from engine.models import Event, RunState, TaskRun
+from engine.qa_report import format_qa_summary_footer, resolve_qa_media, validate_qa_report
 from engine.state import _now_iso, artifact_ledger_path
 
 _INJECTION_PATTERNS = ("ignore previous instructions", "disregard your")
@@ -152,49 +153,64 @@ def _latest_review_round(review_md: str) -> str:
     ticket-thread park comment). Falls back to the whole text if the reviewer
     left no round headers."""
     idx = review_md.rfind("\n## Round ")
-    return review_md[idx + 1:] if idx != -1 else review_md
+    return review_md[idx + 1 :] if idx != -1 else review_md
 
 
 _IMG_LINK = re.compile(r"(!\[[^\]]*\]\()(?!https?://)/?([^)\s]+)(\))")
+# Non-image markdown links to video evidence (GitHub won't inline-play raw
+# webm in comments; a clear ledger URL is enough).
+_VIDEO_LINK = re.compile(
+    r"(?<!!)(\[[^\]]*\]\()(?!https?://)/?([^)\s]+\.(?:webm|mp4))(\))",
+    re.IGNORECASE,
+)
 # Where ledger artifacts are readable from (scripts/checkout-state.sh owns the
 # branch name).
 _STATE_BRANCH = "agent-hq-state"
 
 
+def _ledger_raw_url(engine_repo: str, ticket_id: str, run_id: str, rel: str) -> str:
+    path = artifact_ledger_path(ticket_id, run_id, rel)
+    return f"https://raw.githubusercontent.com/{engine_repo}/{_STATE_BRANCH}/{path}"
+
+
 def _ledger_image_urls(
     md: str, engine_repo: str, ticket_id: str, run_id: str, ledger: set[str]
 ) -> str:
-    """Rewrite repo-relative markdown image paths to raw URLs for their copy
-    in this run's ledger namespace on the state branch -- what makes QA's
-    screenshots render when `qa.md` is posted as a PR comment (a relative path
-    renders as a broken image there). Absolute URLs are left alone.
+    """Rewrite repo-relative markdown image (and video) paths to raw URLs for
+    their copy in this run's ledger namespace on the state branch -- what makes
+    QA's screenshots render and video links resolve when `qa.md` is posted as
+    a PR comment (a relative path renders broken there). Absolute URLs are
+    left alone.
 
-    Screenshots live in the ledger with the rest of a run's evidence, not in
-    the work repo: they are QA output, not product code, and committing them
-    to the PR branch would merge them into the product's history. The path is
-    namespaced by producing run, so the link keeps showing what THAT QA pass
-    saw even after a later round.
+    Evidence lives in the ledger with the rest of a run's outputs, not in the
+    work repo: it is QA output, not product code, and committing it to the PR
+    branch would merge it into the product's history. The path is namespaced
+    by producing run, so the link keeps showing what THAT QA pass saw even
+    after a later round.
 
-    An image the run referenced but never produced becomes an explicit
-    "missing" note instead of a URL -- `ledger` is what actually reached the
-    ledger, so the check is against what exists, not what the agent claimed. A
+    A file the run referenced but never produced becomes an explicit "missing"
+    note instead of a URL -- `ledger` is what actually reached the ledger, so
+    the check is against what exists, not what the agent claimed. A
     broken-image icon would read as an infrastructure glitch rather than as
-    what it is: a screenshot that was never taken.
+    what it is: evidence that was never captured.
 
     ponytail: assumes a public engine repo -- raw URLs on a private one need a
     token GitHub's image proxy doesn't have."""
 
-    def rewrite(m: re.Match) -> str:
+    def rewrite_img(m: re.Match) -> str:
         rel = m[2]
         if rel not in ledger:
             return f"_[missing screenshot: `{rel}` — referenced but never produced]_"
-        path = artifact_ledger_path(ticket_id, run_id, rel)
-        return (
-            f"{m[1]}https://raw.githubusercontent.com/{engine_repo}"
-            f"/{_STATE_BRANCH}/{path}{m[3]}"
-        )
+        return f"{m[1]}{_ledger_raw_url(engine_repo, ticket_id, run_id, rel)}{m[3]}"
 
-    return _IMG_LINK.sub(rewrite, md)
+    def rewrite_video(m: re.Match) -> str:
+        rel = m[2]
+        if rel not in ledger:
+            return f"_[missing video: `{rel}` — referenced but never produced]_"
+        return f"{m[1]}{_ledger_raw_url(engine_repo, ticket_id, run_id, rel)}{m[3]}"
+
+    out = _IMG_LINK.sub(rewrite_img, md)
+    return _VIDEO_LINK.sub(rewrite_video, out)
 
 
 def _pr_body(config, ticket_id: str, ticket_body: str) -> str:
@@ -251,7 +267,7 @@ def _write_parent_diff(worktree: Path, base: str | None, tip: str) -> bool:
     base..tip. Computed in EXECUTE's own clone -- prepare has no clone, so it
     only passes these commit ids via bundle.json's `diff_base`/`diff_head`.
     Best-effort — a missing commit or non-git worktree just skips the file."""
-    args = ["git", "-C", str(worktree), "diff", *( [f"{base}..{tip}"] if base else [tip] )]
+    args = ["git", "-C", str(worktree), "diff", *([f"{base}..{tip}"] if base else [tip])]
     try:
         result = subprocess.run(args, capture_output=True, text=True, check=False)
     except OSError:
@@ -265,8 +281,14 @@ def _write_parent_diff(worktree: Path, base: str | None, tip: str) -> bool:
 
 
 def _assemble_prompt(
-    taskdef, details, rework: str | None, parent: dict | None = None, run: dict | None = None,
-    has_setup: bool = False, taskdefs: dict | None = None, config: Config | None = None,
+    taskdef,
+    details,
+    rework: str | None,
+    parent: dict | None = None,
+    run: dict | None = None,
+    has_setup: bool = False,
+    taskdefs: dict | None = None,
+    config: Config | None = None,
 ) -> str:
     parts = [
         f"# Task: {taskdef['id']}",
@@ -310,13 +332,29 @@ def _assemble_prompt(
         parts.append("## Context\n" + "\n\n".join(context))
 
     outputs = [
-        subst(path, details.ticket_id)
-        for path in taskdef.get("outputs", {}).get("artifacts", [])
+        subst(path, details.ticket_id) for path in taskdef.get("outputs", {}).get("artifacts", [])
     ]
     if outputs:
         parts.append(
             "## Required outputs\nCreate every file below before finishing:\n"
             + "\n".join(f"- `{path}`" for path in outputs)
+        )
+    # Filename convention: a run that must produce qa-report.json also gets
+    # the repo's evidence-media policy (defaults: video on, screenshots off).
+    if (
+        any(p.endswith("qa-report.json") for p in outputs)
+        and config is not None
+        and run is not None
+    ):
+        media = resolve_qa_media((config.repos or {}).get(run.get("repo") or "", {}))
+        video_dir = subst("specs/{ticket}/videos/", details.ticket_id)
+        parts.append(
+            "## Evidence media policy\n"
+            f"- `video`: {str(media['video']).lower()} — when true, every `pass` needs "
+            f"a live-flow clip under `{video_dir}`\n"
+            f"- `screenshots`: {str(media['screenshots']).lower()} — optional stills; "
+            "required for pass only when video is false\n"
+            f"- `video_max_seconds`: {media['video_max_seconds']} — soft cap per clip"
         )
     if parent:
         lineage = [f"- parent task: {parent.get('task_id')}"]
@@ -340,10 +378,12 @@ def _assemble_prompt(
         # menu has to say what a task IS, or an agent picking off it is guessing
         # from a name. Generated from the library, so adding a task lists it.
         queueable = [
-            subst(f"`{tid}` -- {taskdefs[tid].get('description', '')}", details.ticket_id).rstrip(" -")
+            subst(f"`{tid}` -- {taskdefs[tid].get('description', '')}", details.ticket_id).rstrip(
+                " -"
+            )
             for tid in sorted(taskdefs or {})
         ]
-        max_entries = (config.budgets.get("max_queue_length", 8) if config else 8)
+        max_entries = config.budgets.get("max_queue_length", 8) if config else 8
         control_lines = [
             "Before finishing, write `.agent-hq/control.json` -- exactly one JSON object:",
             (
@@ -497,7 +537,8 @@ def _expand_declared(root: Path, declared: list[str]) -> list[str]:
             continue  # absent or unsafe: an empty directory artifact is fine
         base = root / rel
         paths.extend(
-            str(p.relative_to(root)) for p in sorted(base.rglob("*"))
+            str(p.relative_to(root))
+            for p in sorted(base.rglob("*"))
             if p.is_file() and p.resolve().is_relative_to(root)
         )
     return paths
@@ -524,7 +565,10 @@ def _stage_files(worktree: Path, candidates: list[str], staging: Path) -> None:
 def _prepare(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskdef) -> dict:
     run_id = run["run_id"]
     claimed = store.claim_run(
-        ticket_id, run_id, now_iso, taskdef["budget"]["max_runtime_min"],
+        ticket_id,
+        run_id,
+        now_iso,
+        taskdef["budget"]["max_runtime_min"],
         in_flight_cap=config.budgets["in_flight_cap"],
     )
     if not claimed:
@@ -533,7 +577,9 @@ def _prepare(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskd
     # Re-read the just-claimed run (deadline is now set).
     _, run, _ = _find_run(store, taskdefs, run_id)
 
-    tracker = adapter_fn("tracker", config.components["tracker"]["adapter"], repo=intake_repo(config))
+    tracker = adapter_fn(
+        "tracker", config.components["tracker"]["adapter"], repo=intake_repo(config)
+    )
     details = tracker.fetch_ticket(ticket_id)
     repo = run.get("repo") or resolve_target_repo(config, details) or next(iter(config.repos))
 
@@ -543,9 +589,7 @@ def _prepare(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskd
     }
     gate_post = taskdef.get("gates", {}).get("post")
     if gate_post:
-        bindings["gate"] = resolve_binding(
-            config, "gate", gate_post[0]["adapter"], details.labels
-        )
+        bindings["gate"] = resolve_binding(config, "gate", gate_post[0]["adapter"], details.labels)
 
     ticket_doc = store.read_state(ticket_id) or {}
     # base_commit resolution (Task 12): the first task on a repo branches
@@ -572,7 +616,8 @@ def _prepare(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskd
     parent = None
     if input_from:
         parent = next(
-            (r for r in ticket_doc.get("runs", []) if r["run_id"] == input_from), None,
+            (r for r in ticket_doc.get("runs", []) if r["run_id"] == input_from),
+            None,
         )
 
     # A ROOT run had no declaring queue entry to choose its inputs, so it
@@ -585,8 +630,12 @@ def _prepare(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskd
 
     store.write(
         lambda txn: txn.update_run(
-            ticket_id, run_id, bindings=bindings, base_commit=base_commit,
-            input_from_run_id=input_from, input_artifacts=list(inherited),
+            ticket_id,
+            run_id,
+            bindings=bindings,
+            base_commit=base_commit,
+            input_from_run_id=input_from,
+            input_artifacts=list(inherited),
         )
     )
     run = {**run, "input_from_run_id": input_from, "input_artifacts": list(inherited)}
@@ -596,8 +645,14 @@ def _prepare(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskd
     setup_cmd = eng.resolve_setup(config, repo, taskdef["id"])
     bundle = {
         "prompt": _assemble_prompt(
-            taskdef, details, rework, parent, run={**run, "repo": repo},
-            has_setup=bool(setup_cmd), taskdefs=taskdefs, config=config,
+            taskdef,
+            details,
+            rework,
+            parent,
+            run={**run, "repo": repo},
+            has_setup=bool(setup_cmd),
+            taskdefs=taskdefs,
+            config=config,
         ),
         "tools": taskdef.get("tools", []),
         "deadline": run.get("deadline"),
@@ -650,9 +705,14 @@ def _run_setup(command: str | None, worktree: Path, deadline: str | None) -> dic
     timeout = _seconds_until(deadline)
     try:
         proc = subprocess.run(
-            ["bash", "-lc", command], cwd=worktree, env=env,
-            capture_output=True, text=True, timeout=timeout, check=False
-)
+            ["bash", "-lc", command],
+            cwd=worktree,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
     except subprocess.TimeoutExpired:
         detail = f"setup timed out after {timeout:.0f}s: {command}"
     else:
@@ -662,7 +722,10 @@ def _run_setup(command: str | None, worktree: Path, deadline: str | None) -> dic
         detail = f"setup failed (exit {proc.returncode}): {command}\n{tail}"
 
     return {
-        "outcome": "failure", "usage_known": True, "cost_usd": 0.0, "tokens": 0,
+        "outcome": "failure",
+        "usage_known": True,
+        "cost_usd": 0.0,
+        "tokens": 0,
         "detail": detail,
     }
 
@@ -671,8 +734,7 @@ def _seconds_until(deadline: str | None) -> float | None:
     if not deadline:
         return None
     remaining = (
-        datetime.strptime(deadline, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
-        - datetime.now(UTC)
+        datetime.strptime(deadline, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC) - datetime.now(UTC)
     ).total_seconds()
     return max(remaining, 1.0)
 
@@ -757,14 +819,20 @@ def _collect(
     out_dir = execute_dir_for(config, run_id)
     result_path = out_dir / "execute-result.json"
     default_result = {
-        "outcome": execute_outcome or "failure", "usage_known": False, "cost_usd": None, "tokens": None,
+        "outcome": execute_outcome or "failure",
+        "usage_known": False,
+        "cost_usd": None,
+        "tokens": None,
     }
     result = json.loads(result_path.read_text()) if result_path.exists() else default_result
 
     schema_reason = _validate_execute_result(result)
     if schema_reason is not None:
         result = {
-            "outcome": "failure", "usage_known": False, "cost_usd": None, "tokens": None,
+            "outcome": "failure",
+            "usage_known": False,
+            "cost_usd": None,
+            "tokens": None,
             "detail": schema_reason,
         }
 
@@ -804,14 +872,18 @@ def _collect(
     if outcome != "success":
         eng._mark_failed(store, ticket_id, run_id, "run.failed", "failed")
         _handle_failure(
-            store, config, taskdefs, taskdef, ticket_id, {**run, "state": "FAILED"}, adapter_fn,
+            store,
+            config,
+            taskdefs,
+            taskdef,
+            ticket_id,
+            {**run, "state": "FAILED"},
+            adapter_fn,
             block_on_unknown_usage=True,
         )
         return result
 
-    _collect_success(
-        config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskdef, out_dir
-    )
+    _collect_success(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskdef, out_dir)
     return result
 
 
@@ -841,7 +913,9 @@ def _validate_staged_declared(staging_dir: Path, declared: list[str]) -> str | N
     return None
 
 
-def _fail_execute_artifact(store, config, taskdefs, taskdef, ticket_id, run, adapter_fn, reason: str) -> None:
+def _fail_execute_artifact(
+    store, config, taskdefs, taskdef, ticket_id, run, adapter_fn, reason: str
+) -> None:
     """A transport-boundary failure discovered AFTER a trustworthy
     execute-result (a declared output didn't survive transport, or the work
     patch failed to `git apply`): same retry-per-budget/BLOCK policy as any
@@ -853,18 +927,29 @@ def _fail_execute_artifact(store, config, taskdefs, taskdef, ticket_id, run, ada
         lambda txn: txn.append_event(
             ticket_id,
             Event(
-                event_id=f"{run_id}:artifact_rejected", kind="run.artifact_rejected",
-                ticket_id=ticket_id, run_id=run_id, detail=reason,
+                event_id=f"{run_id}:artifact_rejected",
+                kind="run.artifact_rejected",
+                ticket_id=ticket_id,
+                run_id=run_id,
+                detail=reason,
             ).to_dict(),
         )
     )
     _handle_failure(
-        store, config, taskdefs, taskdef, ticket_id, {**run, "state": "FAILED"}, adapter_fn,
+        store,
+        config,
+        taskdefs,
+        taskdef,
+        ticket_id,
+        {**run, "state": "FAILED"},
+        adapter_fn,
         block_on_unknown_usage=True,
     )
 
 
-def _fail_control_invalid(store, config, taskdefs, taskdef, ticket_id, run, adapter_fn, reason: str) -> None:
+def _fail_control_invalid(
+    store, config, taskdefs, taskdef, ticket_id, run, adapter_fn, reason: str
+) -> None:
     """A control.json that the pure validator (or apply_queue' state-
     dependent guards) rejected: same retry-per-budget/BLOCK policy as any
     other run failure, plus one generic handoff.rejected audit event (no
@@ -875,13 +960,22 @@ def _fail_control_invalid(store, config, taskdefs, taskdef, ticket_id, run, adap
         lambda txn: txn.append_event(
             ticket_id,
             Event(
-                event_id=f"{run_id}:handoff_rejected", kind="handoff.rejected", ticket_id=ticket_id,
-                run_id=run_id, detail=reason,
+                event_id=f"{run_id}:handoff_rejected",
+                kind="handoff.rejected",
+                ticket_id=ticket_id,
+                run_id=run_id,
+                detail=reason,
             ).to_dict(),
         )
     )
     _handle_failure(
-        store, config, taskdefs, taskdef, ticket_id, {**run, "state": "FAILED"}, adapter_fn,
+        store,
+        config,
+        taskdefs,
+        taskdef,
+        ticket_id,
+        {**run, "state": "FAILED"},
+        adapter_fn,
         block_on_unknown_usage=True,
     )
 
@@ -892,8 +986,12 @@ def _block_from_control(store, config, adapter_fn, ticket_id, run_id, reason: st
         txn.append_event(
             ticket_id,
             Event(
-                event_id=f"{run_id}:blocked", kind="run.blocked", ticket_id=ticket_id,
-                run_id=run_id, state=RunState.BLOCKED, detail=reason,
+                event_id=f"{run_id}:blocked",
+                kind="run.blocked",
+                ticket_id=ticket_id,
+                run_id=run_id,
+                state=RunState.BLOCKED,
+                detail=reason,
             ).to_dict(),
         )
         txn.set_block(ticket_id, reason=reason, source="task", interrupted_run=run_id)
@@ -920,7 +1018,9 @@ def _collect_success(
     if not check_claim_active(store.read_state(ticket_id), run_id):
         return
 
-    tracker = adapter_fn("tracker", config.components["tracker"]["adapter"], repo=intake_repo(config))
+    tracker = adapter_fn(
+        "tracker", config.components["tracker"]["adapter"], repo=intake_repo(config)
+    )
     details = tracker.fetch_ticket(ticket_id)
     repo = run.get("repo") or resolve_target_repo(config, details) or next(iter(config.repos))
     base_commit = run.get("base_commit")
@@ -930,7 +1030,11 @@ def _collect_success(
 
     control = _read_control(out_dir / "control.json")
     accepted, reason = validate_queue(
-        control, taskdef=taskdef, taskdefs=taskdefs, config=config, worktree=staging_dir,
+        control,
+        taskdef=taskdef,
+        taskdefs=taskdefs,
+        config=config,
+        worktree=staging_dir,
         run=TaskRun.from_dict(run),
     )
     if reason is not None:
@@ -968,6 +1072,30 @@ def _collect_success(
         if (staging_dir / rel_path).is_file()
     }
 
+    # Filename convention (like review.md / qa.md posting): when a run produced
+    # qa-report.json, collect refuses a dishonest report before anything is
+    # marked SUCCEEDED or posted to the PR.
+    qa_report_path = subst("specs/{ticket}/qa-report.json", ticket_id)
+    if qa_report_path in artifact_contents:
+        media = resolve_qa_media(config.repos.get(repo, {}))
+        bad_report = validate_qa_report(
+            artifact_contents[qa_report_path],
+            ledger=set(artifact_contents),
+            media=media,
+        )
+        if bad_report is not None:
+            _fail_execute_artifact(
+                store,
+                config,
+                taskdefs,
+                taskdef,
+                ticket_id,
+                run,
+                adapter_fn,
+                bad_report,
+            )
+            return
+
     # -- Land the work patch on the ticket's stable per-issue branch. This
     # is the ONLY place a work-repo clone/push happens (Task 12: execute
     # never holds a push credential) -- a fresh clone, `git apply` the
@@ -985,12 +1113,21 @@ def _collect_success(
             agent.apply_patch(collect_clone, patch_text)
         except RuntimeError as exc:
             _fail_execute_artifact(
-                store, config, taskdefs, taskdef, ticket_id, run, adapter_fn,
+                store,
+                config,
+                taskdefs,
+                taskdef,
+                ticket_id,
+                run,
+                adapter_fn,
                 f"work patch failed to apply: {exc}",
             )
             return
     land = agent.land_branch(
-        run_id, collect_clone, branch, base_branch,
+        run_id,
+        collect_clone,
+        branch,
+        base_branch,
         _commit_message(
             config, taskdef["id"], ticket_id, control.get("summary", ""), details.title, run_id
         ),
@@ -1001,13 +1138,20 @@ def _collect_success(
     # second one -- at most one PR per repo per ticket, opened only once the
     # work has actually landed.
     existing_work_repo = next(
-        (wr for wr in (store.read_state(ticket_id) or {}).get("work_repos", []) if wr["repo"] == repo),
+        (
+            wr
+            for wr in (store.read_state(ticket_id) or {}).get("work_repos", [])
+            if wr["repo"] == repo
+        ),
         None,
     )
     pr_ref = (existing_work_repo or {}).get("pr_ref")
     if land["landed"] and taskdef.get("opens_pr") and not pr_ref:
         pr_ref = agent.open_draft_pr(
-            repo, branch, base_branch, details.title or f"hq: {ticket_id}",
+            repo,
+            branch,
+            base_branch,
+            details.title or f"hq: {ticket_id}",
             _pr_body(config, ticket_id, details.body),
         )
 
@@ -1030,17 +1174,27 @@ def _collect_success(
             txn.append_event(
                 ticket_id,
                 Event(
-                    event_id=f"{run_id}:branch_conflict", kind="run.blocked", ticket_id=ticket_id,
-                    run_id=run_id, state=RunState.BLOCKED, detail="branch_conflict",
+                    event_id=f"{run_id}:branch_conflict",
+                    kind="run.blocked",
+                    ticket_id=ticket_id,
+                    run_id=run_id,
+                    state=RunState.BLOCKED,
+                    detail="branch_conflict",
                 ).to_dict(),
             )
-            txn.set_block(ticket_id, reason="branch_conflict", source="task", interrupted_run=run_id)
+            txn.set_block(
+                ticket_id, reason="branch_conflict", source="task", interrupted_run=run_id
+            )
             result["blocked"] = True
             return
 
         output_commit = land["head"]
         txn.upsert_work_repo(
-            ticket_id, repo, branch=branch, base_branch=base_branch, recorded_head=output_commit,
+            ticket_id,
+            repo,
+            branch=branch,
+            base_branch=base_branch,
+            recorded_head=output_commit,
             pr_ref=pr_ref,
         )
         for rel_path, content in artifact_contents.items():
@@ -1099,7 +1253,8 @@ def _collect_success(
 
         if accepted and gate_entry and not auto_approved:
             txn.update_run(
-                ticket_id, run_id,
+                ticket_id,
+                run_id,
                 artifacts=declared,
                 output_commit=output_commit,
                 pr_ref=pr_ref,
@@ -1123,8 +1278,11 @@ def _collect_success(
                 txn.append_event(
                     ticket_id,
                     Event(
-                        event_id=f"{run_id}:{h.key}:proposed", kind="handoff.proposed",
-                        ticket_id=ticket_id, run_id=run_id, detail=h.reason,
+                        event_id=f"{run_id}:{h.key}:proposed",
+                        kind="handoff.proposed",
+                        ticket_id=ticket_id,
+                        run_id=run_id,
+                        detail=h.reason,
                     ).to_dict(),
                 )
             result["gated"] = True
@@ -1134,8 +1292,10 @@ def _collect_success(
             txn.append_event(
                 ticket_id,
                 Event(
-                    event_id=f"{run_id}:auto_approval", kind="gate.decided",
-                    ticket_id=ticket_id, run_id=run_id,
+                    event_id=f"{run_id}:auto_approval",
+                    kind="gate.decided",
+                    ticket_id=ticket_id,
+                    run_id=run_id,
                     detail=(
                         f"auto-approved by task config (would have asked "
                         f"{gate_entry.get('approvers')})"
@@ -1150,21 +1310,31 @@ def _collect_success(
             txn.append_event(
                 ticket_id,
                 Event(
-                    event_id=f"{run_id}:{h.key}:proposed", kind="handoff.proposed",
-                    ticket_id=ticket_id, run_id=run_id, detail=h.reason,
+                    event_id=f"{run_id}:{h.key}:proposed",
+                    kind="handoff.proposed",
+                    ticket_id=ticket_id,
+                    run_id=run_id,
+                    detail=h.reason,
                 ).to_dict(),
             )
         if accepted or cancel_keys or cancel_pending:
             applied_ids, apply_reason = apply_queue(
-                txn, config, taskdefs, ticket_id, run, accepted,
-                cancel_keys=cancel_keys, cancel_pending=cancel_pending,
+                txn,
+                config,
+                taskdefs,
+                ticket_id,
+                run,
+                accepted,
+                cancel_keys=cancel_keys,
+                cancel_pending=cancel_pending,
             )
             result["applied_ids"] = applied_ids
             result["apply_reason"] = apply_reason
             if apply_reason is not None:
                 return
         txn.update_run(
-            ticket_id, run_id,
+            ticket_id,
+            run_id,
             artifacts=declared,
             output_commit=output_commit,
             pr_ref=pr_ref,
@@ -1189,7 +1359,13 @@ def _collect_success(
         # so this takes the ordinary invalid-control path (retry per budget,
         # then block), same as a schema violation.
         _fail_control_invalid(
-            store, config, taskdefs, taskdef, ticket_id, run, adapter_fn,
+            store,
+            config,
+            taskdefs,
+            taskdef,
+            ticket_id,
+            run,
+            adapter_fn,
             result["reject_reason"],
         )
         return
@@ -1206,7 +1382,11 @@ def _collect_success(
     if result.get("blocked"):
         eng.set_status_label(config, adapter_fn, ticket_id, "BLOCKED")
         _escalate(
-            store, config, adapter_fn, ticket_id, run_id,
+            store,
+            config,
+            adapter_fn,
+            ticket_id,
+            run_id,
             "Work branch conflict: agent-hq/"
             f"{ticket_id} moved unexpectedly since this run started; blocked pending operator review.",
         )
@@ -1220,14 +1400,23 @@ def _collect_success(
                 txn.append_event(
                     ticket_id,
                     Event(
-                        event_id=f"{run_id}:{h.key}:rejected", kind="handoff.rejected",
-                        ticket_id=ticket_id, run_id=run_id, detail=h.reason,
+                        event_id=f"{run_id}:{h.key}:rejected",
+                        kind="handoff.rejected",
+                        ticket_id=ticket_id,
+                        run_id=run_id,
+                        detail=h.reason,
                     ).to_dict(),
                 )
 
         store.write(reject_txn)
         _handle_failure(
-            store, config, taskdefs, taskdef, ticket_id, {**run, "state": "FAILED"}, adapter_fn,
+            store,
+            config,
+            taskdefs,
+            taskdef,
+            ticket_id,
+            {**run, "state": "FAILED"},
+            adapter_fn,
             block_on_unknown_usage=True,
         )
         return
@@ -1241,26 +1430,31 @@ def _collect_success(
     review_path = subst("specs/{ticket}/review.md", ticket_id)
     if pr_ref and review_path in declared:
         eng.post_pr_comment(
-            config, adapter_fn, pr_ref,
+            config,
+            adapter_fn,
+            pr_ref,
             "### agent-hq review\n\n"
             + _latest_review_round(_as_text(artifact_contents.get(review_path))),
             f"{run_id}:pr-review",
         )
 
     # Same convention for qa.md, whole file rather than a single round -- its
-    # screenshots landed in this run's own patch, so their repo-relative links
-    # are rewritten to raw URLs on the commit that just landed them.
+    # evidence landed in this run's ledger, so repo-relative image/video links
+    # are rewritten to raw state-branch URLs. A qa-report.json footer (when
+    # present) adds honest pass/fail/not-exercised counts.
     qa_path = subst("specs/{ticket}/qa.md", ticket_id)
     if pr_ref and qa_path in declared:
-        eng.post_pr_comment(
-            config, adapter_fn, pr_ref,
-            "### agent-hq QA\n\n"
-            + _ledger_image_urls(
-                _as_text(artifact_contents.get(qa_path)),
-                intake_repo(config), ticket_id, run_id, set(artifact_contents),
-            ),
-            f"{run_id}:pr-qa",
+        body = "### agent-hq QA\n\n" + _ledger_image_urls(
+            _as_text(artifact_contents.get(qa_path)),
+            intake_repo(config),
+            ticket_id,
+            run_id,
+            set(artifact_contents),
         )
+        footer = format_qa_summary_footer(artifact_contents.get(qa_report_path))
+        if footer:
+            body = f"{body}\n\n**{footer}**"
+        eng.post_pr_comment(config, adapter_fn, pr_ref, body, f"{run_id}:pr-qa")
 
     _complete_if_queue_empty(
         store, config, adapter_fn, ticket_id, {**run, "state": "SUCCEEDED", "artifacts": declared}
@@ -1284,7 +1478,9 @@ def intake_ticket(issue_ref: str, event_key: str, config, taskdefs, store, adapt
     rejection happens before any state/artifact write."""
     adapter_fn = adapter_fn or eng._default_adapter_fn(config)
 
-    tracker = adapter_fn("tracker", config.components["tracker"]["adapter"], repo=intake_repo(config))
+    tracker = adapter_fn(
+        "tracker", config.components["tracker"]["adapter"], repo=intake_repo(config)
+    )
     details = tracker.fetch_ticket(issue_ref.rsplit("#", 1)[-1])
     ticket_id = details.ticket_id
 
@@ -1363,8 +1559,12 @@ def intake_ticket(issue_ref: str, event_key: str, config, taskdefs, store, adapt
     # a reason for a ticket that is no longer blocked.
     store.write(
         lambda txn: txn.set_ticket(
-            ticket_id, status="ACTIVE", pinned_comment_id=pinned_id,
-            block_reason=None, block_source=None, interrupted_run_id=None,
+            ticket_id,
+            status="ACTIVE",
+            pinned_comment_id=pinned_id,
+            block_reason=None,
+            block_source=None,
+            interrupted_run_id=None,
         )
     )
     eng.set_status_label(config, adapter_fn, ticket_id, "ACTIVE")
