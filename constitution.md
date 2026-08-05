@@ -11,6 +11,8 @@ Every ticket's working artifacts live under `specs/<ticket>/`:
 - `classification.json` -- `{"classification": "crud"|"beyond-crud", "reasoning": "..."}`
 - `tasks.md` -- the ordered implementation breakdown
 - `review.md` -- review findings
+- `qa-plan.md` -- UI traversal plan for QA (research map + steps)
+- `qa.md` / `qa-report.json` -- QA verdicts + structured honesty record
 - `summary.md` -- the closing summary
 
 Don't write ticket artifacts anywhere else, and don't touch another ticket's

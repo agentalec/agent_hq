@@ -6,7 +6,11 @@ skills:
   - prompts/implement.md
 opens_pr: true
 outputs:
-  artifacts: []
+  artifacts:
+    # Traversal plan for QA: research map + Action/Expect steps per user-facing
+    # criterion. Required even when there is nothing user-facing (say so in the
+    # file) so review can forward it and QA never invents a journey from scratch.
+    - specs/{ticket}/qa-plan.md
 budget:
   max_cost_usd: 15
   max_runtime_min: 90

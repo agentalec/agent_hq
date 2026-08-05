@@ -171,8 +171,9 @@ There is exactly one artifact namespace and one input source:
 - **Directory artifacts.** An `outputs.artifacts` entry ending in `/` is a
   directory: the engine collects whatever files it holds, recursively, zero
   or more (`engine.runner._expand_declared`). Use it for output a task cannot
-  name in advance -- `qa` writes one screenshot per acceptance criterion it
-  managed to exercise, which is not a list anyone can write into `task.yml`.
+  name in advance -- `qa` writes one video (and optional screenshots) per
+  acceptance criterion it managed to exercise, which is not a list anyone can
+  write into `task.yml`.
   Unlike a plain entry they are never *required*: an empty or absent
   directory is a valid run. They expand to concrete paths before anything is
   recorded, so `run.artifacts`, handoff forwarding, and `_inputs_ready` only
@@ -358,13 +359,13 @@ somewhere unexpected.
 | arch-plan | Defined; **no prompt queues it**. Nothing to activate beyond a prompt that names it -- any task in the library is queueable. |
 | arch-approval | Defined; **no prompt queues it**. Confirms the plan artifacts, no changes; gated (`default`). |
 | breakdown | Defined; **no prompt queues it**. Would queue one `implement` entry per affected repo. |
-| implement | Routed through. `opens_pr: true`; its prompt queues `review`. |
-| review | Routed through. Its prompt loops back to `implement` while blockers remain (prompt-capped at 3 rounds; on the cap it queues nothing and the engine posts the accumulated `review.md` findings to the thread, parking awaiting-human with the PR left in draft), else queues `qa`. Round memory is `review.md` forwarded around the loop as an input artifact. Every review round also reflects its latest-round findings onto the work-repo PR as a comment (`engine.engine.post_pr_comment`, in the credentialed collect phase -- the read-only agent can't, PD-5). |
+| implement | Routed through. `opens_pr: true`; its prompt queues `review`. Writes required `specs/{ticket}/qa-plan.md` (research map + Action/Expect/Record steps per user-facing criterion) and forwards it with `spec.md` so QA never invents a click path from scratch. |
+| review | Routed through. Its prompt loops back to `implement` while blockers remain (prompt-capped at 3 rounds; on the cap it emits `outcome: blocked` and the engine posts the accumulated `review.md` findings to the thread, parking awaiting-human with the PR left in draft), else queues `qa`, forwarding `spec.md`, `review.md`, and `qa-plan.md`. Round memory is `review.md` forwarded around the loop as an input artifact. Every review round also reflects its latest-round findings onto the work-repo PR as a comment (`engine.engine.post_pr_comment`, in the credentialed collect phase -- the read-only agent can't, PD-5). |
 | finalize | Routed through, and named by `config.projects.final_task`: writes `summary.md`, queues nothing, and its completion is what finishes the ticket (see "Where the route ends"). Still no task-name special case in the engine -- the name lives in config, and pointing `final_task` elsewhere moves the endpoint. |
 | clinical | Defined; **no prompt queues it**. Gated (`clinical-reviewers`, `default` adapter). |
 | poll | Converted, defined, **unwired** -- needs the P1 reaction-based `poll` adapter (`docs/roadmap.md`); no task currently hands off to it. |
 | docs | Defined; **no prompt queues it** -- it belongs between `qa` and `finalize`, so `qa`'s prompt would name it. |
-| qa | Routed through. Its prompt always queues `finalize` -- `qa` reports, it never gates. `writes_code: false`, so the engine discards its work patch outright: everything it leaves in the worktree is scratch, and an instruction to keep scratch under `.agent-hq/` is advisory where discarding is not. Stands the app up with the work repo's own tooling inside the devcontainer and screenshots each acceptance criterion; it declares **no** `components` port, so the deferred `qa-env` binding (`docs/ports/qa-env.md`) is still not required. Screenshots are ledger artifacts under the **directory artifact** `specs/{ticket}/screenshots/` -- kept out of the work repo, which is for product code -- and collect rewrites `qa.md`'s relative image links to their state-branch URLs before posting it to the PR (`engine.runner._ledger_image_urls`). |
+| qa | Routed through. Its prompt always queues `finalize` -- `qa` reports, it never gates. `writes_code: false`, so the engine discards its work patch outright: everything it leaves in the worktree is scratch, and an instruction to keep scratch under `.agent-hq/` is advisory where discarding is not. Stands the app up with the work repo's own tooling inside the devcontainer and executes `qa-plan.md` with Playwright `recordVideo` (default evidence); it declares **no** `components` port, so the deferred `qa-env` binding (`docs/ports/qa-env.md`) is still not required. Required `qa-report.json` is validated at collect (`engine.qa_report.validate_qa_report`, filename convention — no task-id special case): a `pass` needs `live-flow` + ≥1 video in the ledger (repo `qa.video`, default true); screenshots stay optional (`qa.screenshots`). Directory artifacts `specs/{ticket}/videos/` and `screenshots/` are kept out of the work repo; collect rewrites `qa.md`'s relative media links to state-branch URLs and appends summary counts (`3 pass / 2 not-exercised`) before posting to the PR (`engine.runner._ledger_image_urls`). |
 
 None of the above is a name the engine special-cases; every row describes a
 task-graph state (wired vs. defined-but-unwired), not an engine code path.

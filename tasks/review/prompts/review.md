@@ -43,9 +43,10 @@ Never edit the implementation — your tools are read-only.
 ## Decide what runs next (see Control output below)
 
 - **No blockers remain** (only should-fix / nits, or clean): queue `qa`,
-  forwarding `specs/{ticket}/spec.md` and `specs/{ticket}/review.md`. QA
-  exercises the change in a running app and screenshots it onto the PR before
-  `finalize` — you do not queue `finalize` yourself.
+  forwarding `specs/{ticket}/spec.md`, `specs/{ticket}/review.md`, and
+  `specs/{ticket}/qa-plan.md` (when you were given it — QA executes that
+  traversal plan with live-flow video before `finalize`). You do not queue
+  `finalize` yourself.
 - **Blockers remain and N < 3**: queue `implement`, forwarding
   `specs/{ticket}/spec.md` and `specs/{ticket}/review.md`; the entry's
   `reason` must name the blockers to fix.
