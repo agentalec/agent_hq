@@ -234,63 +234,12 @@ priority rather than duplicating the roadmap item silently.
 
 # Pass malformed control-output feedback to retry attempts
 
-## Problem
-
-When a task emits an invalid `.agent-hq/control.json`, the engine records a
-`handoff.rejected` event and retries the task when its retry budget allows it.
-
-The retry does not receive the rejection reason.
-
-The retry prompt currently reads feedback only from `run.rework` events for
-the retry run. A malformed control document is recorded as
-`handoff.rejected` on the failed attempt, so attempt 2 starts with the same
-prompt and can repeat the exact same schema mistake.
-
-Observed example:
-
-```text
-control.json schema violation: <root>: 'outcome' is a required property
-```
-
-Ticket 4 then retried the task and failed with the same validation error.
-
-## Expected behavior
-
-A retry caused by invalid control output should receive concise, safe feedback
-explaining why the prior attempt was rejected.
-
-For the example above, the retry should be told:
-
-```text
-Your previous control.json was rejected because it was missing the required
-"outcome" property. Produce a schema-valid control.json.
-```
-
-## Likely implementation options
-
-1. Write the rejection reason as retry feedback for the newly queued retry.
-2. Extend retry feedback loading to include the failed predecessor's relevant
-   `handoff.rejected` event.
-
-The implementation must preserve the distinction between a human-requested
-`run.rework` event and an engine-generated validation rejection.
-
-## Acceptance criteria
-
-- A control-schema rejection followed by a retry includes the rejection reason
-  in the retry prompt.
-- The retry receives feedback only from its own immediate failed predecessor,
-  not unrelated ticket events.
-- The feedback is concise and does not expose secrets or raw sensitive output.
-- Human rework comments continue to work unchanged.
-- A regression test reproduces invalid control output, retry creation, and a
-  retry prompt containing the validation reason.
-- The retry can produce a corrected control document without manual
-  intervention.
-
-## Reference
-
-- [Ticket 4 events](https://github.com/yash-learner/agent_hq/blob/agent-hq-state/tickets/4/events.jsonl)
+**Shipped.** `_handle_failure` now appends `run.rework` on the retry run after
+`handoff.rejected` / `run.artifact_rejected`, with `actor: "engine"` and
+`source: "{failed_id}:handoff_rejected"` (or `:artifact_rejected`). Prepare
+surfaces it under `## Requested changes`. Covered by
+`test_invalid_control_retry_prepare_prompt_contains_rejection` in
+`tests/test_runner_e2e.py`.
 
 ---
 

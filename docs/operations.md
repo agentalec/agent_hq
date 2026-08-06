@@ -178,7 +178,9 @@ transport, not durable state.
 **`ffmpeg` on collect.** Collect may derive lite GIFs from QA WebM ledger
 artifacts so PR comments can embed motion via GitHub's image proxy
 (`engine.runner._derive_qa_gifs`). `run.yml`'s collect job installs
-`ffmpeg` via apt before the phase runs. Local collect against a worktree
+`ffmpeg` via apt before the phase runs; unit CI (`.github/workflows/ci.yml`)
+installs it too so `test_webm_to_gif_roundtrip_with_ffmpeg` can run (the
+test skips when ffmpeg is absent locally). Local collect against a worktree
 with WebMs needs `ffmpeg` on `PATH` for the same happy path; if it is
 missing, the run still succeeds and the PR comment degrades to a plain
 WebM link (pass validation continues to require WebM, never GIF).

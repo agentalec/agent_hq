@@ -20,6 +20,7 @@ the prior single-job model.
 """
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -31,6 +32,7 @@ from engine.engine import (
     _complete_if_queue_empty,
     dispatch,
     post_pr_comment,
+    resolve_format,
     resolve_setup,
     sweep,
 )
@@ -41,6 +43,7 @@ from engine.runner import (
     _latest_review_round,
     _ledger_image_urls,
     _rework_comments,
+    _run_format,
     _run_setup,
     _sibling_gif_path,
     _webm_to_gif,
@@ -1005,6 +1008,65 @@ def test_collect_invalid_control_fails_and_retries(config, taskdefs, store, tmp_
     assert len(retries) == 1
     rejected = [e for e in store.read_events("7") if e["kind"] == "handoff.rejected"]
     assert rejected and "schema" in rejected[0]["detail"]
+    # Retry learns why: engine writes run.rework on the NEW run so prepare's
+    # "## Requested changes" channel carries the predecessor rejection.
+    new_id = retries[0]["run_id"]
+    rework = [
+        e for e in store.read_events("7") if e["kind"] == "run.rework" and e["run_id"] == new_id
+    ]
+    assert len(rework) == 1
+    assert rework[0]["actor"] == "engine"
+    assert rework[0]["source"] == "buildrun:handoff_rejected"
+    assert "Previous attempt rejected:" in rework[0]["detail"]
+    assert "schema" in rework[0]["detail"]
+
+
+def test_invalid_control_retry_prepare_prompt_contains_rejection(config, taskdefs, store, tmp_path):
+    """Regression (ticket 4): blind retries after handoff.rejected burned
+    budget repeating the same missing-`outcome` mistake. Prepare must surface
+    the rejection under ## Requested changes."""
+    _seed(
+        store,
+        _run_dict(
+            "buildrun", "build", state="RUNNING", attempt=0, source_event_id="evt", enqueue_index=0
+        ),
+    )
+    _write_execute_result(config, "buildrun")
+    # Missing required `outcome` -- the live failure mode on tickets 4/8/11.
+    _write_control(config, "buildrun", {"queue": []})
+    adapters = _adapters(tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"))
+    run_task(
+        "buildrun",
+        "collect",
+        config,
+        taskdefs,
+        store,
+        now_iso="2026-07-18T09:00:00Z",
+        adapter_fn=adapters,
+    )
+
+    retries = [
+        r
+        for r in store.read_state("7")["runs"]
+        if r["task_id"] == "build" and r["attempt"] == 1 and r["state"] == "QUEUED"
+    ]
+    assert len(retries) == 1
+    new_id = retries[0]["run_id"]
+
+    out = run_task(
+        new_id,
+        "prepare",
+        config,
+        taskdefs,
+        store,
+        now_iso="2026-07-18T09:05:00Z",
+        adapter_fn=adapters,
+    )
+    assert out["claimed"] is True
+    prompt = out["bundle"]["prompt"]
+    assert "## Requested changes" in prompt
+    assert "Previous attempt rejected:" in prompt
+    assert "outcome" in prompt.lower() or "schema" in prompt.lower()
 
 
 def test_collect_patch_apply_failure_fails_run_never_lands(config, taskdefs, store, tmp_path):
@@ -1357,6 +1419,157 @@ def test_resolve_setup_prefers_the_task_over_default(config):
     assert resolve_setup(config, None, "qa") is None
 
 
+def test_resolve_format_prefers_the_task_over_default(config):
+    repo = "yash-learner/care_fe_agent_hq"
+    config.repos[repo]["format"] = {
+        "default": "prettier --write .",
+        "implement": "prettier --write src",
+    }
+
+    assert resolve_format(config, repo, "implement") == "prettier --write src"
+    assert resolve_format(config, repo, "review") == "prettier --write ."
+    assert resolve_format(config, "other/org-repo", "implement") is None
+    assert resolve_format(config, None, "implement") is None
+
+
+def test_run_format_failure_is_a_normal_run_failure(tmp_path):
+    result = _run_format("echo 'prettier blew up' >&2; exit 2", _mkworktree(tmp_path), None)
+
+    assert result["outcome"] == "failure"
+    assert result["usage_known"] is True
+    assert "format failed (exit 2)" in result["detail"]
+    assert "prettier blew up" in result["detail"]
+
+
+def test_execute_runs_format_before_materialize_when_writes_code(
+    config, taskdefs, store, tmp_path, monkeypatch
+):
+    """Format is execute-only: after a successful agent, before the work patch,
+    and only when writes_code and repos.yml configures a command."""
+    calls: list[str] = []
+
+    def fake_format(command, worktree, deadline):
+        calls.append(f"format:{command}")
+        (Path(worktree) / "formatted.marker").write_text("ok")
+
+    class TrackingAgent(FakeAgent):
+        def materialize_work_patch(self, worktree, exclude_paths):
+            calls.append("materialize")
+            assert (Path(worktree) / "formatted.marker").exists()
+            return "fake-patch"
+
+    monkeypatch.setattr("engine.runner._run_format", fake_format)
+    _seed(store, _run_dict("specrun", "spec", state="RUNNING"))
+    prepare_dir_for(config, "specrun").mkdir(parents=True, exist_ok=True)
+    (prepare_dir_for(config, "specrun") / "bundle.json").write_text(
+        json.dumps(
+            {
+                "prompt": "p",
+                "tools": [],
+                "deadline": None,
+                "repo": "yash-learner/care_fe_agent_hq",
+                "base_commit": "abc",
+                "format": "echo format-me",
+                "output_paths": [],
+            }
+        )
+    )
+    agent = TrackingAgent(tmp_path / "work")
+
+    result = run_task(
+        "specrun",
+        "execute",
+        config,
+        taskdefs,
+        store,
+        adapter_fn=_adapters(tracker=FakeTracker(_details()), agent=agent),
+    )
+
+    assert result["outcome"] == "success"
+    assert calls == ["format:echo format-me", "materialize"]
+    assert (execute_dir_for(config, "specrun") / "work.patch").read_text() == "fake-patch"
+
+
+def test_execute_skips_format_when_writes_code_false(
+    config, taskdefs, store, tmp_path, monkeypatch
+):
+    calls: list[str] = []
+
+    def fake_format(command, worktree, deadline):
+        calls.append("format")
+
+    monkeypatch.setattr("engine.runner._run_format", fake_format)
+    taskdefs["spec"]["writes_code"] = False
+    _seed(store, _run_dict("specrun", "spec", state="RUNNING"))
+    prepare_dir_for(config, "specrun").mkdir(parents=True, exist_ok=True)
+    (prepare_dir_for(config, "specrun") / "bundle.json").write_text(
+        json.dumps(
+            {
+                "prompt": "p",
+                "tools": [],
+                "deadline": None,
+                "repo": "yash-learner/care_fe_agent_hq",
+                "base_commit": "abc",
+                "format": "echo should-not-run",
+                "output_paths": [],
+            }
+        )
+    )
+
+    run_task(
+        "specrun",
+        "execute",
+        config,
+        taskdefs,
+        store,
+        adapter_fn=_adapters(tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work")),
+    )
+
+    assert calls == []
+    assert (execute_dir_for(config, "specrun") / "work.patch").read_text() == ""
+
+
+def test_execute_format_failure_fails_the_run(config, taskdefs, store, tmp_path, monkeypatch):
+    def fake_format(command, worktree, deadline):
+        return {
+            "outcome": "failure",
+            "usage_known": True,
+            "cost_usd": 0.0,
+            "tokens": 0,
+            "detail": "format failed (exit 1): boom",
+        }
+
+    monkeypatch.setattr("engine.runner._run_format", fake_format)
+    _seed(store, _run_dict("specrun", "spec", state="RUNNING"))
+    prepare_dir_for(config, "specrun").mkdir(parents=True, exist_ok=True)
+    (prepare_dir_for(config, "specrun") / "bundle.json").write_text(
+        json.dumps(
+            {
+                "prompt": "p",
+                "tools": [],
+                "deadline": None,
+                "repo": "yash-learner/care_fe_agent_hq",
+                "base_commit": "abc",
+                "format": "false",
+                "output_paths": [],
+            }
+        )
+    )
+
+    result = run_task(
+        "specrun",
+        "execute",
+        config,
+        taskdefs,
+        store,
+        adapter_fn=_adapters(tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work")),
+    )
+
+    assert result["outcome"] == "failure"
+    assert "format failed" in result["detail"]
+    assert not (execute_dir_for(config, "specrun") / "work.patch").exists()
+
+
 def test_expand_declared_resolves_directory_artifacts(tmp_path):
     """A trailing slash means "whatever is in there": the engine collects a
     set the task could not name in advance. Plain entries pass through
@@ -1483,12 +1696,32 @@ def test_ledger_image_urls_wraps_webm_with_sibling_gif_in_details():
     gif_url = f"{prefix}/tickets/42/artifacts/run7/specs/42/videos/flow.gif"
     webm_url = f"{prefix}/tickets/42/artifacts/run7/specs/42/videos/flow.webm"
     assert "<details>" in out
-    assert "<summary><b>Evidence: dropdown open — desktop</b> (click to expand)</summary>" in out
+    assert "<summary><b>Video: dropdown open — desktop</b> (click to expand)</summary>" in out
     assert f'<img width="960" alt="flow" src="{gif_url}" />' in out
     assert f"[Full recording (webm)]({webm_url})" in out
     assert "</details>" in out
     # The bare markdown webm link must not remain (replaced by the details block).
     assert f"[dropdown open — desktop]({webm_url})" not in out
+    # Block-level: a blank line must precede <details> so GitHub collapses it.
+    assert "\n\n<details>" in out
+
+
+def test_ledger_image_urls_strips_evidence_prefix_for_block_details():
+    """Agents often write `**Evidence**: [label](….webm)`. Without stripping
+    that prefix, collect left `**Evidence**: <details>…` on one line and
+    GitHub did not treat it as a collapsible (ticket 13)."""
+    ledger = {"specs/7/videos/x.webm", "specs/7/videos/x.gif"}
+    md = "**Evidence**: [Search input visible on load](specs/7/videos/x.webm)\n"
+    out = _ledger_image_urls(md, "agentalec/agent_hq", "7", "run7", ledger)
+    assert "**Evidence**" not in out
+    assert "Evidence:" not in out
+    assert "<summary><b>Video: Search input visible on load</b> (click to expand)</summary>" in out
+    assert "\n\n<details>" in out
+    # No same-line junk before the opening tag.
+    assert not any(
+        line.strip() and not line.lstrip().startswith("<details>") and "<details>" in line
+        for line in out.splitlines()
+    )
 
 
 def test_sibling_gif_path_filename_convention():
@@ -1514,8 +1747,17 @@ def test_derive_qa_gifs_omits_failures_without_raising(monkeypatch):
     assert derived == {}
 
 
+@pytest.mark.skipif(
+    shutil.which("ffmpeg") is None,
+    reason="ffmpeg not on PATH (install for local smoke; CI installs it)",
+)
 def test_webm_to_gif_roundtrip_with_ffmpeg(tmp_path):
-    """Smoke: real ffmpeg produces a GIF header from a tiny synthetic webm."""
+    """Smoke: real ffmpeg produces a GIF header from a tiny synthetic webm.
+
+    Skips when ffmpeg is absent so local/dev without it does not hard-fail.
+    CI installs ffmpeg so this still runs there. Production collect already
+    installs ffmpeg in run.yml; missing ffmpeg there degrades to WebM only.
+    """
     webm = tmp_path / "t.webm"
     proc = subprocess.run(
         [
@@ -2464,6 +2706,99 @@ def test_comment_unblocks_a_blocked_ticket(config, taskdefs, store, tmp_path):
     assert "ran dry" in rework[-1]["detail"]
     assert rework[-1]["actor"] == "example-alice"
     assert rework[-1]["source"] == "issue-comment:203"
+
+
+def test_intake_blocked_bare_comment_readmits_when_eligible(config, taskdefs, store, tmp_path):
+    """Intake product-area block: a bare approver comment must re-check
+    eligibility and enqueue initial_task (spec), not burn triage."""
+    _feedback_config(config)
+    config.projects["comment_default_task"] = "build"  # stand-in for triage
+    config.projects["initial_task"] = "spec"
+    store.write(
+        lambda txn: txn.set_block(
+            "7",
+            reason="no product area matches a configured repo",
+            source="intake",
+        )
+    )
+    messaging = FakeMessaging(
+        by_subject=_issue_comments(_comment(301, "fixed the title, please retry"))
+    )
+    # Eligible: title carries product area, body long enough.
+    adapters = _adapters(
+        tracker=FakeTracker(_details(title="Add frontend endpoint")),
+        agent=FakeAgent(tmp_path / "work"),
+        messaging=messaging,
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    state = store.read_state("7")
+    assert state["status"] == "ACTIVE"
+    assert state["block_source"] is None
+    queued = [r for r in state["runs"] if r["state"] == "QUEUED"]
+    assert len(queued) == 1
+    assert queued[0]["task_id"] == "spec"  # initial_task, not comment_default
+    assert queued[0]["repo"] == "yash-learner/care_fe_agent_hq"
+    assert any("Re-admitted" in msg for _, msg, _ in messaging.calls)
+    assert dict(messaging.reactions)[301] == "rocket"
+
+
+def test_intake_blocked_bare_comment_acks_when_still_ineligible(config, taskdefs, store, tmp_path):
+    """Still no product area → ack reasons, do not queue triage/default."""
+    _feedback_config(config)
+    config.projects["comment_default_task"] = "build"
+    config.projects["initial_task"] = "spec"
+    store.write(
+        lambda txn: txn.set_block(
+            "7",
+            reason="no product area matches a configured repo",
+            source="intake",
+        )
+    )
+    messaging = FakeMessaging(by_subject=_issue_comments(_comment(302, "please retry")))
+    adapters = _adapters(
+        tracker=FakeTracker(_details(title="do something", body="too short")),
+        agent=FakeAgent(tmp_path / "work"),
+        messaging=messaging,
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    state = store.read_state("7")
+    assert state["status"] == "BLOCKED"
+    assert state["block_source"] == "intake"
+    assert [r for r in state["runs"] if r["state"] == "QUEUED"] == []
+    assert any("Still not eligible" in msg for _, msg, _ in messaging.calls)
+    assert any("product area" in msg for _, msg, _ in messaging.calls)
+    assert dict(messaging.reactions)[302] == "eyes"
+
+
+def test_intake_blocked_explicit_do_still_queues_named_task(config, taskdefs, store, tmp_path):
+    """Mid-route steering: `/agent-hq do build` while intake-blocked still
+    queues the named task (recovery path is bare-default only)."""
+    _feedback_config(config)
+    config.projects["comment_default_task"] = "build"
+    store.write(
+        lambda txn: txn.set_block(
+            "7", reason="no product area matches a configured repo", source="intake"
+        )
+    )
+    messaging = FakeMessaging(
+        by_subject=_issue_comments(_comment(303, "/agent-hq do build steer anyway"))
+    )
+    adapters = _adapters(
+        tracker=FakeTracker(_details(title="do something")),
+        agent=FakeAgent(tmp_path / "work"),
+        messaging=messaging,
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    state = store.read_state("7")
+    assert state["status"] == "ACTIVE"
+    queued = [r for r in state["runs"] if r["state"] == "QUEUED"]
+    assert len(queued) == 1 and queued[0]["task_id"] == "build"
 
 
 def test_a_blocked_ticket_with_queued_work_is_still_polled(config, taskdefs, store, tmp_path):
