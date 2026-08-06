@@ -71,21 +71,60 @@ was missing.
 else that is not a declared ledger output. That directory never reaches the
 work repo. Anything you leave elsewhere (except the paths below) lands in the
 pull request.
+**Scratch goes under `.agent-hq/`** — temp pages, downloaded data, and anything
+else that is not a declared ledger output. That directory never reaches the
+work repo. Anything you leave elsewhere (except the paths below) lands in the
+pull request.
 
+Declared ledger outputs under `specs/{ticket}/` (collected; kept out of the
+work-repo patch because `writes_code: false`):
 Declared ledger outputs under `specs/{ticket}/` (collected; kept out of the
 work-repo patch because `writes_code: false`):
 
 - drivers → `specs/{ticket}/qa-drivers/{id}.mjs` (one file per criterion `id`)
 - run logs → `specs/{ticket}/qa-logs/{id}.log` (stdout/stderr for that driver)
 - videos → `specs/{ticket}/videos/{id}.webm` (basename **must** equal `id`)
+- drivers → `specs/{ticket}/qa-drivers/{id}.mjs` (one file per criterion `id`)
+- run logs → `specs/{ticket}/qa-logs/{id}.log` (stdout/stderr for that driver)
+- videos → `specs/{ticket}/videos/{id}.webm` (basename **must** equal `id`)
 - screenshots → `specs/{ticket}/screenshots/<short-slug>.png` (optional unless
   the media policy disables video)
+- report → `specs/{ticket}/qa.md` and `specs/{ticket}/qa-report.json`
 - report → `specs/{ticket}/qa.md` and `specs/{ticket}/qa-report.json`
 
 You write WebM only. Collect may derive a sibling lite `.gif` for the PR
 comment embed — do not spend the run producing GIFs yourself.
 
 Do not commit anything.
+
+## Serial, one isolated driver per criterion
+
+Run criteria **strictly one after another**. Forbidden:
+
+- `npx playwright test` over a folder with default workers
+- `fullyParallel` / multi-file suites in one invocation
+- backgrounding multiple drivers
+- one shared browser context or one long recording across ACs
+- manually renaming or reassigning opaque `recordVideo` clips between ids
+
+Allowed: `node specs/{ticket}/qa-drivers/{id}.mjs` (or equivalent) for a
+**single** id, wait for exit, then the next id. If you must use the Playwright
+test runner for one file, force `--workers=1` and never pass more than that
+one file.
+
+For each live-flow criterion:
+
+1. Write **one** driver at `specs/{ticket}/qa-drivers/{id}.mjs` (plain Node +
+   Playwright API preferred over the test runner; `id` from `qa-report.json`).
+2. That script alone opens a context with `recordVideo`, calls
+   `page.screencast.showActions({ cursor: "pointer" })`, runs **only** that
+   criterion's steps, then **closes the page/context** (flushes WebM).
+3. Move/copy the finished clip to exactly `specs/{ticket}/videos/{id}.webm`.
+4. Redirect that driver's stdout/stderr to `specs/{ticket}/qa-logs/{id}.log`
+   (non-empty — capture what the runner printed).
+
+`qa.md` / `qa-report.json` video paths must be that same
+`specs/{ticket}/videos/{id}.webm`. Never share one recording across ACs.
 
 ## Serial, one isolated driver per criterion
 
@@ -215,6 +254,7 @@ Required structured twin of `qa.md`. Shape:
       "blocker": null,
       "blocker_category": null,
       "plan_steps_run": ["1", "2"],
+      "videos": ["specs/{ticket}/videos/short-slug.webm"],
       "videos": ["specs/{ticket}/videos/short-slug.webm"],
       "screenshots": []
     }

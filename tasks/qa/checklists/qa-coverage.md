@@ -36,10 +36,15 @@ confirm:
       pointer are visible in the WebM (no custom DOM cursor overlay).
 - [ ] You never manually reassigned opaque `recordVideo` clips between
       criterion ids.
+- [ ] You never manually reassigned opaque `recordVideo` clips between
+      criterion ids.
 - [ ] Screenshots (if any) are optional extras unless the media policy has
       `video: false`; they never substitute for video when video is on.
 - [ ] `qa-report.json` summary counts match the criteria; `all_passed` is
       false whenever any criterion is `fail` or `not-exercised`.
+- [ ] Nothing you created lives outside `.agent-hq/` — except declared ledger
+      paths under `specs/{ticket}/`: `qa.md`, `qa-report.json`, `videos/`,
+      `screenshots/`, `qa-drivers/`, and `qa-logs/`. Check with `git status`.
 - [ ] Nothing you created lives outside `.agent-hq/` — except declared ledger
       paths under `specs/{ticket}/`: `qa.md`, `qa-report.json`, `videos/`,
       `screenshots/`, `qa-drivers/`, and `qa-logs/`. Check with `git status`.
