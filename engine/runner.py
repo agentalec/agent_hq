@@ -69,7 +69,9 @@ from engine.engine import (
     _handle_failure,
     apply_queue,
     check_claim_active,
+    eligibility_reasons,
     enqueue,
+    has_injection,
     intake_repo,
     resolve_target_repo,
     subst,
@@ -79,7 +81,6 @@ from engine.models import Event, RunState, TaskRun
 from engine.qa_report import format_qa_summary_footer, resolve_qa_media, validate_qa_report
 from engine.state import _now_iso, artifact_ledger_path
 
-_INJECTION_PATTERNS = ("ignore previous instructions", "disregard your")
 _EXECUTE_RESULT_SCHEMA_PATH = (
     Path(__file__).resolve().parent.parent / "schemas" / "execute-result.schema.json"
 )
@@ -160,8 +161,12 @@ def _latest_review_round(review_md: str) -> str:
 
 _IMG_LINK = re.compile(r"(!\[[^\]]*\]\()(?!https?://)/?([^)\s]+)(\))")
 # Non-image markdown links to video evidence (GitHub won't inline-play raw
-# webm in comments; a clear ledger URL is enough).
+# webm in comments; a clear ledger URL is enough). Optional same-line
+# `Evidence:` / `Video:` prefix (bold or plain) is captured so a sibling-gif
+# rewrite can strip it -- otherwise `<details>` lands mid-line and GitHub
+# will not treat it as a collapsible block.
 _VIDEO_LINK = re.compile(
+    r"(?:(?:\*\*)?[Ee]vidence(?:\*\*)?\s*:\s*|(?:\*\*)?[Vv]ideo(?:\*\*)?\s*:\s*)?"
     r"(?<!!)(\[[^\]]*\]\()(?!https?://)/?([^)\s]+\.(?:webm|mp4))(\))",
     re.IGNORECASE,
 )
@@ -286,12 +291,15 @@ def _ledger_image_urls(
             label = html.escape(m[1][1:-2] or Path(rel).stem)
             slug = html.escape(Path(rel).stem)
             gif_url = _ledger_raw_url(engine_repo, ticket_id, run_id, gif_rel)
+            # Standalone block HTML: leading/trailing blank lines so GitHub
+            # treats `<details>` as a collapsible (mid-line prefixes break it).
+            # The regex already consumed any same-line Evidence:/Video: prefix.
             return (
-                f"<details>\n"
-                f"<summary><b>Evidence: {label}</b> (click to expand)</summary>\n\n"
+                f"\n\n<details>\n"
+                f"<summary><b>Video: {label}</b> (click to expand)</summary>\n\n"
                 f'<img width="960" alt="{slug}" src="{gif_url}" />\n\n'
                 f"[Full recording (webm)]({webm_url})\n\n"
-                f"</details>"
+                f"</details>\n\n"
             )
         return f"{m[1]}{webm_url}{m[3]}"
 
@@ -729,6 +737,7 @@ def _prepare(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskd
     rework = _rework_comments(store, ticket_id, run_id)
     declared = [subst(a, ticket_id) for a in taskdef.get("outputs", {}).get("artifacts", [])]
     setup_cmd = eng.resolve_setup(config, repo, taskdef["id"])
+    format_cmd = eng.resolve_format(config, repo, taskdef["id"])
     bundle = {
         "prompt": _assemble_prompt(
             taskdef,
@@ -745,6 +754,7 @@ def _prepare(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskd
         "repo": repo,
         "base_commit": base_commit,
         "setup": setup_cmd,
+        "format": format_cmd,
         "output_paths": declared,
     }
     # Only when the immediate parent left a commit -- the parent's diff,
@@ -763,8 +773,8 @@ def _prepare(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskd
     return {"claimed": True, "prepare_dir": str(prep_dir), "bundle": bundle}
 
 
-# Never handed to a setup command. It is operator-authored config, not agent
-# output, so it is trusted further than the agent child -- but it has no
+# Never handed to a setup/format command. It is operator-authored config, not
+# agent output, so it is trusted further than the agent child -- but it has no
 # business holding the engine's own credentials either, and in execute those
 # are absent anyway (`permissions: {}`). Deliberately duplicated rather than
 # imported from an adapter: engine code names no concrete adapter (CLAUDE.md).
@@ -772,18 +782,13 @@ _SETUP_FORBIDDEN_ENV = ("AGENT_HQ_TOKEN", "GITHUB_TOKEN", "GH_TOKEN", "COPILOT_G
 _SETUP_LOG_TAIL = 2000
 
 
-def _run_setup(command: str | None, worktree: Path, deadline: str | None) -> dict | None:
-    """Run the repo's configured setup command in the worktree before the
-    agent starts. Returns None on success, else a normalized execute-result
-    `failure` -- collect's ordinary failure/retry accounting takes it from
-    there, so a broken environment retries and then blocks, rather than
-    handing the agent a half-built one to flail in.
-
-    This exists so structured setup is not the agent's job: a fixed sequence
-    of shell commands narrated by a model costs a premium request per step,
-    fails in a different way each time, and is exactly the part that never
-    needed judgment. Bounded by the run's own deadline -- a hanging
-    `docker compose up` must not consume the whole run silently."""
+def _run_worktree_shell(
+    command: str | None, worktree: Path, deadline: str | None, *, kind: str
+) -> dict | None:
+    """Run an operator-authored shell command in the worktree. Returns None on
+    success, else a normalized execute-result `failure`. Used for setup
+    (before the agent) and format (after a successful agent run, before the
+    work patch). Credentials stripped; bounded by the run's deadline."""
     if not command:
         return None
 
@@ -800,12 +805,12 @@ def _run_setup(command: str | None, worktree: Path, deadline: str | None) -> dic
             check=False,
         )
     except subprocess.TimeoutExpired:
-        detail = f"setup timed out after {timeout:.0f}s: {command}"
+        detail = f"{kind} timed out after {timeout:.0f}s: {command}"
     else:
         if proc.returncode == 0:
             return None
         tail = (proc.stderr or proc.stdout or "")[-_SETUP_LOG_TAIL:]
-        detail = f"setup failed (exit {proc.returncode}): {command}\n{tail}"
+        detail = f"{kind} failed (exit {proc.returncode}): {command}\n{tail}"
 
     return {
         "outcome": "failure",
@@ -814,6 +819,28 @@ def _run_setup(command: str | None, worktree: Path, deadline: str | None) -> dic
         "tokens": 0,
         "detail": detail,
     }
+
+
+def _run_setup(command: str | None, worktree: Path, deadline: str | None) -> dict | None:
+    """Run the repo's configured setup command in the worktree before the
+    agent starts. Returns None on success, else a normalized execute-result
+    `failure` -- collect's ordinary failure/retry accounting takes it from
+    there, so a broken environment retries and then blocks, rather than
+    handing the agent a half-built one to flail in.
+
+    This exists so structured setup is not the agent's job: a fixed sequence
+    of shell commands narrated by a model costs a premium request per step,
+    fails in a different way each time, and is exactly the part that never
+    needed judgment. Bounded by the run's own deadline -- a hanging
+    `docker compose up` must not consume the whole run silently."""
+    return _run_worktree_shell(command, worktree, deadline, kind="setup")
+
+
+def _run_format(command: str | None, worktree: Path, deadline: str | None) -> dict | None:
+    """Run the repo's configured format command after a successful agent run
+    and before the work patch is materialized. Same failure shape as setup:
+    non-zero exit fails the run through ordinary retry accounting."""
+    return _run_worktree_shell(command, worktree, deadline, kind="format")
 
 
 def _seconds_until(deadline: str | None) -> float | None:
@@ -852,6 +879,17 @@ def _execute(config, store, adapter_fn, run, taskdef) -> dict:
     (out_dir / "execute-result.json").write_text(json.dumps(result, indent=2) + "\n")
 
     if result.get("outcome") == "success":
+        # Format after the agent and before the work patch, only for tasks that
+        # write product code and only when repos.yml configures a command.
+        # Collect must not reinstall or reformat -- this is execute-only.
+        if taskdef.get("writes_code", True) and bundle.get("format"):
+            format_failure = _run_format(bundle.get("format"), worktree, bundle.get("deadline"))
+            if format_failure is not None:
+                (out_dir / "execute-result.json").write_text(
+                    json.dumps(format_failure, indent=2) + "\n"
+                )
+                return format_failure
+
         control_src = worktree / ".agent-hq" / "control.json"
         if control_src.exists():
             (out_dir / "control.json").write_text(control_src.read_text())
@@ -1589,7 +1627,7 @@ def intake_ticket(issue_ref: str, event_key: str, config, taskdefs, store, adapt
     if existing and any(r["state"] in eng.NON_TERMINAL for r in existing.get("runs", [])):
         return "skipped"
 
-    reasons = _eligibility_reasons(config, details)
+    reasons = eligibility_reasons(config, details)
     event_id = f"intake:{event_key}"
     if reasons:
         body = "This ticket cannot be picked up automatically:\n" + "\n".join(
@@ -1616,7 +1654,7 @@ def intake_ticket(issue_ref: str, event_key: str, config, taskdefs, store, adapt
         eng.set_status_label(config, adapter_fn, ticket_id, "BLOCKED")
         return "blocked"
 
-    if _has_injection(details):
+    if has_injection(details):
         body = (
             "This ticket cannot be picked up automatically: possible "
             "prompt-injection patterns were detected in the ticket text. A "
@@ -1686,25 +1724,3 @@ def intake_ticket(issue_ref: str, event_key: str, config, taskdefs, store, adapt
     # inherits a repo (never null for a wired task).
     store.write(lambda txn: txn.update_run(ticket_id, run_id, repo=repo))
     return "enqueued"
-
-
-def _eligibility_reasons(config, details) -> list[str]:
-    intake_cfg = config.projects.get("intake", {})
-    reasons: list[str] = []
-    min_words = intake_cfg.get("min_body_words", 0)
-    if len(details.body.split()) < min_words:
-        reasons.append(f"description too short (needs >= {min_words} words)")
-    for label in intake_cfg.get("excluded_labels", []):
-        if label in details.labels:
-            reasons.append(f"excluded label '{label}'")
-    if resolve_target_repo(config, details) is None:
-        reasons.append("no product area matches a configured repo")
-    public_safe_label = config.projects.get("public_safe_label")
-    if config.projects.get("public") and public_safe_label not in details.labels:
-        reasons.append(f"missing required label '{public_safe_label}' (public deployment)")
-    return reasons
-
-
-def _has_injection(details) -> bool:
-    text = f"{details.title} {details.body}".lower()
-    return any(pattern in text for pattern in _INJECTION_PATTERNS)

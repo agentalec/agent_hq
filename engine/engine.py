@@ -81,8 +81,7 @@ def resolve_input_source(runs: list[dict], run: dict) -> str | None:
     positions = queue_positions(runs)
     mine = positions.get(run["run_id"], 0)
     earlier = [
-        r for r in runs
-        if positions[r["run_id"]] < mine and r["state"] == RunState.SUCCEEDED.value
+        r for r in runs if positions[r["run_id"]] < mine and r["state"] == RunState.SUCCEEDED.value
     ]
     if earlier:
         return max(earlier, key=lambda r: positions[r["run_id"]])["run_id"]
@@ -95,8 +94,7 @@ def resolve_input_source(runs: list[dict], run: dict) -> str | None:
     # ledger artifacts at all, which is fatal for a task whose job is to read
     # what happened and re-plan.
     produced = [
-        r for r in runs
-        if r["state"] == RunState.SUCCEEDED.value and r["run_id"] != run["run_id"]
+        r for r in runs if r["state"] == RunState.SUCCEEDED.value and r["run_id"] != run["run_id"]
     ]
     if produced:
         return max(produced, key=lambda r: positions[r["run_id"]])["run_id"]
@@ -134,8 +132,17 @@ def _insert_at_queue_head(txn: Txn, ticket_id: str) -> int:
     return front
 
 
-def _put_queued_run(txn: Txn, run_id: str, *, ticket_id: str, task_id: str, task_version: int,
-                    bindings: dict[str, str], queue_seq: int | None = None, **fields) -> bool:
+def _put_queued_run(
+    txn: Txn,
+    run_id: str,
+    *,
+    ticket_id: str,
+    task_id: str,
+    task_version: int,
+    bindings: dict[str, str],
+    queue_seq: int | None = None,
+    **fields,
+) -> bool:
     """Insert a QUEUED run (idempotent by run_id) plus its run.queued event.
     Returns True if newly inserted, False if it already existed (no-op) --
     shared by every run-creation path (`enqueue`, `apply_queue`,
@@ -211,10 +218,17 @@ def enqueue(
 
     def fn(txn: Txn) -> None:
         _put_queued_run(
-            txn, run_id, ticket_id=ticket_id, task_id=task_id, task_version=task_version,
-            bindings=bindings, attempt=attempt, chain_depth=chain_depth,
+            txn,
+            run_id,
+            ticket_id=ticket_id,
+            task_id=task_id,
+            task_version=task_version,
+            bindings=bindings,
+            attempt=attempt,
+            chain_depth=chain_depth,
             parent_run_id=parent_run["run_id"] if parent_run is not None else None,
-            source_event_id=source_event_id, enqueue_index=enqueue_index,
+            source_event_id=source_event_id,
+            enqueue_index=enqueue_index,
             queue_seq=queue_seq,
         )
 
@@ -248,17 +262,16 @@ def check_concurrency(
 
     def has_exclusive(doc: dict) -> bool:
         return any(
-            r["state"] in EXCLUSIVE_STATES and r["run_id"] != run_id
-            for r in doc.get("runs", [])
+            r["state"] in EXCLUSIVE_STATES and r["run_id"] != run_id for r in doc.get("runs", [])
         )
 
     if not parallel_ok and has_exclusive(state_docs.get(ticket_id, {})):
         return False
 
     other_active = sum(
-        1 for tid, doc in state_docs.items()
-        if tid != ticket_id
-        and any(r["state"] in EXCLUSIVE_STATES for r in doc.get("runs", []))
+        1
+        for tid, doc in state_docs.items()
+        if tid != ticket_id and any(r["state"] in EXCLUSIVE_STATES for r in doc.get("runs", []))
     )
     return other_active < in_flight_cap
 
@@ -285,9 +298,7 @@ def check_claim_active(ticket_doc: dict | None, run_id: str) -> bool:
     return run is not None and run["state"] == "RUNNING"
 
 
-def check_loop_guard(
-    state_doc: dict, max_runs: int = 25
-) -> tuple[bool, list[dict] | None]:
+def check_loop_guard(state_doc: dict, max_runs: int = 25) -> tuple[bool, list[dict] | None]:
     """True (ok, None) unless the ticket has too many runs, in which case
     (False, trace) with trace being every run's run_id/task_id/parent_run_id
     for the BLOCKED reason.
@@ -302,9 +313,7 @@ def check_loop_guard(
     route is depth 1. Even before that it was redundant -- measured on the
     pilot's own tickets, depth was `max_runs` minus retries (the same axis),
     and `budget.retries` already caps retries per task."""
-    runs = [
-        r for r in state_doc.get("runs", []) if r.get("state") != RunState.CANCELLED.value
-    ]
+    runs = [r for r in state_doc.get("runs", []) if r.get("state") != RunState.CANCELLED.value]
     # Guard runs BEFORE an enqueue, so `<` makes max_runs the true ceiling.
     if len(runs) < max_runs:
         return True, None
@@ -399,6 +408,18 @@ def resolve_setup(config: Config, repo: str | None, task_id: str) -> str | None:
     return setup.get(task_id) or setup.get("default")
 
 
+def resolve_format(config: Config, repo: str | None, task_id: str) -> str | None:
+    """The shell command that formats `repo`'s worktree for `task_id` after a
+    successful agent run, from `repos.yml`'s `format` map: the task's own
+    entry, else `default`, else None. Same shape and resolution as setup;
+    execute runs it only when the task `writes_code`, before the work patch
+    is materialized, so CI formatters do not reject the PR for style the
+    agent left unformatted."""
+    meta = (config.repos or {}).get(repo or "", {})
+    fmt = meta.get("format") or {}
+    return fmt.get(task_id) or fmt.get("default")
+
+
 def resolve_target_repo(config: Config, details) -> str | None:
     """Match a repos.yml product_area against the ticket's labels/title/body.
     Returns None when nothing matches (intake treats that as ineligible;
@@ -408,6 +429,36 @@ def resolve_target_repo(config: Config, details) -> str | None:
         if meta["product_area"].lower() in haystack:
             return repo
     return None
+
+
+_INJECTION_PATTERNS = ("ignore previous instructions", "disregard your")
+
+
+def eligibility_reasons(config: Config, details) -> list[str]:
+    """Why intake (or comment-driven re-admit) would refuse this ticket.
+
+    Shared by `intake_ticket` and the intake-block recovery path in
+    `poll_comments` so the two cannot drift.
+    """
+    intake_cfg = config.projects.get("intake", {})
+    reasons: list[str] = []
+    min_words = intake_cfg.get("min_body_words", 0)
+    if len(details.body.split()) < min_words:
+        reasons.append(f"description too short (needs >= {min_words} words)")
+    for label in intake_cfg.get("excluded_labels", []):
+        if label in details.labels:
+            reasons.append(f"excluded label '{label}'")
+    if resolve_target_repo(config, details) is None:
+        reasons.append("no product area matches a configured repo")
+    public_safe_label = config.projects.get("public_safe_label")
+    if config.projects.get("public") and public_safe_label not in details.labels:
+        reasons.append(f"missing required label '{public_safe_label}' (public deployment)")
+    return reasons
+
+
+def has_injection(details) -> bool:
+    text = f"{details.title} {details.body}".lower()
+    return any(pattern in text for pattern in _INJECTION_PATTERNS)
 
 
 def subst(template: str, ticket_id: str) -> str:
@@ -428,13 +479,17 @@ def set_status_label(config, adapter_fn, ticket_id: str, status: str) -> None:
     (`hq:intake`, `hq:public-safe`, `hq:executor=...`) has to be passed back
     through or it gets stripped. Only `STATUS_LABELS` values are dropped --
     filtering on the `hq:` prefix instead would strip config's own labels."""
-    tracker = adapter_fn("tracker", config.components["tracker"]["adapter"], repo=intake_repo(config))
+    tracker = adapter_fn(
+        "tracker", config.components["tracker"]["adapter"], repo=intake_repo(config)
+    )
     keep = [name for name in tracker.fetch_ticket(ticket_id).labels if name not in _OWNED_LABELS]
     label = STATUS_LABELS.get(status)
     tracker.set_status_labels(ticket_id, status, keep + ([label] if label else []))
 
 
-def notify_ticket(config, adapter_fn, ticket_id, message: str, event_id: str, mentions=None) -> None:
+def notify_ticket(
+    config, adapter_fn, ticket_id, message: str, event_id: str, mentions=None
+) -> None:
     """Post one plain comment to the ticket thread, idempotent by `event_id`
     (the messaging adapter dedupes on its `<!--hq:evt:...-->` marker). The
     single primitive for engine-authored ticket-thread comments -- escalation
@@ -442,9 +497,7 @@ def notify_ticket(config, adapter_fn, ticket_id, message: str, event_id: str, me
     messaging = adapter_fn(
         "messaging", config.components["messaging"]["adapter"], repo=intake_repo(config)
     )
-    messaging.notify(
-        {"ticket_id": ticket_id, "mentions": mentions or []}, message, [], event_id
-    )
+    messaging.notify({"ticket_id": ticket_id, "mentions": mentions or []}, message, [], event_id)
 
 
 def post_pr_comment(config, adapter_fn, pr_ref: str, message: str, event_id: str) -> None:
@@ -464,8 +517,15 @@ def _escalate(store, config, adapter_fn, ticket_id, run_id, message: str) -> Non
 
 
 def _block_ticket(
-    store, config, adapter_fn, ticket_id, run_id, reason: str,
-    *, actor: str | None = None, source: str | None = None,
+    store,
+    config,
+    adapter_fn,
+    ticket_id,
+    run_id,
+    reason: str,
+    *,
+    actor: str | None = None,
+    source: str | None = None,
 ) -> None:
     """Block the ticket, recording WHY in state -- not only in the event.
 
@@ -476,6 +536,7 @@ def _block_ticket(
     null for all of them. The dashboard and `hq-ticket` then rendered "BLOCKED"
     with no reason, and the only copy of it was prose in an event `detail`.
     """
+
     def fn(txn: Txn) -> None:
         txn.set_block(ticket_id, reason=reason, source="engine", interrupted_run=run_id)
         txn.append_event(
@@ -513,11 +574,18 @@ def reenqueue_same(store, run: dict, taskdef: dict, attempt: int) -> str:
         run_id = compute_handoff_run_id(run["parent_run_id"], run["handoff_key"], attempt)
         store.write(
             lambda txn: _put_queued_run(
-                txn, run_id, ticket_id=run["ticket_id"], task_id=run["task_id"],
-                task_version=taskdef["version"], bindings=run.get("bindings", {}),
-                attempt=attempt, chain_depth=run["chain_depth"],
-                parent_run_id=run.get("parent_run_id"), handoff_key=run["handoff_key"],
-                repo=run.get("repo"), input_artifacts=list(run.get("input_artifacts") or []),
+                txn,
+                run_id,
+                ticket_id=run["ticket_id"],
+                task_id=run["task_id"],
+                task_version=taskdef["version"],
+                bindings=run.get("bindings", {}),
+                attempt=attempt,
+                chain_depth=run["chain_depth"],
+                parent_run_id=run.get("parent_run_id"),
+                handoff_key=run["handoff_key"],
+                repo=run.get("repo"),
+                input_artifacts=list(run.get("input_artifacts") or []),
                 queue_seq=run.get("queue_seq"),
             )
         )
@@ -571,9 +639,15 @@ def _resolve_cancellations(
 
 
 def apply_queue(
-    txn: Txn, config: Config, taskdefs: dict, ticket_id: str, source_run: dict,
-    accepted: list[Handoff], attempt: int = 0,
-    cancel_keys: list[str] | None = None, cancel_pending: bool = False,
+    txn: Txn,
+    config: Config,
+    taskdefs: dict,
+    ticket_id: str,
+    source_run: dict,
+    accepted: list[Handoff],
+    attempt: int = 0,
+    cancel_keys: list[str] | None = None,
+    cancel_pending: bool = False,
 ) -> tuple[list[str], str | None]:
     """Apply a run's queue declaration: cancel what it names, then append
     `accepted` as QUEUED runs in declared order, idempotent by derived id
@@ -598,9 +672,7 @@ def apply_queue(
                 return [], f"artifact '{rel_path}' missing from {source_run['run_id']}'s ledger"
 
     ticket_doc = txn.ticket_doc(ticket_id)
-    doomed, cancel_reason = _resolve_cancellations(
-        ticket_doc, cancel_keys or [], cancel_pending
-    )
+    doomed, cancel_reason = _resolve_cancellations(ticket_doc, cancel_keys or [], cancel_pending)
     if cancel_reason is not None:
         return [], cancel_reason
 
@@ -613,8 +685,7 @@ def apply_queue(
     # (source_run's chain_depth + 1), which the current runs' own recorded
     # depths don't yet reflect.
     existing_runs = [
-        r for r in ticket_doc.get("runs", [])
-        if r.get("state") != RunState.CANCELLED.value
+        r for r in ticket_doc.get("runs", []) if r.get("state") != RunState.CANCELLED.value
     ]
     projected_runs = len(existing_runs) + len(accepted)
     if projected_runs > loop_cfg["max_runs"]:
@@ -649,10 +720,17 @@ def apply_queue(
         target = taskdefs[h.target_task]
         run_id = compute_handoff_run_id(source_run["run_id"], h.key, attempt)
         _put_queued_run(
-            txn, run_id, ticket_id=ticket_id, task_id=target["id"], task_version=target["version"],
-            bindings=source_run.get("bindings", {}), attempt=attempt,
-            chain_depth=source_run["chain_depth"] + 1, parent_run_id=source_run["run_id"],
-            handoff_key=h.key, repo=h.repo or source_run.get("repo"),
+            txn,
+            run_id,
+            ticket_id=ticket_id,
+            task_id=target["id"],
+            task_version=target["version"],
+            bindings=source_run.get("bindings", {}),
+            attempt=attempt,
+            chain_depth=source_run["chain_depth"] + 1,
+            parent_run_id=source_run["run_id"],
+            handoff_key=h.key,
+            repo=h.repo or source_run.get("repo"),
             input_artifacts=list(h.artifacts or []),
         )
         applied.append(run_id)
@@ -667,6 +745,25 @@ def apply_queue(
             ).to_dict(),
         )
     return applied, None
+
+
+def _predecessor_rejection(store, ticket_id: str, run_id: str) -> tuple[str, str] | None:
+    """`(source_suffix, detail)` for a collect-time rejection of `run_id`.
+
+    Looks for the most recent `handoff.rejected` or `run.artifact_rejected`
+    on the failed attempt -- callers write those events before invoking
+    `_handle_failure`. Returns None for ordinary failures (runner-lost,
+    execute outcome=failure) that have nothing useful to tell the retry.
+    """
+    for event in reversed(store.read_events(ticket_id)):
+        if event.get("run_id") != run_id:
+            continue
+        kind = event.get("kind")
+        if kind == "handoff.rejected":
+            return "handoff_rejected", event.get("detail") or "control output rejected"
+        if kind == "run.artifact_rejected":
+            return "artifact_rejected", event.get("detail") or "artifact rejected"
+    return None
 
 
 def _handle_failure(
@@ -688,17 +785,50 @@ def _handle_failure(
       is unknown).
     - runner-lost/timeout sweep (block_on_unknown_usage=False): the attempt
       never collected, so retry from scratch (D1) up to budget.retries.
+
+    When a retry is queued after `handoff.rejected` / `run.artifact_rejected`,
+    a `run.rework` event on the NEW run carries the predecessor's rejection
+    into prepare's `## Requested changes` channel -- otherwise attempt N+1
+    repeats the same schema/artifact mistake blind.
     """
     run_id = run["run_id"]
     if block_on_unknown_usage and run.get("usage_known") is False:
-        _block_ticket(store, config, adapter_fn, ticket_id, run_id, "attempt failed with unknown spend")
+        _block_ticket(
+            store, config, adapter_fn, ticket_id, run_id, "attempt failed with unknown spend"
+        )
         _escalate(
-            store, config, adapter_fn, ticket_id, run_id,
+            store,
+            config,
+            adapter_fn,
+            ticket_id,
+            run_id,
             "Run failed with unknown spend; blocked pending human review.",
         )
         return
     if run["attempt"] < taskdef["budget"]["retries"]:
-        reenqueue_same(store, run, taskdef, run["attempt"] + 1)
+        new_run_id = reenqueue_same(store, run, taskdef, run["attempt"] + 1)
+        pred = _predecessor_rejection(store, ticket_id, run_id)
+        if pred is not None:
+            suffix, detail = pred
+            # Cap detail length: rejection text is agent-/schema-authored and
+            # lands in the next prompt; keep it concise and secret-safe-ish.
+            concise = " ".join(str(detail).split())
+            if len(concise) > 500:
+                concise = concise[:497] + "..."
+            store.write(
+                lambda txn: txn.append_event(
+                    ticket_id,
+                    Event(
+                        event_id=f"{new_run_id}:rework",
+                        kind="run.rework",
+                        ticket_id=ticket_id,
+                        run_id=new_run_id,
+                        detail=f"Previous attempt rejected: {concise}",
+                        actor="engine",
+                        source=f"{run_id}:{suffix}",
+                    ).to_dict(),
+                )
+            )
         return
     _block_ticket(store, config, adapter_fn, ticket_id, run_id, "retries exhausted")
     # Escalate, exactly like the unknown-spend block above. Retries-exhausted
@@ -707,7 +837,11 @@ def _handle_failure(
     # nobody: the block landed on the state branch while the issue still read
     # "work has been queued".
     _escalate(
-        store, config, adapter_fn, ticket_id, run_id,
+        store,
+        config,
+        adapter_fn,
+        ticket_id,
+        run_id,
         f"`{taskdef['id']}` failed {run['attempt'] + 1} time(s) and exhausted its retry budget; "
         "the ticket is blocked pending human review.",
     )
@@ -769,7 +903,13 @@ def sweep(
             _mark_failed(store, ticket_id, run_id, "run.failed", "failed")
         failed = {**run, "state": "FAILED"}
         _handle_failure(
-            store, config, taskdefs, taskdef, ticket_id, failed, adapter_fn,
+            store,
+            config,
+            taskdefs,
+            taskdef,
+            ticket_id,
+            failed,
+            adapter_fn,
             block_on_unknown_usage=False,
         )
 
@@ -791,7 +931,9 @@ def sweep(
             # auto-approved at collect time needs no such notice -- its comment
             # never asked.) Idempotent by event id.
             notify_ticket(
-                config, adapter_fn, ticket_id,
+                config,
+                adapter_fn,
+                ticket_id,
                 f"Gate `{taskdef['id']}` was auto-approved by task config after the request "
                 f"above was posted — `auto_approve` was turned on while this run was waiting. "
                 f"No decision is needed.",
@@ -800,13 +942,17 @@ def sweep(
         else:
             timeout = gate_entry.get("timeout_working_hours")
             repo = (
-                run.get("repo") or _target_repo(config, adapter_fn, ticket_id)
+                run.get("repo")
+                or _target_repo(config, adapter_fn, ticket_id)
                 or next(iter(config.repos))
             )
             gate = adapter_fn("gate", run.get("bindings", {}).get("gate", "pr-review"), repo=repo)
             decision = gate.status(
-                {**run, "timeout_working_hours": timeout,
-                 "approver_group": gate_entry.get("approvers")}
+                {
+                    **run,
+                    "timeout_working_hours": timeout,
+                    "approver_group": gate_entry.get("approvers"),
+                }
             )
         status = decision.status.value if hasattr(decision.status, "value") else decision.status
 
@@ -834,26 +980,35 @@ def sweep(
                 txn.append_event(
                     ticket_id,
                     Event(
-                        event_id=f"{run_id}:succeeded", kind="run.succeeded", ticket_id=ticket_id,
-                        run_id=run_id, state=RunState.SUCCEEDED,
+                        event_id=f"{run_id}:succeeded",
+                        kind="run.succeeded",
+                        ticket_id=ticket_id,
+                        run_id=run_id,
+                        state=RunState.SUCCEEDED,
                     ).to_dict(),
                 )
                 if decision.comment_id is not None:
                     txn.append_event(
                         ticket_id,
                         Event(
-                            event_id=f"{decision.comment_id}:approval", kind="gate.decided",
-                            ticket_id=ticket_id, run_id=run_id,
+                            event_id=f"{decision.comment_id}:approval",
+                            kind="gate.decided",
+                            ticket_id=ticket_id,
+                            run_id=run_id,
                             detail=f"approved by {decision.actor} at {decision.decided_at}",
-                            actor=decision.actor, source=str(decision.comment_id),
+                            actor=decision.actor,
+                            source=str(decision.comment_id),
                         ).to_dict(),
                     )
                 elif gate_entry.get("auto_approve"):
                     txn.append_event(
                         ticket_id,
                         Event(
-                            event_id=f"{run_id}:auto_approval", kind="gate.decided",
-                            ticket_id=ticket_id, run_id=run_id, detail=decision.comments,
+                            event_id=f"{run_id}:auto_approval",
+                            kind="gate.decided",
+                            ticket_id=ticket_id,
+                            run_id=run_id,
+                            detail=decision.comments,
                             # No human decided this one; that is the audit fact,
                             # so it is stated rather than left absent.
                             actor="engine",
@@ -865,22 +1020,40 @@ def sweep(
                 _mark_gate_terminal(store, ticket_id, run, "run.failed", "handoff_apply_failed")
                 _block_ticket(store, config, adapter_fn, ticket_id, run_id, result["apply_reason"])
                 return
-            _complete_if_queue_empty(store, config, adapter_fn, ticket_id, {**run, "state": "SUCCEEDED"})
+            _complete_if_queue_empty(
+                store, config, adapter_fn, ticket_id, {**run, "state": "SUCCEEDED"}
+            )
         elif status == "CHANGES_REQUESTED":
             src = str(decision.comment_id) if decision.comment_id is not None else None
             if run["attempt"] >= 2:
                 _mark_gate_terminal(
-                    store, ticket_id, run, "run.rework", "rework_final",
-                    actor=decision.actor, source=src,
+                    store,
+                    ticket_id,
+                    run,
+                    "run.rework",
+                    "rework_final",
+                    actor=decision.actor,
+                    source=src,
                 )
                 _block_ticket(
-                    store, config, adapter_fn, ticket_id, run_id, "max rework cycles reached",
-                    actor=decision.actor, source=src,
+                    store,
+                    config,
+                    adapter_fn,
+                    ticket_id,
+                    run_id,
+                    "max rework cycles reached",
+                    actor=decision.actor,
+                    source=src,
                 )
                 return
             _mark_gate_terminal(
-                store, ticket_id, run, "run.changes_requested", "changes_requested",
-                actor=decision.actor, source=src,
+                store,
+                ticket_id,
+                run,
+                "run.changes_requested",
+                "changes_requested",
+                actor=decision.actor,
+                source=src,
             )
             new_run_id = reenqueue_same(store, run, taskdef, run["attempt"] + 1)
             store.write(
@@ -892,37 +1065,63 @@ def sweep(
                         ticket_id=ticket_id,
                         run_id=new_run_id,
                         detail=decision.comments,
-                        actor=decision.actor, source=src,
+                        actor=decision.actor,
+                        source=src,
                     ).to_dict(),
                 )
             )
         elif status == "REJECTED":
             src = str(decision.comment_id) if decision.comment_id is not None else None
             _mark_gate_terminal(
-                store, ticket_id, run, "run.rejected", "rejected",
-                actor=decision.actor, source=src,
+                store,
+                ticket_id,
+                run,
+                "run.rejected",
+                "rejected",
+                actor=decision.actor,
+                source=src,
             )
             _block_ticket(
-                store, config, adapter_fn, ticket_id, run_id,
+                store,
+                config,
+                adapter_fn,
+                ticket_id,
+                run_id,
                 decision.comments or "gate rejected",
-                actor=decision.actor, source=src,
+                actor=decision.actor,
+                source=src,
             )
         elif status == "EXPIRED":
             # Nobody decided -- the clock did. `actor="engine"` states that
             # rather than leaving a reader to wonder who rejected it.
             _mark_gate_terminal(
-                store, ticket_id, run, "run.gate_expired", "gate_expired", actor="engine",
+                store,
+                ticket_id,
+                run,
+                "run.gate_expired",
+                "gate_expired",
+                actor="engine",
             )
             _block_ticket(
-                store, config, adapter_fn, ticket_id, run_id, "gate timed out", actor="engine",
+                store,
+                config,
+                adapter_fn,
+                ticket_id,
+                run_id,
+                "gate timed out",
+                actor="engine",
             )
             _escalate(
-                store, config, adapter_fn, ticket_id, run_id,
+                store,
+                config,
+                adapter_fn,
+                ticket_id,
+                run_id,
                 "Review gate expired without a decision; blocked pending escalation.",
             )
         # PENDING: leave the run WAITING_GATE.
 
-    for ticket_id in (ticket_ids if ticket_ids is not None else store.list_tickets()):
+    for ticket_id in ticket_ids if ticket_ids is not None else store.list_tickets():
         state = store.read_state(ticket_id)
         if state is None:
             continue
@@ -960,8 +1159,14 @@ def sweep(
 
 
 def _mark_gate_terminal(
-    store, ticket_id, run: dict, kind: str, event_suffix: str,
-    *, actor: str | None = None, source: str | None = None,
+    store,
+    ticket_id,
+    run: dict,
+    kind: str,
+    event_suffix: str,
+    *,
+    actor: str | None = None,
+    source: str | None = None,
 ) -> None:
     """Terminalize a WAITING_GATE run FAILED, clearing any `pending_handoffs`
     and emitting `handoff.rejected` (each carrying that handoff's own
@@ -1042,7 +1247,9 @@ def _complete_if_queue_empty(store, config, adapter_fn, ticket_id, terminal_run:
     if any(r.get("pending_handoffs") for r in runs):
         return
 
-    tracker = adapter_fn("tracker", config.components["tracker"]["adapter"], repo=intake_repo(config))
+    tracker = adapter_fn(
+        "tracker", config.components["tracker"]["adapter"], repo=intake_repo(config)
+    )
     done_key = f"{ticket_id}:{terminal_run['run_id']}:done"
     final_task = config.projects.get("final_task")
     if not final_task or terminal_run.get("task_id") != final_task:
@@ -1057,7 +1264,11 @@ def _complete_if_queue_empty(store, config, adapter_fn, ticket_id, terminal_run:
         )
         _block_ticket(store, config, adapter_fn, ticket_id, terminal_run["run_id"], reason)
         _escalate(
-            store, config, adapter_fn, ticket_id, terminal_run["run_id"],
+            store,
+            config,
+            adapter_fn,
+            ticket_id,
+            terminal_run["run_id"],
             f"{reason}; the ticket is blocked pending human review.",
         )
         return
@@ -1068,7 +1279,8 @@ def _complete_if_queue_empty(store, config, adapter_fn, ticket_id, terminal_run:
     watched = [wr for wr in state.get("work_repos", []) if wr.get("pr_ref")]
     for work_repo in watched:
         agent = adapter_fn(
-            "agent-session", config.components["agent-session"]["adapter"],
+            "agent-session",
+            config.components["agent-session"]["adapter"],
             repo=work_repo["repo"],
         )
         agent.mark_pr_ready(work_repo["pr_ref"])
@@ -1082,7 +1294,9 @@ def _complete_if_queue_empty(store, config, adapter_fn, ticket_id, terminal_run:
     store.write(lambda txn: txn.set_ticket(ticket_id, status="AWAITING_MERGE"))
     set_status_label(config, adapter_fn, ticket_id, "AWAITING_MERGE")
     notify_ticket(
-        config, adapter_fn, ticket_id,
+        config,
+        adapter_fn,
+        ticket_id,
         "Engine work is complete and "
         + ", ".join(wr["pr_ref"] for wr in watched)
         + " is ready for review. This issue stays open until the PR is merged or "
@@ -1103,8 +1317,8 @@ _HQ_COMMENT_MARKER = "<!--hq:"
 # Reactions rather than replies because they are idempotent at the API -- the
 # watermark is inclusive at the boundary second, so a comment can be re-read,
 # and a reply would duplicate where a reaction cannot.
-REACTION_QUEUED = "rocket"   # this comment produced a run
-REACTION_IGNORED = "eyes"    # read, understood to ask for nothing, no run
+REACTION_QUEUED = "rocket"  # this comment produced a run
+REACTION_IGNORED = "eyes"  # read, understood to ask for nothing, no run
 
 
 def _comment_intent(
@@ -1132,10 +1346,23 @@ def _comment_intent(
     return None
 
 
+def _is_bare_default_intent(body: str, *, default_task: str | None) -> bool:
+    """True when the comment maps to `default_task` only because no command
+    was given -- not an explicit `/agent-hq do <default_task>` or
+    `request-changes`. Intake-block recovery applies only to this case; an
+    explicit command still steers mid-route even while intake-blocked.
+    """
+    if not default_task:
+        return False
+    parsed = parse_decision(body, "")
+    if parsed is not None and parsed[0] == "request-changes":
+        return False
+    return parse_queue_command(body) is None
+
+
 def _comment_run_count(doc: dict, prefixes: tuple[str, ...]) -> int:
     return sum(
-        1 for r in doc.get("runs", [])
-        if str(r.get("source_event_id") or "").startswith(prefixes)
+        1 for r in doc.get("runs", []) if str(r.get("source_event_id") or "").startswith(prefixes)
     )
 
 
@@ -1169,11 +1396,19 @@ def poll_comments(store, config, taskdefs, adapter_fn, ticket_id: str, state: di
     # audience than a work PR.
     if feedback_task or default_task:
         _poll_comment_subject(
-            store, config, taskdefs, adapter_fn, ticket_id,
-            repo=intake_repo(config), number=ticket_id, source_prefix="issue-comment",
+            store,
+            config,
+            taskdefs,
+            adapter_fn,
+            ticket_id,
+            repo=intake_repo(config),
+            number=ticket_id,
+            source_prefix="issue-comment",
             watermark=state.get("comments_polled_at"),
             save_watermark=lambda txn, w: txn.set_ticket(ticket_id, comments_polled_at=w),
-            members=members, feedback_task=feedback_task, default_task=default_task,
+            members=members,
+            feedback_task=feedback_task,
+            default_task=default_task,
             ack=lambda message, event_id: notify_ticket(
                 config, adapter_fn, ticket_id, message, event_id
             ),
@@ -1185,13 +1420,20 @@ def poll_comments(store, config, taskdefs, adapter_fn, ticket_id: str, state: di
             continue
         repo, _, number = pr_ref.rpartition("#")
         _poll_comment_subject(
-            store, config, taskdefs, adapter_fn, ticket_id,
-            repo=repo, number=number, source_prefix="pr-comment",
+            store,
+            config,
+            taskdefs,
+            adapter_fn,
+            ticket_id,
+            repo=repo,
+            number=number,
+            source_prefix="pr-comment",
             watermark=work_repo.get("comments_polled_at"),
             save_watermark=lambda txn, w, r=repo: txn.upsert_work_repo(
                 ticket_id, r, comments_polled_at=w
             ),
-            members=members, feedback_task=feedback_task,
+            members=members,
+            feedback_task=feedback_task,
             # A PR is a wider, lower-trust audience than the engine issue, so an
             # explicit command is still required there -- "an approver said
             # something" never spends budget from a PR thread.
@@ -1217,11 +1459,134 @@ def _acknowledge(messaging, considered: list[dict], queued_ids: set) -> None:
             pass
 
 
+def _intake_comment_readmit(
+    store,
+    config,
+    taskdefs,
+    adapter_fn,
+    ticket_id: str,
+    *,
+    messaging,
+    considered,
+    qualifying_ids,
+    latest_read,
+    save_watermark,
+    ack,
+    source_event_id: str,
+) -> None:
+    """Re-admit an intake-blocked ticket from a bare approver comment.
+
+    Mirrors `intake_ticket`'s eligibility + root enqueue: if the ticket now
+    matches a product area (etc.), clear the intake block and queue
+    `initial_task` with the resolved repo. If still ineligible, ack the
+    reasons and queue nothing -- burning triage here was how tickets 4/8
+    spent retries on a ticket that never started.
+    """
+    tracker = adapter_fn(
+        "tracker", config.components["tracker"]["adapter"], repo=intake_repo(config)
+    )
+    details = tracker.fetch_ticket(ticket_id)
+    reasons = list(eligibility_reasons(config, details))
+    if has_injection(details):
+        reasons.append("prompt-injection pattern detected in ticket text")
+
+    if reasons:
+        store.write(lambda txn, w=latest_read: save_watermark(txn, w))
+        body = "Still not eligible for intake:\n" + "\n".join(f"- {r}" for r in reasons)
+        ack(body, f"{source_event_id}:intake-still-ineligible")
+        _acknowledge(messaging, considered, set())
+        return
+
+    initial_task_id = config.projects["initial_task"]
+    if initial_task_id not in taskdefs:
+        store.write(lambda txn, w=latest_read: save_watermark(txn, w))
+        ack(
+            f"`{initial_task_id}` is not a task in this deployment, so nothing was queued.",
+            f"{source_event_id}:unknown-task",
+        )
+        _acknowledge(messaging, considered, set())
+        return
+
+    taskdef = taskdefs[initial_task_id]
+    repo = resolve_target_repo(config, details)
+    run_id = compute_run_id(source_event_id, 0, initial_task_id, 0)
+    result: dict = {}
+
+    def apply(txn: Txn) -> None:
+        result.clear()
+        save_watermark(txn, latest_read)
+        doc = txn.ticket_doc(ticket_id)
+        if doc.get("block_source") != "intake":
+            # Another writer cleared the intake block between our read and
+            # this write; do not invent a second root run.
+            return
+        cap = config.budgets.get("max_comment_runs_per_ticket")
+        if cap is not None and _comment_run_count(doc, _COMMENT_SOURCE_PREFIXES) >= cap:
+            result["refused"] = f"this ticket has already spent its {cap} comment-triggered runs"
+            return
+        ok, _trace = check_loop_guard(doc, max_runs=config.budgets["loop_guard"]["max_runs"])
+        verdict = check_budget(doc, taskdef["budget"], config.budgets["ticket_cap_usd"])
+        if not ok or verdict["over_ticket_cap"] or verdict["insufficient_headroom"]:
+            result["refused"] = "comment would exceed this ticket's run/budget ceiling"
+            return
+        seq = _insert_at_queue_head(txn, ticket_id)
+        if not _put_queued_run(
+            txn,
+            run_id,
+            ticket_id=ticket_id,
+            task_id=initial_task_id,
+            task_version=taskdef["version"],
+            bindings={},
+            attempt=0,
+            chain_depth=0,
+            source_event_id=source_event_id,
+            enqueue_index=0,
+            repo=repo,
+            queue_seq=seq,
+        ):
+            return
+        txn.set_ticket(
+            ticket_id,
+            status="ACTIVE",
+            block_reason=None,
+            block_source=None,
+            interrupted_run_id=None,
+        )
+        result["enqueued"] = run_id
+
+    store.write(apply)
+
+    if result.get("refused"):
+        _acknowledge(messaging, considered, set())
+        _block_ticket(store, config, adapter_fn, ticket_id, run_id, result["refused"])
+        _escalate(store, config, adapter_fn, ticket_id, run_id, result["refused"])
+        return
+    _acknowledge(messaging, considered, qualifying_ids)
+    if result.get("enqueued"):
+        set_status_label(config, adapter_fn, ticket_id, "ACTIVE")
+        ack(
+            f"Re-admitted after intake block; queued `{initial_task_id}`.",
+            f"{run_id}:ack",
+        )
+
+
 def _poll_comment_subject(
-    store, config, taskdefs, adapter_fn, ticket_id: str, *,
-    repo: str, number: str, source_prefix: str, watermark: str | None,
-    save_watermark, members: set[str], feedback_task: str | None,
-    default_task: str | None, ack, run_repo: str | None = None,
+    store,
+    config,
+    taskdefs,
+    adapter_fn,
+    ticket_id: str,
+    *,
+    repo: str,
+    number: str,
+    source_prefix: str,
+    watermark: str | None,
+    save_watermark,
+    members: set[str],
+    feedback_task: str | None,
+    default_task: str | None,
+    ack,
+    run_repo: str | None = None,
 ) -> None:
     """Poll one comment thread and queue at most one run from it.
 
@@ -1280,9 +1645,7 @@ def _poll_comment_subject(
     # qualifying comment picks the task and owns the run's identity; every
     # comment's text goes into the reason.
     latest_comment, (task_id, _) = requests[-1]
-    reason = "\n\n".join(
-        f"@{c['author']}: {text}" for c, (_, text) in requests if text
-    )
+    reason = "\n\n".join(f"@{c['author']}: {text}" for c, (_, text) in requests if text)
     source_event_id = f"{source_prefix}:{latest_comment['id']}"
 
     qualifying_ids = {c["id"] for c, _ in requests}
@@ -1299,6 +1662,32 @@ def _poll_comment_subject(
         # above carries the detail; the reaction just keeps every read comment
         # accounted for.
         _acknowledge(messaging, considered, set())
+        return
+
+    # Intake-blocked + bare "retry" comment: re-check eligibility instead of
+    # burning comment_default_task (triage) on a ticket that never started.
+    # Explicit `/agent-hq do …` still steers mid-route as usual.
+    ticket_state = store.read_state(ticket_id) or {}
+    if (
+        ticket_state.get("block_source") == "intake"
+        and default_task
+        and task_id == default_task
+        and _is_bare_default_intent(latest_comment["body"], default_task=default_task)
+    ):
+        _intake_comment_readmit(
+            store,
+            config,
+            taskdefs,
+            adapter_fn,
+            ticket_id,
+            messaging=messaging,
+            considered=considered,
+            qualifying_ids=qualifying_ids,
+            latest_read=latest_read,
+            save_watermark=save_watermark,
+            ack=ack,
+            source_event_id=source_event_id,
+        )
         return
 
     taskdef = taskdefs[task_id]
@@ -1318,9 +1707,7 @@ def _poll_comment_subject(
         # next comment unblock it -- a slow oscillation that spends real money.
         cap = config.budgets.get("max_comment_runs_per_ticket")
         if cap is not None and _comment_run_count(doc, _COMMENT_SOURCE_PREFIXES) >= cap:
-            result["refused"] = (
-                f"this ticket has already spent its {cap} comment-triggered runs"
-            )
+            result["refused"] = f"this ticket has already spent its {cap} comment-triggered runs"
             return
         ok, _trace = check_loop_guard(doc, max_runs=config.budgets["loop_guard"]["max_runs"])
         verdict = check_budget(doc, taskdef["budget"], config.budgets["ticket_cap_usd"])
@@ -1333,9 +1720,17 @@ def _poll_comment_subject(
         # the queue is disturbed.
         seq = _insert_at_queue_head(txn, ticket_id)
         if not _put_queued_run(
-            txn, run_id, ticket_id=ticket_id, task_id=task_id,
-            task_version=taskdef["version"], bindings={}, attempt=0, chain_depth=0,
-            source_event_id=source_event_id, enqueue_index=0, repo=run_repo,
+            txn,
+            run_id,
+            ticket_id=ticket_id,
+            task_id=task_id,
+            task_version=taskdef["version"],
+            bindings={},
+            attempt=0,
+            chain_depth=0,
+            source_event_id=source_event_id,
+            enqueue_index=0,
+            repo=run_repo,
             queue_seq=seq,
         ):
             return  # already applied on an earlier pass
@@ -1349,8 +1744,12 @@ def _poll_comment_subject(
         txn.append_event(
             ticket_id,
             Event(
-                event_id=f"{run_id}:rework", kind="run.rework", ticket_id=ticket_id,
-                run_id=run_id, detail=detail, actor=latest_comment["author"],
+                event_id=f"{run_id}:rework",
+                kind="run.rework",
+                ticket_id=ticket_id,
+                run_id=run_id,
+                detail=detail,
+                actor=latest_comment["author"],
                 source=source_event_id,
             ).to_dict(),
         )
@@ -1359,8 +1758,11 @@ def _poll_comment_subject(
         # out were a full restart via re-label or hand-editing the state branch.
         if doc.get("status") in ("AWAITING_MERGE", "BLOCKED"):
             txn.set_ticket(
-                ticket_id, status="ACTIVE",
-                block_reason=None, block_source=None, interrupted_run_id=None,
+                ticket_id,
+                status="ACTIVE",
+                block_reason=None,
+                block_source=None,
+                interrupted_run_id=None,
             )
         result["enqueued"] = run_id
 
@@ -1408,7 +1810,8 @@ def resolve_awaiting_merge(store, config, adapter_fn, ticket_id: str, state: dic
     pr_states = {}
     for work_repo in watched:
         agent = adapter_fn(
-            "agent-session", config.components["agent-session"]["adapter"],
+            "agent-session",
+            config.components["agent-session"]["adapter"],
             repo=work_repo["repo"],
         )
         pr_states[work_repo["pr_ref"]] = agent.pr_state(work_repo["pr_ref"])
@@ -1425,7 +1828,11 @@ def resolve_awaiting_merge(store, config, adapter_fn, ticket_id: str, state: dic
         reason = "work PR closed unmerged: " + ", ".join(sorted(abandoned))
         _block_ticket(store, config, adapter_fn, ticket_id, run_id, reason)
         _escalate(
-            store, config, adapter_fn, ticket_id, run_id,
+            store,
+            config,
+            adapter_fn,
+            ticket_id,
+            run_id,
             f"{reason}. The engine finished its work, but the PR was closed without "
             "merging, so the ticket is blocked pending human review.",
         )
@@ -1434,9 +1841,13 @@ def resolve_awaiting_merge(store, config, adapter_fn, ticket_id: str, state: dic
     if not all(pr["merged"] for pr in pr_states.values()):
         return
 
-    tracker = adapter_fn("tracker", config.components["tracker"]["adapter"], repo=intake_repo(config))
+    tracker = adapter_fn(
+        "tracker", config.components["tracker"]["adapter"], repo=intake_repo(config)
+    )
     notify_ticket(
-        config, adapter_fn, ticket_id,
+        config,
+        adapter_fn,
+        ticket_id,
         "Merged: " + ", ".join(sorted(pr_states)) + ". Closing the ticket.",
         f"{ticket_id}:merged",
     )
@@ -1532,17 +1943,16 @@ def dispatch(
             # configured limit -- reusing the enqueue-time "<" ceiling here
             # would block a legitimately-queued boundary run before it ever
             # executes.
-            runs = [
-                r for r in state.get("runs", [])
-                if r.get("state") != RunState.CANCELLED.value
-            ]
+            runs = [r for r in state.get("runs", []) if r.get("state") != RunState.CANCELLED.value]
             if len(runs) > budgets["loop_guard"]["max_runs"]:
                 _block_ticket(store, config, adapter_fn, ticket_id, run_id, "loop guard tripped")
                 break
 
             verdict = check_budget(state, taskdef["budget"], budgets["ticket_cap_usd"])
             if verdict["over_ticket_cap"] or verdict["insufficient_headroom"]:
-                _block_ticket(store, config, adapter_fn, ticket_id, run_id, "ticket budget exhausted")
+                _block_ticket(
+                    store, config, adapter_fn, ticket_id, run_id, "ticket budget exhausted"
+                )
                 break
 
             if not check_concurrency(

@@ -256,12 +256,19 @@ agentalec/care_fe:
     qa: |
       make -C .agent-hq/care up load-fixtures
       npm ci && npm run build
+  format:
+    implement: |
+      # prettier --write on git-changed files only (exclude .agent-hq)
 ```
 
-The engine runs it in the worktree before the agent starts
+The engine runs setup in the worktree before the agent starts
 (`engine.runner._run_setup`), and resolution is
 `setup[task_id] or setup["default"] or None`
-(`engine.engine.resolve_setup`). It lives in config, not in a prompt or in
+(`engine.engine.resolve_setup`). An optional `format` map has the same shape
+and resolution (`engine.engine.resolve_format`): after a successful agent run
+on a task with `writes_code: true`, execute runs it before
+`materialize_work_patch` (`engine.runner._run_format`). Collect does not
+reinstall deps or reformat. Both live in config, not in a prompt or in
 engine code, so a different project configures a different command without
 touching either.
 
@@ -278,8 +285,8 @@ The command runs with the engine's credentials stripped
 (`AGENT_HQ_TOKEN`/`GITHUB_TOKEN`/`GH_TOKEN`/`COPILOT_GITHUB_TOKEN`): it is
 operator-authored config and so trusted further than agent output, but it has
 no business holding tokens. It is bounded by the run's own deadline — note
-that deadline starts at *claim* time, so setup time comes out of the task's
-`budget.max_runtime_min`.
+that deadline starts at *claim* time, so setup (and format) time comes out of
+the task's `budget.max_runtime_min`.
 
 Anything the agent needs to know goes in `.agent-hq/setup-notes.md` (URLs,
 credentials, paths). When a setup command is configured, the assembled prompt

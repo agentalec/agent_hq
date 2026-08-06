@@ -45,8 +45,11 @@ Never edit the implementation — your tools are read-only.
 - **No blockers remain** (only should-fix / nits, or clean): queue `qa`,
   forwarding `specs/{ticket}/spec.md`, `specs/{ticket}/review.md`, and
   `specs/{ticket}/qa-plan.md` (when you were given it — QA executes that
-  traversal plan with live-flow video before `finalize`). You do not queue
-  `finalize` yourself.
+  traversal plan with live-flow video before `finalize`). Suite/CI /
+  "Playwright must pass" notes belong in Test plan / notes, not as live
+  Action/Expect criteria; if the plan mixed them in, flag that as a
+  should-fix so the next implement round keeps them out of the live list.
+  You do not queue `finalize` yourself.
 - **Blockers remain and N < 3**: queue `implement`, forwarding
   `specs/{ticket}/spec.md` and `specs/{ticket}/review.md`; the entry's
   `reason` must name the blockers to fix.

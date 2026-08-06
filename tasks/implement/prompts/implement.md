@@ -22,13 +22,22 @@ than batching everything at the end -- it keeps your own working state
 recoverable. Your commits are squashed into one before they reach the work
 repo, so the message that ends up on the branch is the `summary` you write in
 `.agent-hq/control.json` (see Control output below) -- describe what you
-actually changed there, not what the ticket asked for.
+actually changed there, not what the ticket asked for. The engine formats
+changed files after you finish, per the work repo's `format` config -- you do
+not need to run the repo formatter yourself.
 
 ## Write `specs/{ticket}/qa-plan.md` (required)
 
 QA will execute this plan in a browser; it must not invent clicks from scratch.
 For every **user-facing** acceptance criterion that applies to your repo,
-add a section. If nothing is user-facing, write a short file saying so.
+add a section with Action / Expect / Record steps. If nothing is user-facing,
+write a short file saying so.
+
+**Live plan only.** Agent QA drives the running app; it does not run the
+repo's Playwright suite or CI. Put "add Playwright coverage" / "CI must
+pass" under a **Test plan / notes** section (or in the implement summary) —
+**not** as a live Action/Expect/Record criterion in `qa-plan.md`. Suite
+items that land in the live list waste QA retries when scored dishonestly.
 
 ```markdown
 ## <criterion-id> — <title from spec>
@@ -43,7 +52,7 @@ add a section. If nothing is user-facing, write a short file saying so.
 
 ### Prerequisites
 - facility context active (if applicable)
-- data that must already exist
+- data that must already exist (prefer fixtures; QA may UI-create on localhost)
 
 ### Steps
 1. **Action:** ...
@@ -54,6 +63,9 @@ add a section. If nothing is user-facing, write a short file saying so.
 
 ### Success looks like
 - toast / URL / visible state that proves the criterion
+
+## Test plan / notes
+- Playwright E2E / CI expectations for implement (not live QA criteria)
 ```
 
 Where to look in CARE (compress into the research map):
@@ -63,7 +75,7 @@ Where to look in CARE (compress into the research map):
 - Pages/components: `src/pages/`, `src/components/`
 - Labels: `public/locale/en.json`
 - Permissions: `src/common/Permissions.ts`, `PermissionContext`
-- Existing E2E hints: `tests/`
+- Existing E2E hints: `tests/` (for implement tests — not live QA steps)
 - APIs: `src/types/**/*Api.ts`
 
 When the work is committed, queue a single `review` entry in your
