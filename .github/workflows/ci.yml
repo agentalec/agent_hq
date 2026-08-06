@@ -17,6 +17,11 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           dev: "true"
+      # Match run.yml collect: QA webm→gif smoke needs ffmpeg on PATH.
+      # Production collect already installs it; unit CI did not, so
+      # test_webm_to_gif_roundtrip_with_ffmpeg FileNotFoundError'd.
+      - name: Install ffmpeg (QA webm→gif smoke)
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: ruff check .
       - run: pytest -q
       - run: agent-hq config validate

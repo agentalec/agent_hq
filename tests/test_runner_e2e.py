@@ -20,6 +20,7 @@ the prior single-job model.
 """
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -1746,8 +1747,17 @@ def test_derive_qa_gifs_omits_failures_without_raising(monkeypatch):
     assert derived == {}
 
 
+@pytest.mark.skipif(
+    shutil.which("ffmpeg") is None,
+    reason="ffmpeg not on PATH (install for local smoke; CI installs it)",
+)
 def test_webm_to_gif_roundtrip_with_ffmpeg(tmp_path):
-    """Smoke: real ffmpeg produces a GIF header from a tiny synthetic webm."""
+    """Smoke: real ffmpeg produces a GIF header from a tiny synthetic webm.
+
+    Skips when ffmpeg is absent so local/dev without it does not hard-fail.
+    CI installs ffmpeg so this still runs there. Production collect already
+    installs ffmpeg in run.yml; missing ffmpeg there degrades to WebM only.
+    """
     webm = tmp_path / "t.webm"
     proc = subprocess.run(
         [
