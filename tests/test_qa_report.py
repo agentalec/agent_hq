@@ -21,6 +21,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SCHEMAS_DIR = REPO_ROOT / "schemas"
 CONFIG_DIR = REPO_ROOT / "config"
 
+TICKET = "7"
+
 
 def _criterion(**over):
     base = {
@@ -31,7 +33,7 @@ def _criterion(**over):
         "blocker": None,
         "blocker_category": None,
         "plan_steps_run": ["1", "2"],
-        "videos": ["specs/7/videos/dropdown.webm"],
+        "videos": [f"specs/{TICKET}/videos/dropdown.webm"],
         "screenshots": [],
     }
     base.update(over)
@@ -55,6 +57,34 @@ def _report(criteria, **summary_over):
 
 def _raw(doc) -> bytes:
     return (json.dumps(doc) + "\n").encode()
+
+
+def _pass_ledger(*extra: str) -> set[str]:
+    return {
+        f"specs/{TICKET}/videos/dropdown.webm",
+        f"specs/{TICKET}/qa-drivers/dropdown.mjs",
+        f"specs/{TICKET}/qa-logs/dropdown.log",
+        f"specs/{TICKET}/qa-report.json",
+        *extra,
+    }
+
+
+def _pass_contents(**over: bytes) -> dict[str, bytes]:
+    base = {
+        f"specs/{TICKET}/qa-logs/dropdown.log": b"playwright ok\n",
+    }
+    base.update(over)
+    return base
+
+
+def _validate(doc, *, ledger=None, media=None, contents=None):
+    return validate_qa_report(
+        _raw(doc),
+        ledger=ledger if ledger is not None else _pass_ledger(),
+        media=media,
+        ticket_id=TICKET,
+        contents=contents if contents is not None else _pass_contents(),
+    )
 
 
 def test_schema_accepts_a_minimal_honest_pass():
@@ -94,20 +124,71 @@ def test_load_config_rejects_video_and_screenshots_both_false(tmp_path):
 
 def test_pass_requires_live_flow_video_in_ledger():
     doc = _report([_criterion()])
-    ledger = {"specs/7/videos/dropdown.webm", "specs/7/qa-report.json"}
-    assert validate_qa_report(_raw(doc), ledger=ledger) is None
+    assert _validate(doc) is None
 
-    assert "live-flow" in validate_qa_report(
-        _raw(_report([_criterion(evidence_kind="code-inspection")])),
-        ledger=ledger,
+    assert "live-flow" in _validate(_report([_criterion(evidence_kind="code-inspection")]))
+    assert "≥1 video" in _validate(_report([_criterion(videos=[])]))
+    assert "not in ledger" in _validate(
+        doc,
+        ledger={
+            f"specs/{TICKET}/qa-drivers/dropdown.mjs",
+            f"specs/{TICKET}/qa-logs/dropdown.log",
+            f"specs/{TICKET}/qa-report.json",
+        },
     )
-    assert "≥1 video" in validate_qa_report(
-        _raw(_report([_criterion(videos=[])])),
-        ledger=ledger,
+
+
+def test_pass_requires_canonical_video_name():
+    doc = _report([_criterion(videos=[f"specs/{TICKET}/videos/dropdown-desktop.webm"])])
+    assert "exactly" in _validate(
+        doc,
+        ledger=_pass_ledger(f"specs/{TICKET}/videos/dropdown-desktop.webm"),
     )
-    assert "not in ledger" in validate_qa_report(
-        _raw(doc),
-        ledger={"specs/7/qa-report.json"},
+
+
+def test_pass_rejects_shared_video_across_criteria():
+    """Two criteria cannot list the same video path (ticket-13 rename swap)."""
+    shared = f"specs/{TICKET}/videos/dropdown.webm"
+    doc = _report(
+        [
+            _criterion(id="dropdown", videos=[shared]),
+            _criterion(id="other", videos=[shared]),
+        ]
+    )
+    ledger = _pass_ledger(
+        f"specs/{TICKET}/qa-drivers/other.mjs",
+        f"specs/{TICKET}/qa-logs/other.log",
+    )
+    contents = {
+        **_pass_contents(),
+        f"specs/{TICKET}/qa-logs/other.log": b"other\n",
+    }
+    err = _validate(doc, ledger=ledger, contents=contents)
+    assert err is not None
+    assert "claimed by" in err
+
+
+def test_pass_requires_driver_and_nonempty_log():
+    doc = _report([_criterion()])
+    assert "driver" in _validate(
+        doc,
+        ledger={
+            f"specs/{TICKET}/videos/dropdown.webm",
+            f"specs/{TICKET}/qa-logs/dropdown.log",
+            f"specs/{TICKET}/qa-report.json",
+        },
+    )
+    assert "log" in _validate(
+        doc,
+        ledger={
+            f"specs/{TICKET}/videos/dropdown.webm",
+            f"specs/{TICKET}/qa-drivers/dropdown.mjs",
+            f"specs/{TICKET}/qa-report.json",
+        },
+    )
+    assert "non-empty" in _validate(
+        doc,
+        contents={f"specs/{TICKET}/qa-logs/dropdown.log": b"   \n"},
     )
 
 
@@ -116,17 +197,18 @@ def test_screenshots_escape_hatch_when_video_off():
         [
             _criterion(
                 videos=[],
-                screenshots=["specs/7/screenshots/dropdown.png"],
+                screenshots=[f"specs/{TICKET}/screenshots/dropdown.png"],
             )
         ]
     )
-    ledger = {"specs/7/screenshots/dropdown.png"}
+    ledger = {f"specs/{TICKET}/screenshots/dropdown.png"}
     media = {"video": False, "screenshots": True, "video_max_seconds": 30}
-    assert validate_qa_report(_raw(doc), ledger=ledger, media=media) is None
-    assert "≥1 screenshot" in validate_qa_report(
-        _raw(_report([_criterion(videos=[], screenshots=[])])),
+    assert _validate(doc, ledger=ledger, media=media, contents={}) is None
+    assert "≥1 screenshot" in _validate(
+        _report([_criterion(videos=[], screenshots=[])]),
         ledger=ledger,
         media=media,
+        contents={},
     )
 
 
@@ -142,7 +224,7 @@ def test_not_exercised_requires_blocker_category():
             )
         ]
     )
-    assert validate_qa_report(_raw(doc), ledger=set()) is None
+    assert _validate(doc, ledger=set(), contents={}) is None
     bad = _report(
         [
             _criterion(
@@ -154,7 +236,7 @@ def test_not_exercised_requires_blocker_category():
             )
         ]
     )
-    assert "blocker_category" in validate_qa_report(_raw(bad), ledger=set())
+    assert "blocker_category" in _validate(bad, ledger=set(), contents={})
 
 
 def test_all_passed_cannot_claim_full_pass_with_gaps():
@@ -170,18 +252,12 @@ def test_all_passed_cannot_claim_full_pass_with_gaps():
         ),
     ]
     doc = _report(criteria, all_passed=True)
-    assert "all_passed" in validate_qa_report(
-        _raw(doc),
-        ledger={"specs/7/videos/dropdown.webm"},
-    )
+    assert "all_passed" in _validate(doc, ledger=_pass_ledger())
 
 
 def test_summary_counts_must_match_verdicts():
     doc = _report([_criterion()], **{"pass": 2})
-    assert "summary counts" in validate_qa_report(
-        _raw(doc),
-        ledger={"specs/7/videos/dropdown.webm"},
-    )
+    assert "summary counts" in _validate(doc, ledger=_pass_ledger())
 
 
 def test_format_qa_summary_footer():

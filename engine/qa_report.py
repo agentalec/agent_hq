@@ -8,6 +8,7 @@ media policy and refuses a dishonest report (retry via ordinary failure path).
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -47,17 +48,33 @@ def _load_schema() -> dict:
     return json.loads(_SCHEMA_PATH.read_text())
 
 
+def _canonical_video(ticket_id: str, criterion_id: str) -> str:
+    return f"specs/{ticket_id}/videos/{criterion_id}.webm"
+
+
+def _driver_path(ticket_id: str, criterion_id: str) -> str:
+    return f"specs/{ticket_id}/qa-drivers/{criterion_id}.mjs"
+
+
+def _log_path(ticket_id: str, criterion_id: str) -> str:
+    return f"specs/{ticket_id}/qa-logs/{criterion_id}.log"
+
+
 def validate_qa_report(
     raw: bytes | str,
     *,
     ledger: set[str],
     media: dict | None = None,
+    ticket_id: str,
+    contents: Mapping[str, bytes] | None = None,
 ) -> str | None:
     """None if the report is honest and consistent; else a rejection reason.
 
     `media` is the resolved policy from `resolve_qa_media`. Default policy:
-    `pass` requires `evidence_kind: live-flow`, empty blocker fields, and ≥1
-    video path present in the ledger. Escape hatch (`video: false`,
+    `pass` requires `evidence_kind: live-flow`, empty blocker fields, and the
+    canonical video `specs/{ticket}/videos/{id}.webm` present in the ledger,
+    owned by that criterion alone, plus matching `qa-drivers/{id}.mjs` and a
+    non-empty `qa-logs/{id}.log`. Escape hatch (`video: false`,
     `screenshots: true`): ≥1 screenshot in the ledger instead.
     """
     media = media or dict(_DEFAULT_MEDIA)
@@ -107,6 +124,8 @@ def validate_qa_report(
             f"(all_passed={summary['all_passed']}, expected {expected_all})"
         )
 
+    video_owners: dict[str, str] = {}
+
     for c in criteria:
         cid = c["id"]
         if c["verdict"] == "pass":
@@ -127,11 +146,40 @@ def validate_qa_report(
                         f"qa-report.json: criterion '{cid}': pass requires ≥1 video "
                         "when qa.video is true"
                     )
+                expected = _canonical_video(ticket_id, cid)
+                for v in videos:
+                    owner = video_owners.get(v)
+                    if owner is not None:
+                        return (
+                            f"qa-report.json: video {v} is claimed by criteria "
+                            f"'{owner}' and '{cid}'"
+                        )
+                    video_owners[v] = cid
+                    if v != expected:
+                        return (
+                            f"qa-report.json: criterion '{cid}': video path must be "
+                            f"exactly {expected}, got {v}"
+                        )
                 missing = [v for v in videos if v not in ledger]
                 if missing:
                     return f"qa-report.json: criterion '{cid}': video not in ledger: " + ", ".join(
                         missing
                     )
+                driver = _driver_path(ticket_id, cid)
+                if driver not in ledger:
+                    return (
+                        f"qa-report.json: criterion '{cid}': pass requires driver "
+                        f"{driver} in the ledger"
+                    )
+                log = _log_path(ticket_id, cid)
+                if log not in ledger:
+                    return (
+                        f"qa-report.json: criterion '{cid}': pass requires log {log} in the ledger"
+                    )
+                if contents is not None:
+                    log_bytes = contents.get(log, b"")
+                    if not log_bytes.strip():
+                        return f"qa-report.json: criterion '{cid}': log {log} must be non-empty"
             else:
                 # Escape hatch: screenshots-only mode.
                 shots = c.get("screenshots") or []
