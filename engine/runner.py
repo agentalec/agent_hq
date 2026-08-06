@@ -1168,6 +1168,8 @@ def _collect_success(
             artifact_contents[qa_report_path],
             ledger=set(artifact_contents),
             media=media,
+            ticket_id=ticket_id,
+            contents=artifact_contents,
         )
         if bad_report is not None:
             _fail_execute_artifact(

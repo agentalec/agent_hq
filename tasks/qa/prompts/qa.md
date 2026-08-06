@@ -15,10 +15,13 @@ code under test is there, and you have Bash, Node 22, and Docker.
    `tests/.auth/*.json`). Verify the session, then facility context when the
    plan marks a flow facility-scoped. Missing facility → `not-exercised` /
    `missing-facility-context`.
-3. **Execute steps with Playwright.** Default evidence is **video**
-   (`recordVideo`); copy finished clips into
-   `specs/{ticket}/videos/<short-slug>.webm`. Before driving each recorded
-   flow, enable the native cursor/click overlay:
+3. **Execute criteria one-by-one with Playwright.** Default evidence is
+   **video** (`recordVideo`). For each live-flow criterion, write one isolated
+   driver, run it alone, wait for exit, then move on — never parallel workers
+   or a shared recording across ACs. Canonical clip path:
+   `specs/{ticket}/videos/{id}.webm` (basename **must** equal the criterion
+   `id` from `qa-report.json`). Before driving each recorded flow, enable the
+   native cursor/click overlay:
    `await page.screencast.showActions({ cursor: "pointer" })`
    (Playwright ≥ 1.61). Do not invent a custom DOM cursor. Optional stills
    only when the Evidence media policy (injected above) has
@@ -46,21 +49,54 @@ was missing.
 
 ## Where your files go
 
-**Everything you create except evidence media goes under `.agent-hq/`** —
-driver scripts, throwaway fixtures, temp pages, downloaded data, all of it.
-That directory never reaches the work repo. Anything you leave anywhere else
-lands in the pull request.
+**Scratch goes under `.agent-hq/`** — temp pages, downloaded data, and anything
+else that is not a declared ledger output. That directory never reaches the
+work repo. Anything you leave elsewhere (except the paths below) lands in the
+pull request.
 
-Evidence media is the exception:
+Declared ledger outputs under `specs/{ticket}/` (collected; kept out of the
+work-repo patch because `writes_code: false`):
 
-- videos → `specs/{ticket}/videos/<short-slug>.webm` (default; required for pass)
+- drivers → `specs/{ticket}/qa-drivers/{id}.mjs` (one file per criterion `id`)
+- run logs → `specs/{ticket}/qa-logs/{id}.log` (stdout/stderr for that driver)
+- videos → `specs/{ticket}/videos/{id}.webm` (basename **must** equal `id`)
 - screenshots → `specs/{ticket}/screenshots/<short-slug>.png` (optional unless
   the media policy disables video)
+- report → `specs/{ticket}/qa.md` and `specs/{ticket}/qa-report.json`
 
 You write WebM only. Collect may derive a sibling lite `.gif` for the PR
 comment embed — do not spend the run producing GIFs yourself.
 
 Do not commit anything.
+
+## Serial, one isolated driver per criterion
+
+Run criteria **strictly one after another**. Forbidden:
+
+- `npx playwright test` over a folder with default workers
+- `fullyParallel` / multi-file suites in one invocation
+- backgrounding multiple drivers
+- one shared browser context or one long recording across ACs
+- manually renaming or reassigning opaque `recordVideo` clips between ids
+
+Allowed: `node specs/{ticket}/qa-drivers/{id}.mjs` (or equivalent) for a
+**single** id, wait for exit, then the next id. If you must use the Playwright
+test runner for one file, force `--workers=1` and never pass more than that
+one file.
+
+For each live-flow criterion:
+
+1. Write **one** driver at `specs/{ticket}/qa-drivers/{id}.mjs` (plain Node +
+   Playwright API preferred over the test runner; `id` from `qa-report.json`).
+2. That script alone opens a context with `recordVideo`, calls
+   `page.screencast.showActions({ cursor: "pointer" })`, runs **only** that
+   criterion's steps, then **closes the page/context** (flushes WebM).
+3. Move/copy the finished clip to exactly `specs/{ticket}/videos/{id}.webm`.
+4. Redirect that driver's stdout/stderr to `specs/{ticket}/qa-logs/{id}.log`
+   (non-empty — capture what the runner printed).
+
+`qa.md` / `qa-report.json` video paths must be that same
+`specs/{ticket}/videos/{id}.webm`. Never share one recording across ACs.
 
 ## Live-flow evidence (not code inspection)
 
@@ -104,9 +140,11 @@ Use exactly one of: `app-not-loading` | `auth-failure` |
 
 ### Honesty rules the engine also enforces
 
-- `pass` ⇒ `evidence_kind: live-flow` + ≥1 video path that reached the ledger
-  (default). Stills never required for pass unless video is disabled in
-  config.
+- `pass` ⇒ `evidence_kind: live-flow` + video path exactly
+  `specs/{ticket}/videos/{id}.webm` in the ledger (default), plus matching
+  `qa-drivers/{id}.mjs` and non-empty `qa-logs/{id}.log`. Each video path
+  may back at most one criterion. Stills never required for pass unless video
+  is disabled in config.
 - Non-live `evidence_kind` ⇒ never `pass`.
 - Summary cannot claim `all_passed` if any `fail` / `not-exercised`.
 - If video capture fails → `not-exercised` / `fail` with `video-failure`, not
@@ -125,8 +163,9 @@ One subsection per acceptance criterion, each with:
 
 - the verdict — `pass`, `fail`, or `not-exercised` (with reason + category)
 - what you actually did (plan steps run, briefly)
-- the video, linked with a **repo-relative** markdown link:
-  `[dropdown open — desktop](specs/{ticket}/videos/dropdown-desktop.webm)`
+- the video, linked with a **repo-relative** markdown link whose basename is
+  the criterion id:
+  `[dropdown open — desktop](specs/{ticket}/videos/dropdown.webm)`
 - optional screenshot embeds only when stills were taken:
   `![…](specs/{ticket}/screenshots/….png)`
 
@@ -152,7 +191,7 @@ Required structured twin of `qa.md`. Shape:
       "blocker": null,
       "blocker_category": null,
       "plan_steps_run": ["1", "2"],
-      "videos": ["specs/{ticket}/videos/….webm"],
+      "videos": ["specs/{ticket}/videos/short-slug.webm"],
       "screenshots": []
     }
   ],
