@@ -19,7 +19,7 @@ _SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schemas" / "qa-report.s
 _DEFAULT_MEDIA = {
     "video": True,
     "screenshots": False,
-    "video_max_seconds": 30,
+    "video_max_seconds": 120,
 }
 
 
