@@ -159,7 +159,12 @@ def test_duplicate_event_id_appended_twice_is_one_line(tmp_path):
     origin = _make_origin(tmp_path)
     worktree = _clone_worktree(tmp_path, origin, "wt1")
     store = GitJsonStateStore(worktree)
-    event = {"event_id": "evt-dup", "kind": "run.queued", "ticket_id": "ticket-1", "run_id": "run-1"}
+    event = {
+        "event_id": "evt-dup",
+        "kind": "run.queued",
+        "ticket_id": "ticket-1",
+        "run_id": "run-1",
+    }
 
     store.write(lambda txn: txn.append_event("ticket-1", dict(event)))
     store.write(lambda txn: txn.append_event("ticket-1", dict(event)))
@@ -249,9 +254,7 @@ def test_claim_run_cap_excludes_queued_no_deadlock(tmp_path):
     store.write(setup)
 
     # cap=2, but ticket-1/ticket-2 are only QUEUED -- not in-flight.
-    assert store.claim_run(
-        "ticket-3", "run-3", "2026-07-18T00:00:00Z", 30, in_flight_cap=2
-    ) is True
+    assert store.claim_run("ticket-3", "run-3", "2026-07-18T00:00:00Z", 30, in_flight_cap=2) is True
 
 
 def test_claim_run_cap_counts_only_running_and_waiting_gate(tmp_path):
@@ -263,20 +266,24 @@ def test_claim_run_cap_counts_only_running_and_waiting_gate(tmp_path):
 
     def setup(txn: Txn) -> None:
         txn.set_ticket("ticket-1", status="ACTIVE", pinned_comment_id=None)
-        txn.put_run("ticket-1", {**RUN, "run_id": "run-1", "ticket_id": "ticket-1", "state": "RUNNING"})
+        txn.put_run(
+            "ticket-1", {**RUN, "run_id": "run-1", "ticket_id": "ticket-1", "state": "RUNNING"}
+        )
         txn.set_ticket("ticket-2", status="ACTIVE", pinned_comment_id=None)
         txn.put_run(
             "ticket-2",
             {**RUN, "run_id": "run-2", "ticket_id": "ticket-2", "state": "WAITING_GATE"},
         )
         txn.set_ticket("ticket-3", status="ACTIVE", pinned_comment_id=None)
-        txn.put_run("ticket-3", {**RUN, "run_id": "run-3", "ticket_id": "ticket-3", "state": "QUEUED"})
+        txn.put_run(
+            "ticket-3", {**RUN, "run_id": "run-3", "ticket_id": "ticket-3", "state": "QUEUED"}
+        )
 
     store.write(setup)
 
-    assert store.claim_run(
-        "ticket-3", "run-3", "2026-07-18T00:00:00Z", 30, in_flight_cap=2
-    ) is False
+    assert (
+        store.claim_run("ticket-3", "run-3", "2026-07-18T00:00:00Z", 30, in_flight_cap=2) is False
+    )
     run3 = store.read_state("ticket-3")["runs"][0]
     assert run3["state"] == "QUEUED"
 
@@ -341,6 +348,8 @@ def test_artifact_round_trip(tmp_path):
     )
     assert store.read_artifact("ticket-1", "run-1", "specs/ticket-1/spec.md") == b"hello"
     assert store.read_artifact("ticket-1", "run-1", "missing.md") is None
+    assert store.list_artifacts("ticket-1", "run-1") == ["specs/ticket-1/spec.md"]
+    assert store.list_artifacts("ticket-1", "missing-run") == []
 
     # pushed to origin, not just written locally
     check = _clone_worktree(tmp_path, origin, "check")
@@ -359,7 +368,12 @@ def test_pending_handoffs_and_block_persist(tmp_path):
 
     store.write(setup)
 
-    handoff = {"key": "impl", "target_task": "implement", "reason": "ready", "source_run_id": "run-1"}
+    handoff = {
+        "key": "impl",
+        "target_task": "implement",
+        "reason": "ready",
+        "source_run_id": "run-1",
+    }
     store.write(lambda txn: txn.set_pending_handoffs("ticket-1", "run-1", [handoff]))
 
     state = store.read_state("ticket-1")

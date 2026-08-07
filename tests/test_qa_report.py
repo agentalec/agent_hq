@@ -92,6 +92,15 @@ def test_schema_accepts_a_minimal_honest_pass():
     Draft202012Validator(schema).validate(_report([_criterion()]))
 
 
+def test_schema_rejects_extra_notes_on_criterion():
+    """QA report criteria stay closed — narrative belongs in qa.md, not notes."""
+    doc = _report([_criterion(notes="seeded via UI")])
+    err = _validate(doc)
+    assert err is not None
+    assert "notes" in err
+    assert "schema violation" in err
+
+
 def test_resolve_qa_media_defaults_video_on():
     assert resolve_qa_media({}) == {
         "video": True,
