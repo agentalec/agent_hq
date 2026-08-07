@@ -13,6 +13,10 @@
 # `format` is the same shape, run AFTER a successful agent and BEFORE the work
 # patch is materialized (execute only; collect does not reformat). Only used
 # when the task `writes_code`.
+#
+# `format` is the same shape, run AFTER a successful agent and BEFORE the work
+# patch is materialized (execute only; collect does not reformat). Only used
+# when the task `writes_code`.
 yash-learner/care_fe_agent_hq:
   role: fe
   branch_prefix: agent-hq
@@ -25,6 +29,14 @@ yash-learner/care_fe_agent_hq:
     screenshots: false
     video_max_seconds: 120
   setup:
+    # Install deps so implement can run tools and so format's prettier resolves.
+    # HUSKY=0: git hooks have no business installing in a throwaway worktree.
+    # Do not set NODE_ENV=production here -- that skips devDependencies and
+    # breaks husky's prepare script the same way it would without HUSKY=0.
+    implement: |
+      set -euo pipefail
+      export CI=1 HUSKY=0
+      npm ci --prefer-offline
     # Install deps so implement can run tools and so format's prettier resolves.
     # HUSKY=0: git hooks have no business installing in a throwaway worktree.
     # Do not set NODE_ENV=production here -- that skips devDependencies and
