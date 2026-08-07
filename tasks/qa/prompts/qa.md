@@ -286,6 +286,8 @@ Every media path you link must be a file you actually saved.
 
 Required structured twin of `qa.md`. Shape:
 
+Omit `seed_attempt` unless `missing-test-data` (then require `{method, summary}` with method ≠ none).
+
 ```json
 {
   "criteria": [
@@ -296,7 +298,6 @@ Required structured twin of `qa.md`. Shape:
       "evidence_kind": "live-flow|code-inspection|emulator-limit|device-limit|unreachable",
       "blocker": null,
       "blocker_category": null,
-      "seed_attempt": null,
       "plan_steps_run": ["1", "2"],
       "videos": ["specs/{ticket}/videos/short-slug.webm"],
       "screenshots": []
