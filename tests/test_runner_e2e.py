@@ -2742,6 +2742,12 @@ def test_intake_blocked_bare_comment_readmits_when_eligible(config, taskdefs, st
     assert queued[0]["repo"] == "yash-learner/care_fe_agent_hq"
     assert any("Re-admitted" in msg for _, msg, _ in messaging.calls)
     assert dict(messaging.reactions)[301] == "rocket"
+    rework = [e for e in store.read_events("7") if e["kind"] == "run.rework"]
+    assert len(rework) == 1
+    assert rework[0]["run_id"] == queued[0]["run_id"]
+    assert "fixed the title" in rework[0]["detail"]
+    assert "no product area" in rework[0]["detail"]
+    assert rework[0]["actor"] == "example-alice"
 
 
 def test_intake_blocked_bare_comment_acks_when_still_ineligible(config, taskdefs, store, tmp_path):
@@ -2772,6 +2778,76 @@ def test_intake_blocked_bare_comment_acks_when_still_ineligible(config, taskdefs
     assert any("Still not eligible" in msg for _, msg, _ in messaging.calls)
     assert any("product area" in msg for _, msg, _ in messaging.calls)
     assert dict(messaging.reactions)[302] == "eyes"
+
+
+def test_intake_readmit_refuse_keeps_intake_block_source(config, taskdefs, store, tmp_path):
+    """Comment-cap refuse must not rewrite block_source to engine — otherwise
+    the next bare retry skips intake recovery and burns triage."""
+    _feedback_config(config)
+    config.projects["comment_default_task"] = "build"
+    config.projects["initial_task"] = "spec"
+    config.budgets["max_comment_runs_per_ticket"] = 0
+    store.write(
+        lambda txn: txn.set_block(
+            "7",
+            reason="no product area matches a configured repo",
+            source="intake",
+        )
+    )
+    messaging = FakeMessaging(by_subject=_issue_comments(_comment(304, "retry after fix")))
+    adapters = _adapters(
+        tracker=FakeTracker(_details(title="Add frontend endpoint")),
+        agent=FakeAgent(tmp_path / "work"),
+        messaging=messaging,
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    state = store.read_state("7")
+    assert state["status"] == "BLOCKED"
+    assert state["block_source"] == "intake"
+    assert [r for r in state["runs"] if r["state"] == "QUEUED"] == []
+    assert dict(messaging.reactions)[304] == "eyes"
+
+
+def test_intake_readmit_noop_uses_eyes_not_rocket(config, taskdefs, store, tmp_path):
+    """If the intake block was cleared before apply commits, react eyes —
+    rocket means a run was queued."""
+    from engine.engine import _intake_comment_readmit
+
+    _feedback_config(config)
+    config.projects["initial_task"] = "spec"
+    # No intake block — simulates the race after the gate saw intake.
+    store.write(lambda txn: txn.set_ticket("7", status="ACTIVE"))
+    messaging = FakeMessaging()
+    considered = [_comment(305, "retry")]
+    adapters = _adapters(
+        tracker=FakeTracker(_details(title="Add frontend endpoint")),
+        messaging=messaging,
+    )
+
+    def save_watermark(txn, w):
+        txn.set_ticket("7", comments_polled_at=w)
+
+    _intake_comment_readmit(
+        store,
+        config,
+        taskdefs,
+        adapters,
+        "7",
+        messaging=messaging,
+        considered=considered,
+        qualifying_ids={305},
+        latest_read="2026-07-18T08:00:00Z",
+        save_watermark=save_watermark,
+        ack=lambda *_a, **_k: None,
+        source_event_id="issue-comment:305",
+        rework_detail="@example-alice: retry",
+        rework_actor="example-alice",
+    )
+
+    assert dict(messaging.reactions)[305] == "eyes"
+    assert [r for r in store.read_state("7")["runs"] if r["state"] == "QUEUED"] == []
 
 
 def test_intake_blocked_explicit_do_still_queues_named_task(config, taskdefs, store, tmp_path):

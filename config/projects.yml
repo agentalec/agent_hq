@@ -1,6 +1,8 @@
 # Projects config (§6).
 repos:
   - yash-learner/care_fe_agent_hq
+  - yash-learner/care_agent_hq
+
 intake_label: hq:intake
 engine_repo: yash-learner/agent_hq
 initial_task: spec

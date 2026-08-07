@@ -72,12 +72,18 @@ yash-learner/care_fe_agent_hq:
         1.61+; this repo resolves 1.61.1):
           `await page.screencast.showActions({ cursor: "pointer" });`
         Do not inject a custom DOM cursor. After each criterion, copy the
-        finished `.webm` into `specs/<ticket>/videos/<short-slug>.webm`
-        (keep clips under ~30s). Collect may derive a sibling lite `.gif`
-        for the PR comment; you only need the WebM.
+        finished `.webm` into `specs/<ticket>/videos/<criterion-id>.webm`
+        (basename must equal the criterion `id` in qa-report.json; keep
+        clips under ~30s). Collect may derive a sibling lite `.gif` for
+        the PR comment; you only need the WebM.
       - Chromium is installed. Drive it with Playwright directly; you do not
         need to add tests to the repo's suite. Screenshots are optional; video
         is the required pass evidence unless the repo disables it.
+      - API seed (escape hatch): auth via `getApiUrl` / `getApiHeaders` from
+        `tests/helper/utils.ts` with `tests/.auth/user.json`. Facility-scoped
+        paths live in `src/types/**/*Api.ts` — prefer paths pasted in
+        qa-plan Data setup; else see the QA prompt discovery recipe. Never
+        invent unscoped `/api/v1/<resource>/` routes.
       NOTES
   format:
     # Prettier only the files this run changed vs agent-hq-base (the clone tip
@@ -93,4 +99,49 @@ yash-learner/care_fe_agent_hq:
       )
       if ((${#files[@]})); then
         npx prettier --write --ignore-unknown -- "${files[@]}"
+      fi
+
+# Care Django backend (API). Intake routes tickets whose title/body/labels
+# contain the product_area keyword (first match wins across this file).
+# Spec/breakdown may also pin this repo on a queue entry's `repo` field.
+yash-learner/care_agent_hq:
+  role: be
+  branch_prefix: agent-hq
+  product_area: backend
+  base_branch: develop
+  # No setup.qa: do not copy care_fe's Playwright/npm stack onto an API repo.
+  # Live QA for BE needs its own recipe later (API tests / fixtures), not FE E2E.
+  setup:
+    # Install ruff only so format.implement can run. Full pipenv is skipped:
+    # care requires Python 3.13 and the execute container is 3.11, so a full
+    # install would fail or lie. Implement edits the tree; do not assume
+    # manage.py/tests are runnable here.
+    implement: |
+      set -euo pipefail
+      python -m pip install --quiet "ruff==0.14.14"
+      cat > .agent-hq/setup-notes.md <<'NOTES'
+      # Environment (prepared for you -- do not rebuild it)
+
+      - Formatter: `ruff` is installed (format.implement runs after you on
+        changed `.py` files). Prefer writing code that already matches
+        care's ruff config in `pyproject.toml`.
+      - Full pipenv / Django deps are NOT installed. The execute image is
+        Python 3.11; this repo requires 3.13. Do not run `pipenv install`,
+        `manage.py`, or the test suite expecting a live DB -- edit against
+        the checked-out tree and let CI exercise the stack.
+      NOTES
+  format:
+    # Ruff format + autofix only the files this run changed vs agent-hq-base.
+    # Mirrors care's ruff-fix-all / format workflow; scoped like FE prettier.
+    implement: |
+      set -euo pipefail
+      mapfile -t files < <(
+        {
+          git diff --name-only --diff-filter=ACMR agent-hq-base || true
+          git ls-files --others --exclude-standard || true
+        } | grep -E '\.py$' | grep -v '^\.agent-hq/' | sort -u
+      )
+      if ((${#files[@]})); then
+        python -m ruff format -- "${files[@]}"
+        python -m ruff check --fix -- "${files[@]}"
       fi

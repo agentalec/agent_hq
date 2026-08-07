@@ -49,7 +49,13 @@ Never edit the implementation — your tools are read-only.
   "Playwright must pass" notes belong in Test plan / notes, not as live
   Action/Expect criteria; if the plan mixed them in, flag that as a
   should-fix so the next implement round keeps them out of the live list.
-  You do not queue `finalize` yourself.
+  Likewise: every live criterion that needs non-default / complex fixtures
+  must include a concrete **Data setup** how-to (fixtures, ordered UI
+  recipe, and facility-scoped API paths from `src/types/**/*Api.ts` when
+  the graph is deep) — not only a vague “fixtures needed” need-list. If
+  Data setup is missing or vague for those criteria, flag it as a
+  should-fix (same spirit as suite-on-live-plan). You do not queue
+  `finalize` yourself.
 - **Blockers remain and N < 3**: queue `implement`, forwarding
   `specs/{ticket}/spec.md` and `specs/{ticket}/review.md`; the entry's
   `reason` must name the blockers to fix.
