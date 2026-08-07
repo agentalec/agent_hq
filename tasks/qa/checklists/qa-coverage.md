@@ -11,12 +11,17 @@ confirm:
       never score them as `pass` via code inspection.
 - [ ] You executed `qa-plan.md` (or marked `no-qa-plan` / `not-exercised`).
       Facility-scoped flows verified a facility context first.
-- [ ] You preferred fixtures / setup-notes auth. For missing localhost
-      entities a criterion needs, you created them via the UI with unique
-      synthetic names **before** using `missing-test-data`. Only after a
-      failed create (or a true permission / facility wall) did you mark
-      `not-exercised` + `missing-test-data` / `missing-permission` /
-      `missing-facility-context`.
+- [ ] You preferred fixtures / setup-notes auth, then climbed the seed
+      ladder before `missing-test-data`: (1) fixtures/setup-notes,
+      (2) UI-create with unique synthetic names (prefer qa-plan Data setup
+      recipe), (3) facility-scoped API escape only when the plan marks a
+      deep graph or UI create failed with a recorded error — prefer paths
+      in qa-plan; else discover from `src/types/**/*Api.ts` (never invent
+      unscoped BE routes), (4) only then `not-exercised` +
+      `missing-test-data` / `missing-permission` /
+      `missing-facility-context`. Ban: unscoped API “blocked” claims or
+      “exceeds budget” without a concrete failed UI/API attempt. When
+      reporting `missing-test-data`, fill `seed_attempt` honestly.
 - [ ] Criteria ran **serially**, one isolated driver at a time. No parallel
       Playwright workers, no multi-file suite in one invocation, no shared
       browser context or shared recording across ACs. You did not run the

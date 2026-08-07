@@ -205,6 +205,27 @@ def validate_qa_report(
                 return (
                     f"qa-report.json: criterion '{cid}': {c['verdict']} requires blocker_category"
                 )
+            if c["verdict"] == "not-exercised" and c.get("blocker_category") == "missing-test-data":
+                seed = c.get("seed_attempt")
+                if not isinstance(seed, dict):
+                    return (
+                        f"qa-report.json: criterion '{cid}': not-exercised with "
+                        "missing-test-data requires seed_attempt "
+                        "(method ui|api|both plus a non-empty summary of what was tried)"
+                    )
+                method = seed.get("method")
+                summary = (seed.get("summary") or "").strip()
+                if method == "none" or method not in ("ui", "api", "both"):
+                    return (
+                        f"qa-report.json: criterion '{cid}': missing-test-data "
+                        "seed_attempt.method must be ui, api, or both "
+                        f"(got {method!r}; none means no seed was attempted)"
+                    )
+                if not summary:
+                    return (
+                        f"qa-report.json: criterion '{cid}': missing-test-data "
+                        "seed_attempt.summary must be non-empty"
+                    )
 
     return None
 

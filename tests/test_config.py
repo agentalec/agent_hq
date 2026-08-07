@@ -15,6 +15,11 @@ def test_pilot_config_loads_clean():
     assert config.components["executor"]["adapter"] == "copilot-cli"
     assert "yash-learner/care_fe_agent_hq" in config.repos
     assert config.repos["yash-learner/care_fe_agent_hq"]["qa"]["video"] is True
+    assert "yash-learner/care_agent_hq" in config.repos
+    assert config.repos["yash-learner/care_agent_hq"]["role"] == "be"
+    assert config.repos["yash-learner/care_agent_hq"]["product_area"] == "backend"
+    assert config.repos["yash-learner/care_agent_hq"]["base_branch"] == "develop"
+    assert "yash-learner/care_agent_hq" in config.projects["repos"]
     assert config.projects["intake_label"] == "hq:intake"
     assert config.projects["engine_repo"] == "yash-learner/agent_hq"
     assert config.projects["initial_task"] == "spec"

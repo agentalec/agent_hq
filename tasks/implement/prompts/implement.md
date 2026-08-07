@@ -54,6 +54,22 @@ items that land in the live list waste QA retries when scored dishonestly.
 - facility context active (if applicable)
 - data that must already exist (prefer fixtures; QA may UI-create on localhost)
 
+### Data setup
+- Prefer fixtures: <exact what load-fixtures already provides; IDs if known>
+- If missing — UI recipe (ordered clicks):
+  1. Go to `/facility/{facilityId}/settings/...`
+  2. Create <entity> with fields: ...
+  3. ...
+- If UI graph is deep (3+ entity types / multi-settings), API seed allowed:
+  - Paths: copy exact templates from `src/types/.../*Api.ts`
+    (e.g. POST `/api/v1/facility/{facilityId}/activity_definition/`)
+  - Auth: `getApiUrl` + `getApiHeaders` from `tests/helper/utils.ts` +
+    `tests/.auth/user.json`
+  - Body sketch: minimal JSON fields required
+  - Never unscoped `/api/v1/<resource>/`
+- After seed: open the target URL and confirm dropdown/section visible
+  before scoring the criterion
+
 ### Steps
 1. **Action:** ...
    **Expect:** ...
@@ -68,6 +84,54 @@ items that land in the live list waste QA retries when scored dishonestly.
 - Playwright E2E / CI expectations for implement (not live QA criteria)
 ```
 
+**Data setup is required** for every live criterion that needs non-default
+data. Listing “fixtures needed: SR with multi-code AD” is not enough — QA
+executes a recipe; it must not invent browse-and-hope. Vague “QA may
+UI-create” without ordered clicks (and facility-scoped API paths when the
+graph is deep) is a should-fix in review.
+
+### Worked example — Activity Definition seed
+
+```markdown
+### Data setup
+- Prefer fixtures: load-fixtures leaves a facility; no Activity Definition
+  with the codes this criterion needs.
+- UI recipe:
+  1. Go to `/facility/{facilityId}/settings/activity_definitions`
+  2. Create → title `qa-ad-{ticket}-{slug}`, status active, add required codes
+  3. Save; confirm the new row appears in the list
+- API seed (if UI graph is deep / UI create failed):
+  - POST `/api/v1/facility/{facilityId}/activity_definition/`
+    (verbatim from `src/types/emr/activityDefinition/activityDefinitionApi.ts`)
+  - Auth: `getApiUrl()` + `getApiHeaders()` + `tests/.auth/user.json`
+  - Body: minimal create fields from the nearby type / create form
+  - Never POST `/api/v1/activity_definition/` (unscoped — will 404)
+- Verify: open the target Service Request URL; confirm the AD appears in
+  the dropdown/section before scoring
+```
+
+### Route discovery recipe (paste paths into Data setup)
+
+When writing Data setup, paste the exact `path` + method from the FE route
+object so QA does not rediscover under time pressure. If you need to find
+a path:
+
+1. Name the entity to create (e.g. Activity Definition, Specimen Definition,
+   Service Request).
+2. In the FE worktree, find the matching file under `src/types/**/` — usually
+   `*Api.ts` next to the domain type (e.g.
+   `src/types/emr/activityDefinition/activityDefinitionApi.ts`). Grep:
+   `rg -n "activity_definition|/facility/\{facilityId\}" src/types --glob '*Api.ts'`.
+3. Open that file; use the route entry for create (often `create` / `list`
+   with `method: HttpMethod.POST` or GET). Copy the `path` string
+   **verbatim** (e.g. `/api/v1/facility/{facilityId}/activity_definition/`).
+4. Resolve path params from setup-notes / fixtures (`facilityId`,
+   `patientId`, …) — never drop the facility segment.
+5. Infer minimal body from nearby types / create form / existing Playwright
+   helpers under `tests/` if present; do not guess unscoped top-level routes.
+6. Ban: inventing `/api/v1/<resource>/` without `{facilityId}` just because
+   the resource name “sounds right”.
+
 Where to look in CARE (compress into the research map):
 
 - Routes: `src/Routers/routes/`
@@ -76,7 +140,7 @@ Where to look in CARE (compress into the research map):
 - Labels: `public/locale/en.json`
 - Permissions: `src/common/Permissions.ts`, `PermissionContext`
 - Existing E2E hints: `tests/` (for implement tests — not live QA steps)
-- APIs: `src/types/**/*Api.ts`
+- APIs: `src/types/**/*Api.ts` (copy create paths into Data setup)
 
 When the work is committed, queue a single `review` entry in your
 `.agent-hq/control.json` (see Control output below), forwarding

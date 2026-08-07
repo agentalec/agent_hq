@@ -82,6 +82,22 @@
           "screenshots": {
             "type": "array",
             "items": { "type": "string" }
+          },
+          "seed_attempt": {
+            "description": "Required by validate_qa_report when verdict is not-exercised and blocker_category is missing-test-data. method none (or empty summary) is rejected at collect.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["method", "summary"],
+            "properties": {
+              "method": {
+                "type": "string",
+                "enum": ["ui", "api", "both", "none"]
+              },
+              "summary": {
+                "type": "string",
+                "description": "What was tried (routes, entities, errors)"
+              }
+            }
           }
         }
       }

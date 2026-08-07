@@ -15,13 +15,37 @@ code under test is there, and you have Bash, Node 22, and Docker.
    `.agent-hq/setup-notes.md` (preview URL, `tests/.auth/*.json`). Verify the
    session, then facility context when the plan marks a flow facility-scoped.
    Missing facility → `not-exercised` / `missing-facility-context`.
-3. **Seed data via the UI when needed.** If a live criterion needs an entity
-   that fixtures did not leave on localhost, create it in the running app
-   first (unique synthetic names — never real patient data). Only after that
-   create fails, or you hit a true permission / facility wall, mark
-   `not-exercised` with `missing-test-data` (or `missing-permission` /
-   `missing-facility-context`). Do not jump straight to `missing-test-data`
-   when the UI can create the entity.
+3. **Seed data (ordered ladder — hard rule).** For each live criterion that
+   needs non-default data, climb this ladder; do not skip steps:
+
+   1. **Fixtures / setup-notes** — use what load-fixtures and setup-notes
+      already provide (IDs, auth, facility).
+   2. **UI-create** — if an entity is missing, create it in the running app
+      with unique synthetic names (never real patient data). Prefer the
+      ordered UI recipe in `qa-plan.md` **Data setup** when present.
+   3. **API seed escape hatch** — only when `qa-plan` marks a deep graph
+      (3+ entity types / multi-settings) **or** UI create failed with a
+      recorded error. Facility-scoped fetch/`request` only, then open the
+      UI and confirm the entity is visible before scoring.
+      - Prefer paths already pasted in `qa-plan` Data setup.
+      - If missing: run the discovery recipe below (grep `*Api.ts`, copy
+        `path` verbatim). Never invent BE/Django URLconf names or unscoped
+        `/api/v1/<resource>/` routes.
+      - Auth: `getApiUrl` + `getApiHeaders` from `tests/helper/utils.ts`
+        and `tests/.auth/user.json` (see setup-notes).
+   4. **Only then** `not-exercised` + `missing-test-data` (or
+      `missing-permission` / `missing-facility-context` for true walls).
+
+   Ban weak excuses: claiming API blocked after calling unscoped routes;
+   claiming “exceeds time budget” without a concrete failed UI/API attempt;
+   jumping straight to `missing-test-data` when fixtures or UI create could
+   supply the entity.
+
+   When reporting `missing-test-data`, fill `seed_attempt` honestly in
+   `qa-report.json` (`method`: `ui` | `api` | `both` | `none`, plus a
+   `summary` of what was tried — routes/entities/errors). Do not use
+   `method: none` or an empty summary after claiming you could not seed.
+
 4. **Execute live criteria one-by-one with Playwright.** Default evidence is
    **video** (`recordVideo`). For each live-flow criterion, write one isolated
    driver, run it alone, wait for exit, then move on — never parallel workers
@@ -38,6 +62,21 @@ code under test is there, and you have Bash, Node 22, and Docker.
 5. **Validate success signals** from the plan (toast, URL, visible state).
 6. **Write `qa.md` + `qa-report.json`.** Live evidence is primary; code
    inspection belongs only in notes / Limits — never as a `pass`.
+
+### API route discovery (fallback when qa-plan omitted a path)
+
+1. Name the entity to create (e.g. Activity Definition, Specimen Definition,
+   Service Request).
+2. In the FE worktree, find the matching file under `src/types/**/` — usually
+   `*Api.ts` next to the domain type. Grep example:
+   `rg -n "activity_definition|/facility/\{facilityId\}" src/types --glob '*Api.ts'`.
+3. Open that file; use the create route entry. Copy the `path` string
+   **verbatim** (e.g. `/api/v1/facility/{facilityId}/activity_definition/`).
+4. Resolve path params from setup-notes / fixtures (`facilityId`, …) — never
+   drop the facility segment.
+5. Infer minimal body from nearby types / create form / `tests/` helpers;
+   do not guess unscoped top-level routes.
+6. Ban: inventing `/api/v1/<resource>/` without `{facilityId}`.
 
 ## Automated suite / CI is out of scope
 
@@ -180,11 +219,12 @@ Do **not**, under any circumstances:
 Those prove only that you can restate the spec. Code inspection may appear
 under a **Code inspection** note or in `## Limits` — it never yields `pass`.
 
-If you cannot reach the real page — after trying UI create for missing
-localhost entities, a flow you cannot complete, a role you do not have,
-video capture fails — that criterion is `not-exercised` or `fail` with a
-blocker category from the list below. That is a perfectly good outcome. A
-substitute render is not.
+If you cannot reach the real page — after climbing the seed ladder
+(fixtures → UI-create → facility-scoped API escape) for missing localhost
+entities, a flow you cannot complete, a role you do not have, video capture
+fails — that criterion is `not-exercised` or `fail` with a blocker category
+from the list below. That is a perfectly good outcome. A substitute render
+is not.
 
 Small recovery is allowed (one alternate visible control). Rewriting the
 journey from scratch is not a `pass` path.
@@ -210,6 +250,9 @@ Use exactly one of: `app-not-loading` | `auth-failure` |
   a code-inspection `pass`.
 - Suite/CI coverage items are not live ACs — omit or `not-exercised`; never
   score them as pass via code inspection.
+- `missing-test-data` ⇒ fill `seed_attempt` honestly (`method` + `summary`
+  of the UI/API attempts). Do not claim seed was impossible after only
+  unscoped API calls or with no concrete attempt.
 
 ## Write `specs/{ticket}/qa.md`
 
@@ -243,6 +286,8 @@ Every media path you link must be a file you actually saved.
 
 Required structured twin of `qa.md`. Shape:
 
+Omit `seed_attempt` unless `missing-test-data` (then require `{method, summary}` with method ≠ none).
+
 ```json
 {
   "criteria": [
@@ -254,7 +299,6 @@ Required structured twin of `qa.md`. Shape:
       "blocker": null,
       "blocker_category": null,
       "plan_steps_run": ["1", "2"],
-      "videos": ["specs/{ticket}/videos/short-slug.webm"],
       "videos": ["specs/{ticket}/videos/short-slug.webm"],
       "screenshots": []
     }

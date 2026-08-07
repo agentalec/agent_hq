@@ -526,6 +526,7 @@ def _block_ticket(
     *,
     actor: str | None = None,
     source: str | None = None,
+    block_source: str = "engine",
 ) -> None:
     """Block the ticket, recording WHY in state -- not only in the event.
 
@@ -535,10 +536,16 @@ def _block_ticket(
     to drop the `reason` it was handed on the floor, leaving `block_reason`
     null for all of them. The dashboard and `hq-ticket` then rendered "BLOCKED"
     with no reason, and the only copy of it was prose in an event `detail`.
+
+    `block_source` defaults to `engine`. Callers that refuse while the ticket
+    is still an intake block pass `block_source="intake"` so a later bare
+    retry still hits intake recovery instead of burning triage.
+    `source` is the event's provenance field (comment id, etc.), not the
+    lifecycle sticker.
     """
 
     def fn(txn: Txn) -> None:
-        txn.set_block(ticket_id, reason=reason, source="engine", interrupted_run=run_id)
+        txn.set_block(ticket_id, reason=reason, source=block_source, interrupted_run=run_id)
         txn.append_event(
             ticket_id,
             Event(
@@ -1473,6 +1480,8 @@ def _intake_comment_readmit(
     save_watermark,
     ack,
     source_event_id: str,
+    rework_detail: str,
+    rework_actor: str,
 ) -> None:
     """Re-admit an intake-blocked ticket from a bare approver comment.
 
@@ -1545,6 +1554,23 @@ def _intake_comment_readmit(
             queue_seq=seq,
         ):
             return
+        # Same channel as the normal comment path: prepare inlines this under
+        # "## Requested changes" so the new root run sees the human's retry note.
+        detail = rework_detail
+        if doc.get("block_reason"):
+            detail = f"{detail}\n\n(ticket was blocked: {doc['block_reason']})".lstrip()
+        txn.append_event(
+            ticket_id,
+            Event(
+                event_id=f"{run_id}:rework",
+                kind="run.rework",
+                ticket_id=ticket_id,
+                run_id=run_id,
+                detail=detail,
+                actor=rework_actor,
+                source=source_event_id,
+            ).to_dict(),
+        )
         txn.set_ticket(
             ticket_id,
             status="ACTIVE",
@@ -1557,17 +1583,30 @@ def _intake_comment_readmit(
     store.write(apply)
 
     if result.get("refused"):
+        # Keep block_source=intake so a later bare retry still hits this path
+        # instead of falling through to comment_default_task (triage).
         _acknowledge(messaging, considered, set())
-        _block_ticket(store, config, adapter_fn, ticket_id, run_id, result["refused"])
+        _block_ticket(
+            store,
+            config,
+            adapter_fn,
+            ticket_id,
+            run_id,
+            result["refused"],
+            block_source="intake",
+        )
         _escalate(store, config, adapter_fn, ticket_id, run_id, result["refused"])
         return
-    _acknowledge(messaging, considered, qualifying_ids)
     if result.get("enqueued"):
+        _acknowledge(messaging, considered, qualifying_ids)
         set_status_label(config, adapter_fn, ticket_id, "ACTIVE")
         ack(
             f"Re-admitted after intake block; queued `{initial_task_id}`.",
             f"{run_id}:ack",
         )
+    else:
+        # Race / enqueue no-op: nothing was queued -- eyes, not rocket.
+        _acknowledge(messaging, considered, set())
 
 
 def _poll_comment_subject(
@@ -1687,6 +1726,8 @@ def _poll_comment_subject(
             save_watermark=save_watermark,
             ack=ack,
             source_event_id=source_event_id,
+            rework_detail=reason,
+            rework_actor=latest_comment["author"],
         )
         return
 

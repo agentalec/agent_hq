@@ -239,6 +239,77 @@ def test_not_exercised_requires_blocker_category():
     assert "blocker_category" in _validate(bad, ledger=set(), contents={})
 
 
+def test_missing_test_data_requires_seed_attempt():
+    """not-exercised + missing-test-data without a real seed attempt fails collect."""
+    bare = _report(
+        [
+            _criterion(
+                verdict="not-exercised",
+                evidence_kind="unreachable",
+                blocker="complex UI would exceed budget",
+                blocker_category="missing-test-data",
+                videos=[],
+            )
+        ]
+    )
+    err = _validate(bare, ledger=set(), contents={})
+    assert err is not None
+    assert "seed_attempt" in err
+
+    for method in ("ui", "api", "both"):
+        ok = _report(
+            [
+                _criterion(
+                    verdict="not-exercised",
+                    evidence_kind="unreachable",
+                    blocker="create failed after seed ladder",
+                    blocker_category="missing-test-data",
+                    videos=[],
+                    seed_attempt={
+                        "method": method,
+                        "summary": (
+                            f"tried {method}: UI create on settings then "
+                            "POST /api/v1/facility/{id}/activity_definition/ → 403"
+                        ),
+                    },
+                )
+            ]
+        )
+        assert _validate(ok, ledger=set(), contents={}) is None
+
+    none_method = _report(
+        [
+            _criterion(
+                verdict="not-exercised",
+                evidence_kind="unreachable",
+                blocker="no data",
+                blocker_category="missing-test-data",
+                videos=[],
+                seed_attempt={"method": "none", "summary": "skipped"},
+            )
+        ]
+    )
+    err_none = _validate(none_method, ledger=set(), contents={})
+    assert err_none is not None
+    assert "seed_attempt.method" in err_none
+
+    blank_summary = _report(
+        [
+            _criterion(
+                verdict="not-exercised",
+                evidence_kind="unreachable",
+                blocker="no data",
+                blocker_category="missing-test-data",
+                videos=[],
+                seed_attempt={"method": "ui", "summary": "   \n"},
+            )
+        ]
+    )
+    err_summary = _validate(blank_summary, ledger=set(), contents={})
+    assert err_summary is not None
+    assert "seed_attempt.summary" in err_summary
+
+
 def test_all_passed_cannot_claim_full_pass_with_gaps():
     criteria = [
         _criterion(),
