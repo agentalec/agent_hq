@@ -60,6 +60,34 @@ def _log_path(ticket_id: str, criterion_id: str) -> str:
     return f"specs/{ticket_id}/qa-logs/{criterion_id}.log"
 
 
+def _has_plan_steps(criterion: Mapping[str, Any]) -> bool:
+    return any((step or "").strip() for step in (criterion.get("plan_steps_run") or []))
+
+
+def _require_driver_and_log(
+    cid: str,
+    ticket_id: str,
+    ledger: set[str],
+    contents: Mapping[str, bytes] | None,
+    *,
+    context: str,
+) -> str | None:
+    """Canonical qa-drivers/{id}.mjs + non-empty qa-logs/{id}.log in the ledger."""
+    driver = _driver_path(ticket_id, cid)
+    if driver not in ledger:
+        return (
+            f"qa-report.json: criterion '{cid}': {context} requires driver {driver} in the ledger"
+        )
+    log = _log_path(ticket_id, cid)
+    if log not in ledger:
+        return f"qa-report.json: criterion '{cid}': {context} requires log {log} in the ledger"
+    if contents is not None:
+        log_bytes = contents.get(log, b"")
+        if not log_bytes.strip():
+            return f"qa-report.json: criterion '{cid}': log {log} must be non-empty"
+    return None
+
+
 def validate_qa_report(
     raw: bytes | str,
     *,
@@ -76,6 +104,11 @@ def validate_qa_report(
     owned by that criterion alone, plus matching `qa-drivers/{id}.mjs` and a
     non-empty `qa-logs/{id}.log`. Escape hatch (`video: false`,
     `screenshots: true`): ≥1 screenshot in the ledger instead.
+
+    `fail` / `not-exercised` with non-empty `plan_steps_run` also require the
+    canonical driver and non-empty log. `missing-test-data` additionally
+    requires a valid `seed_attempt` and non-empty `plan_steps_run`. Genuine
+    pre-execution blockers (empty `plan_steps_run`) remain log-free.
     """
     media = media or dict(_DEFAULT_MEDIA)
     try:
@@ -165,21 +198,11 @@ def validate_qa_report(
                     return f"qa-report.json: criterion '{cid}': video not in ledger: " + ", ".join(
                         missing
                     )
-                driver = _driver_path(ticket_id, cid)
-                if driver not in ledger:
-                    return (
-                        f"qa-report.json: criterion '{cid}': pass requires driver "
-                        f"{driver} in the ledger"
-                    )
-                log = _log_path(ticket_id, cid)
-                if log not in ledger:
-                    return (
-                        f"qa-report.json: criterion '{cid}': pass requires log {log} in the ledger"
-                    )
-                if contents is not None:
-                    log_bytes = contents.get(log, b"")
-                    if not log_bytes.strip():
-                        return f"qa-report.json: criterion '{cid}': log {log} must be non-empty"
+                receipt_err = _require_driver_and_log(
+                    cid, ticket_id, ledger, contents, context="pass"
+                )
+                if receipt_err is not None:
+                    return receipt_err
             else:
                 # Escape hatch: screenshots-only mode.
                 shots = c.get("screenshots") or []
@@ -205,6 +228,7 @@ def validate_qa_report(
                 return (
                     f"qa-report.json: criterion '{cid}': {c['verdict']} requires blocker_category"
                 )
+            attempted = _has_plan_steps(c)
             if c["verdict"] == "not-exercised" and c.get("blocker_category") == "missing-test-data":
                 seed = c.get("seed_attempt")
                 if not isinstance(seed, dict):
@@ -214,18 +238,43 @@ def validate_qa_report(
                         "(method ui|api|both plus a non-empty summary of what was tried)"
                     )
                 method = seed.get("method")
-                summary = (seed.get("summary") or "").strip()
+                seed_summary = (seed.get("summary") or "").strip()
                 if method == "none" or method not in ("ui", "api", "both"):
                     return (
                         f"qa-report.json: criterion '{cid}': missing-test-data "
                         "seed_attempt.method must be ui, api, or both "
                         f"(got {method!r}; none means no seed was attempted)"
                     )
-                if not summary:
+                if not seed_summary:
                     return (
                         f"qa-report.json: criterion '{cid}': missing-test-data "
                         "seed_attempt.summary must be non-empty"
                     )
+                if not attempted:
+                    return (
+                        f"qa-report.json: criterion '{cid}': missing-test-data "
+                        "requires non-empty plan_steps_run"
+                    )
+                receipt_err = _require_driver_and_log(
+                    cid,
+                    ticket_id,
+                    ledger,
+                    contents,
+                    context="missing-test-data",
+                )
+                if receipt_err is not None:
+                    return receipt_err
+            elif attempted:
+                # fail / not-exercised with attempted live steps need ledger receipts.
+                receipt_err = _require_driver_and_log(
+                    cid,
+                    ticket_id,
+                    ledger,
+                    contents,
+                    context="attempted fail/not-exercised",
+                )
+                if receipt_err is not None:
+                    return receipt_err
 
     return None
 

@@ -220,6 +220,7 @@ def test_not_exercised_requires_blocker_category():
                 evidence_kind="unreachable",
                 blocker="no facility selected",
                 blocker_category="missing-facility-context",
+                plan_steps_run=[],
                 videos=[],
             )
         ]
@@ -232,11 +233,41 @@ def test_not_exercised_requires_blocker_category():
                 evidence_kind="unreachable",
                 blocker="blocked",
                 blocker_category=None,
+                plan_steps_run=[],
                 videos=[],
             )
         ]
     )
     assert "blocker_category" in _validate(bad, ledger=set(), contents={})
+
+
+def _seed_attempt(method: str = "ui") -> dict:
+    return {
+        "method": method,
+        "summary": (
+            f"tried {method}: UI create on settings then "
+            "POST /api/v1/facility/{id}/activity_definition/ → 403"
+        ),
+    }
+
+
+def _seed_ledger(*extra: str) -> set[str]:
+    return {
+        f"specs/{TICKET}/qa-drivers/dropdown.mjs",
+        f"specs/{TICKET}/qa-logs/dropdown.log",
+        f"specs/{TICKET}/qa-report.json",
+        *extra,
+    }
+
+
+def _seed_contents(**over: bytes) -> dict[str, bytes]:
+    base = {
+        f"specs/{TICKET}/qa-logs/dropdown.log": (
+            b"fixture lookup miss\nUI create failed\nAPI POST -> 403\n"
+        ),
+    }
+    base.update(over)
+    return base
 
 
 def test_missing_test_data_requires_seed_attempt():
@@ -248,6 +279,7 @@ def test_missing_test_data_requires_seed_attempt():
                 evidence_kind="unreachable",
                 blocker="complex UI would exceed budget",
                 blocker_category="missing-test-data",
+                plan_steps_run=[],
                 videos=[],
             )
         ]
@@ -264,18 +296,13 @@ def test_missing_test_data_requires_seed_attempt():
                     evidence_kind="unreachable",
                     blocker="create failed after seed ladder",
                     blocker_category="missing-test-data",
+                    plan_steps_run=["fixture lookup", "UI create", "API POST"],
                     videos=[],
-                    seed_attempt={
-                        "method": method,
-                        "summary": (
-                            f"tried {method}: UI create on settings then "
-                            "POST /api/v1/facility/{id}/activity_definition/ → 403"
-                        ),
-                    },
+                    seed_attempt=_seed_attempt(method),
                 )
             ]
         )
-        assert _validate(ok, ledger=set(), contents={}) is None
+        assert _validate(ok, ledger=_seed_ledger(), contents=_seed_contents()) is None
 
     none_method = _report(
         [
@@ -284,12 +311,13 @@ def test_missing_test_data_requires_seed_attempt():
                 evidence_kind="unreachable",
                 blocker="no data",
                 blocker_category="missing-test-data",
+                plan_steps_run=["tried UI"],
                 videos=[],
                 seed_attempt={"method": "none", "summary": "skipped"},
             )
         ]
     )
-    err_none = _validate(none_method, ledger=set(), contents={})
+    err_none = _validate(none_method, ledger=_seed_ledger(), contents=_seed_contents())
     assert err_none is not None
     assert "seed_attempt.method" in err_none
 
@@ -300,14 +328,127 @@ def test_missing_test_data_requires_seed_attempt():
                 evidence_kind="unreachable",
                 blocker="no data",
                 blocker_category="missing-test-data",
+                plan_steps_run=["tried UI"],
                 videos=[],
                 seed_attempt={"method": "ui", "summary": "   \n"},
             )
         ]
     )
-    err_summary = _validate(blank_summary, ledger=set(), contents={})
+    err_summary = _validate(blank_summary, ledger=_seed_ledger(), contents=_seed_contents())
     assert err_summary is not None
     assert "seed_attempt.summary" in err_summary
+
+
+def test_missing_test_data_requires_plan_steps_and_receipts():
+    """missing-test-data needs executed steps plus canonical driver/log evidence."""
+    base_kwargs = {
+        "verdict": "not-exercised",
+        "evidence_kind": "unreachable",
+        "blocker": "create failed after seed ladder",
+        "blocker_category": "missing-test-data",
+        "videos": [],
+        "seed_attempt": _seed_attempt(),
+    }
+
+    no_steps = _report([_criterion(**base_kwargs, plan_steps_run=[])])
+    err_steps = _validate(no_steps, ledger=_seed_ledger(), contents=_seed_contents())
+    assert err_steps is not None
+    assert "plan_steps_run" in err_steps
+
+    with_steps = _criterion(**base_kwargs, plan_steps_run=["UI create", "API POST"])
+    doc = _report([with_steps])
+    assert "driver" in _validate(
+        doc,
+        ledger={f"specs/{TICKET}/qa-logs/dropdown.log", f"specs/{TICKET}/qa-report.json"},
+        contents=_seed_contents(),
+    )
+    assert "log" in _validate(
+        doc,
+        ledger={f"specs/{TICKET}/qa-drivers/dropdown.mjs", f"specs/{TICKET}/qa-report.json"},
+        contents={},
+    )
+    assert "non-empty" in _validate(
+        doc,
+        ledger=_seed_ledger(),
+        contents={f"specs/{TICKET}/qa-logs/dropdown.log": b"  \n"},
+    )
+    assert _validate(doc, ledger=_seed_ledger(), contents=_seed_contents()) is None
+
+
+def test_attempted_fail_and_not_exercised_require_receipts():
+    """Non-empty plan_steps_run on fail/not-exercised requires driver + non-empty log."""
+    fail_doc = _report(
+        [
+            _criterion(
+                verdict="fail",
+                evidence_kind="live-flow",
+                blocker="assertion failed: dropdown empty",
+                blocker_category="validation-error",
+                plan_steps_run=["open settings", "click dropdown"],
+                videos=[],
+            )
+        ]
+    )
+    assert "driver" in _validate(fail_doc, ledger=set(), contents={})
+    assert "log" in _validate(
+        fail_doc,
+        ledger={f"specs/{TICKET}/qa-drivers/dropdown.mjs"},
+        contents={},
+    )
+    assert "non-empty" in _validate(
+        fail_doc,
+        ledger=_seed_ledger(),
+        contents={f"specs/{TICKET}/qa-logs/dropdown.log": b""},
+    )
+    assert (
+        _validate(
+            fail_doc,
+            ledger=_seed_ledger(),
+            contents={f"specs/{TICKET}/qa-logs/dropdown.log": b"clicked; empty\n"},
+        )
+        is None
+    )
+
+    auth_doc = _report(
+        [
+            _criterion(
+                verdict="not-exercised",
+                evidence_kind="unreachable",
+                blocker="token refresh then re-login both failed",
+                blocker_category="auth-failure",
+                plan_steps_run=["load storageState", "refresh JWT", "UI login"],
+                videos=[],
+            )
+        ]
+    )
+    assert "driver" in _validate(auth_doc, ledger=set(), contents={})
+    assert (
+        _validate(
+            auth_doc,
+            ledger=_seed_ledger(),
+            contents={
+                f"specs/{TICKET}/qa-logs/dropdown.log": b"refresh 401; login failed\n",
+            },
+        )
+        is None
+    )
+
+
+def test_pre_execution_blocker_remains_log_free():
+    """Empty plan_steps_run (e.g. no-qa-plan) stays free of driver/log requirements."""
+    doc = _report(
+        [
+            _criterion(
+                verdict="not-exercised",
+                evidence_kind="unreachable",
+                blocker="no qa-plan.md in the input artifacts",
+                blocker_category="no-qa-plan",
+                plan_steps_run=[],
+                videos=[],
+            )
+        ]
+    )
+    assert _validate(doc, ledger=set(), contents={}) is None
 
 
 def test_all_passed_cannot_claim_full_pass_with_gaps():
@@ -319,6 +460,7 @@ def test_all_passed_cannot_claim_full_pass_with_gaps():
             evidence_kind="unreachable",
             blocker="missing role",
             blocker_category="missing-permission",
+            plan_steps_run=[],
             videos=[],
         ),
     ]
@@ -341,6 +483,7 @@ def test_format_qa_summary_footer():
                 evidence_kind="unreachable",
                 blocker="x",
                 blocker_category="other",
+                plan_steps_run=[],
                 videos=[],
             ),
         ]
