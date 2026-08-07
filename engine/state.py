@@ -225,8 +225,9 @@ class GitJsonStateStore:
         result = subprocess.run(
             ["git", "-C", str(self.worktree_path), *self._cred_args(), *args],
             capture_output=True,
-            text=True, check=False
-)
+            text=True,
+            check=False,
+        )
         if result.returncode != 0:
             raise RuntimeError(f"git {' '.join(args)} failed: {result.stderr}")
         return result.stdout
@@ -270,6 +271,20 @@ class GitJsonStateStore:
             return None
         return path.read_bytes()
 
+    def list_artifacts(self, ticket_id: str, run_id: str) -> list[str]:
+        """Every file under this run's ledger namespace, relative paths sorted.
+
+        Collect writes declared outputs *and* anything an accepted handoff
+        forwarded into the same directory, so this set is wider than
+        `run.artifacts` alone -- which is what a comment-queued root run
+        needs when it inherits from the latest SUCCEEDED source."""
+        root = self.artifacts_dir(ticket_id, run_id)
+        if not root.is_dir():
+            return []
+        return sorted(
+            str(p.relative_to(root)).replace("\\", "/") for p in root.rglob("*") if p.is_file()
+        )
+
     def read_artifact_text(self, ticket_id: str, run_id: str, rel_path: str) -> str | None:
         """`read_artifact` for the callers that want text (review.md,
         summary.md). Undecodable bytes read as None rather than raising --
@@ -295,9 +310,7 @@ class GitJsonStateStore:
         tickets_dir = self.worktree_path / "tickets"
         if not tickets_dir.exists():
             return []
-        return sorted(
-            p.name for p in tickets_dir.iterdir() if (p / "state.json").exists()
-        )
+        return sorted(p.name for p in tickets_dir.iterdir() if (p / "state.json").exists())
 
     def read_events(self, ticket_id: str) -> list[dict]:
         return self._read_events(ticket_id)

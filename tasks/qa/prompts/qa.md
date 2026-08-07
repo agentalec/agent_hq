@@ -348,8 +348,9 @@ One subsection per acceptance criterion, each with:
 
 Keep those links repo-relative. The engine rewrites them to ledger URLs when
 it posts this file as a PR comment — WebM links with a sibling `.gif` in the
-ledger become a collapsed `<details>` preview labelled `Video:`; missing GIF
-degrades to the WebM link alone. Do not wrap or prefix the links yourself.
+ledger become a **blockquoted** collapsed `<details>` preview labelled
+`Video:`; missing GIF degrades to the WebM link alone. Do not wrap, prefix,
+or blockquote the links yourself.
 
 Every media path you link must be a file you actually saved.
 

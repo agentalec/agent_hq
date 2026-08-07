@@ -538,6 +538,114 @@ def test_prepare_claims_and_writes_bundle(config, taskdefs, store, tmp_path):
     assert again["claimed"] is False
 
 
+def test_prepare_root_run_inherits_full_source_ledger(config, taskdefs, store, tmp_path):
+    """Comment-queued root runs inherit the input source's whole ledger
+    namespace, not only `run.artifacts`.
+
+    Collect snapshots forwarded handoff files into the source run's ledger
+    (declared output plus forwarded inputs), while `run.artifacts` stays the
+    declared outputs alone. Ticket 24's comment-requeued qa saw only
+    review.md and marked every criterion not-exercised; handoff-spawned qa
+    on the same source got the full forwarded set."""
+    source = _run_dict(
+        "sourcerun",
+        "spec",
+        state="SUCCEEDED",
+        artifacts=["specs/7/review.md"],
+        input_artifacts=["specs/7/spec.md", "specs/7/qa-plan.md"],
+        queue_seq=0,
+    )
+    root = _run_dict(
+        "commentrun",
+        "build",
+        state="QUEUED",
+        source_event_id="issue-comment:99",
+        queue_seq=1,
+        # Root: no parent_run_id, no declared input_artifacts.
+    )
+    store.write(
+        lambda txn: (
+            txn.set_ticket("7", status="ACTIVE", pinned_comment_id=None),
+            txn.put_run("7", source),
+            txn.put_run("7", root),
+            txn.write_artifact("7", "sourcerun", "specs/7/review.md", b"# review"),
+            txn.write_artifact("7", "sourcerun", "specs/7/spec.md", b"# spec"),
+            txn.write_artifact("7", "sourcerun", "specs/7/qa-plan.md", b"# qa-plan"),
+        )
+    )
+    adapters = _adapters(tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"))
+
+    out = run_task(
+        "commentrun",
+        "prepare",
+        config,
+        taskdefs,
+        store,
+        now_iso="2026-07-18T00:00:00Z",
+        adapter_fn=adapters,
+    )
+    assert out["claimed"] is True
+    run = next(r for r in store.read_state("7")["runs"] if r["run_id"] == "commentrun")
+    assert run["input_from_run_id"] == "sourcerun"
+    assert set(run["input_artifacts"]) == {
+        "specs/7/review.md",
+        "specs/7/spec.md",
+        "specs/7/qa-plan.md",
+    }
+    inputs = prepare_dir_for(config, "commentrun") / "inputs"
+    assert (inputs / "specs/7/spec.md").read_text() == "# spec"
+    assert (inputs / "specs/7/qa-plan.md").read_text() == "# qa-plan"
+    assert (inputs / "specs/7/review.md").read_text() == "# review"
+
+
+def test_prepare_handoff_child_keeps_declared_input_artifacts(config, taskdefs, store, tmp_path):
+    """A handoff-spawned run's declared input_artifacts stay authoritative —
+    even when the source ledger holds extra files the handoff did not forward."""
+    source = _run_dict(
+        "sourcerun",
+        "spec",
+        state="SUCCEEDED",
+        artifacts=["specs/7/review.md"],
+        queue_seq=0,
+    )
+    child = _run_dict(
+        "childrun",
+        "build",
+        state="QUEUED",
+        parent_run_id="sourcerun",
+        handoff_key="build-7",
+        input_artifacts=["specs/7/review.md"],
+        queue_seq=1,
+    )
+    store.write(
+        lambda txn: (
+            txn.set_ticket("7", status="ACTIVE", pinned_comment_id=None),
+            txn.put_run("7", source),
+            txn.put_run("7", child),
+            txn.write_artifact("7", "sourcerun", "specs/7/review.md", b"# review"),
+            txn.write_artifact("7", "sourcerun", "specs/7/spec.md", b"# spec"),
+            txn.write_artifact("7", "sourcerun", "specs/7/qa-plan.md", b"# qa-plan"),
+        )
+    )
+    adapters = _adapters(tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"))
+
+    out = run_task(
+        "childrun",
+        "prepare",
+        config,
+        taskdefs,
+        store,
+        now_iso="2026-07-18T00:00:00Z",
+        adapter_fn=adapters,
+    )
+    assert out["claimed"] is True
+    run = next(r for r in store.read_state("7")["runs"] if r["run_id"] == "childrun")
+    assert run["input_artifacts"] == ["specs/7/review.md"]
+    inputs = prepare_dir_for(config, "childrun") / "inputs"
+    assert (inputs / "specs/7/review.md").exists()
+    assert not (inputs / "specs/7/spec.md").exists()
+
+
 def test_prepare_base_commit_uses_recorded_head_and_survives_downstream_failure(
     config, taskdefs, store, tmp_path
 ):
@@ -1687,23 +1795,23 @@ def test_ledger_image_urls_rewrites_relative_video_links():
 
 
 def test_ledger_image_urls_wraps_webm_with_sibling_gif_in_details():
-    """When collect derived a sibling .gif, the PR comment gets a collapsed
-    details block with an inline GIF plus a full-fidelity webm link."""
+    """When collect derived a sibling .gif, the PR comment gets a blockquoted
+    collapsed details block with an inline GIF plus a full-fidelity webm link."""
     ledger = {"specs/42/videos/flow.webm", "specs/42/videos/flow.gif"}
     md = "[dropdown open — desktop](specs/42/videos/flow.webm)\n"
     out = _ledger_image_urls(md, "agentalec/agent_hq", "42", "run7", ledger)
     prefix = "https://raw.githubusercontent.com/agentalec/agent_hq/agent-hq-state"
     gif_url = f"{prefix}/tickets/42/artifacts/run7/specs/42/videos/flow.gif"
     webm_url = f"{prefix}/tickets/42/artifacts/run7/specs/42/videos/flow.webm"
-    assert "<details>" in out
-    assert "<summary><b>Video: dropdown open — desktop</b> (click to expand)</summary>" in out
-    assert f'<img width="960" alt="flow" src="{gif_url}" />' in out
-    assert f"[Full recording (webm)]({webm_url})" in out
-    assert "</details>" in out
+    assert "> <details>" in out
+    assert "> <summary><b>Video: dropdown open — desktop</b> (click to expand)</summary>" in out
+    assert f'> <img width="960" alt="flow" src="{gif_url}" />' in out
+    assert f"> [Full recording (webm)]({webm_url})" in out
+    assert "> </details>" in out
     # The bare markdown webm link must not remain (replaced by the details block).
     assert f"[dropdown open — desktop]({webm_url})" not in out
-    # Block-level: a blank line must precede <details> so GitHub collapses it.
-    assert "\n\n<details>" in out
+    # Block-level: a blank line must precede the blockquoted <details>.
+    assert "\n\n> <details>" in out
 
 
 def test_ledger_image_urls_strips_evidence_prefix_for_block_details():
@@ -1715,12 +1823,19 @@ def test_ledger_image_urls_strips_evidence_prefix_for_block_details():
     out = _ledger_image_urls(md, "agentalec/agent_hq", "7", "run7", ledger)
     assert "**Evidence**" not in out
     assert "Evidence:" not in out
-    assert "<summary><b>Video: Search input visible on load</b> (click to expand)</summary>" in out
-    assert "\n\n<details>" in out
-    # No same-line junk before the opening tag.
+    assert (
+        "> <summary><b>Video: Search input visible on load</b> (click to expand)</summary>" in out
+    )
+    assert "\n\n> <details>" in out
+    # No same-line junk before the opening tag (blockquote prefix is fine).
     assert not any(
-        line.strip() and not line.lstrip().startswith("<details>") and "<details>" in line
+        line.strip() and not line.lstrip().startswith((">", "<details>")) and "<details>" in line
         for line in out.splitlines()
+    )
+    assert all(
+        not line.strip() or line.startswith(">")
+        for line in out.splitlines()
+        if "<details>" in line or "</details>" in line
     )
 
 
@@ -1850,11 +1965,17 @@ def test_collect_rejects_a_dishonest_qa_report(config, taskdefs, store, tmp_path
 
     runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
     assert runs["qarun"]["state"] == "FAILED"
+    assert runs["qarun"].get("artifacts") == []
     events = store.read_events("7")
     assert any(
         e.get("kind") == "run.artifact_rejected" and "live-flow" in (e.get("detail") or "")
         for e in events
     )
+    # Reject retains ledger evidence for tracing without unlocking handoffs.
+    retained = store.read_artifact("7", "qarun", "specs/7/qa-report.json")
+    assert retained is not None
+    assert json.loads(retained) == dishonest
+    assert store.read_artifact("7", "qarun", "specs/7/qa.md") == b"# QA\npass via reading code\n"
     assert agent.opened_prs == []
 
 
@@ -1923,11 +2044,15 @@ def test_collect_rejects_prose_only_missing_test_data_and_retries(
 
     runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
     assert runs["qarun"]["state"] == "FAILED"
+    assert runs["qarun"].get("artifacts") == []
     events = store.read_events("7")
     assert any(
         e.get("kind") == "run.artifact_rejected" and "plan_steps_run" in (e.get("detail") or "")
         for e in events
     )
+    retained = store.read_artifact("7", "qarun", "specs/7/qa-report.json")
+    assert retained is not None
+    assert json.loads(retained) == prose_only
     retries = [r for r in runs.values() if r["task_id"] == "build" and r["attempt"] == 1]
     assert len(retries) == 1
     new_id = retries[0]["run_id"]

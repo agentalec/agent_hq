@@ -268,9 +268,11 @@ def _ledger_image_urls(
     what it is: evidence that was never captured.
 
     When a sibling `.gif` exists for a referenced `.webm` (collect-derived
-    presentation copy), the rewrite emits a collapsed `<details>` block with
-    an inline GIF plus a full-fidelity WebM link. Without the gif, today's
-    plain WebM markdown link is kept (degraded, still usable).
+    presentation copy), the rewrite emits a blockquoted collapsed `<details>`
+    block with an inline GIF plus a full-fidelity WebM link (the `>` prefix
+    is engine-owned so evidence reads as an aside in PR comments). Without
+    the gif, today's plain WebM markdown link is kept (degraded, still
+    usable — no blockquote).
 
     ponytail: assumes a public engine repo -- raw URLs on a private one need a
     token GitHub's image proxy doesn't have."""
@@ -291,20 +293,36 @@ def _ledger_image_urls(
             label = html.escape(m[1][1:-2] or Path(rel).stem)
             slug = html.escape(Path(rel).stem)
             gif_url = _ledger_raw_url(engine_repo, ticket_id, run_id, gif_rel)
-            # Standalone block HTML: leading/trailing blank lines so GitHub
-            # treats `<details>` as a collapsible (mid-line prefixes break it).
-            # The regex already consumed any same-line Evidence:/Video: prefix.
+            # Standalone blockquoted HTML: leading/trailing blank lines so
+            # GitHub treats `<details>` as a collapsible (mid-line prefixes
+            # break it), and `>` so the evidence reads as an aside. The regex
+            # already consumed any same-line Evidence:/Video: prefix.
             return (
-                f"\n\n<details>\n"
-                f"<summary><b>Video: {label}</b> (click to expand)</summary>\n\n"
-                f'<img width="960" alt="{slug}" src="{gif_url}" />\n\n'
-                f"[Full recording (webm)]({webm_url})\n\n"
-                f"</details>\n\n"
+                f"\n\n> <details>\n"
+                f"> <summary><b>Video: {label}</b> (click to expand)</summary>\n"
+                f">\n"
+                f'> <img width="960" alt="{slug}" src="{gif_url}" />\n'
+                f">\n"
+                f"> [Full recording (webm)]({webm_url})\n"
+                f">\n"
+                f"> </details>\n\n"
             )
         return f"{m[1]}{webm_url}{m[3]}"
 
     out = _IMG_LINK.sub(rewrite_img, md)
     return _VIDEO_LINK.sub(rewrite_video, out)
+
+
+def _ledger_artifacts(
+    txn, ticket_id: str, run_id: str, artifact_contents: dict[str, bytes]
+) -> None:
+    """Persist staged artifact bytes under tickets/<id>/artifacts/<run_id>/.
+
+    Shared by the success path and the artifact_rejected fail path (reject
+    keeps evidence on the state branch for tracing without setting
+    `run.artifacts`, which would unlock `_inputs_ready` handoff children)."""
+    for rel_path, content in artifact_contents.items():
+        txn.write_artifact(ticket_id, run_id, rel_path, content)
 
 
 def _pr_body(config, ticket_id: str, ticket_body: str) -> str:
@@ -715,12 +733,19 @@ def _prepare(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskd
         )
 
     # A ROOT run had no declaring queue entry to choose its inputs, so it
-    # inherits whatever its input source recorded. A queued entry's
-    # `input_artifacts` is its declarer's decision -- including a deliberately
-    # empty one -- and is never overridden here.
+    # inherits everything in its input source's ledger namespace -- declared
+    # outputs *plus* files collect snapshotted there when that run forwarded
+    # them in an accepted handoff (e.g. review's ledger holds review.md and
+    # the forwarded spec.md / qa-plan.md). `parent.artifacts` alone is too
+    # narrow: a comment-queued qa would see only review.md and miss the
+    # criteria it must execute. A queued entry's `input_artifacts` is its
+    # declarer's decision -- including a deliberately empty one -- and is
+    # never overridden here.
     inherited = run.get("input_artifacts") or []
     if parent and not run.get("parent_run_id") and not inherited:
-        inherited = list(parent.get("artifacts") or [])
+        inherited = store.list_artifacts(ticket_id, parent["run_id"])
+        if not inherited:
+            inherited = list(parent.get("artifacts") or [])
 
     store.write(
         lambda txn: txn.update_run(
@@ -1038,17 +1063,37 @@ def _validate_staged_declared(staging_dir: Path, declared: list[str]) -> str | N
 
 
 def _fail_execute_artifact(
-    store, config, taskdefs, taskdef, ticket_id, run, adapter_fn, reason: str
+    store,
+    config,
+    taskdefs,
+    taskdef,
+    ticket_id,
+    run,
+    adapter_fn,
+    reason: str,
+    artifact_contents: dict[str, bytes] | None = None,
 ) -> None:
     """A transport-boundary failure discovered AFTER a trustworthy
-    execute-result (a declared output didn't survive transport, or the work
-    patch failed to `git apply`): same retry-per-budget/BLOCK policy as any
-    other run failure, audited distinctly from `handoff.rejected` since
-    control.json's handoffs were never even reached."""
+    execute-result (a declared output didn't survive transport, a dishonest
+    qa-report.json, or the work patch failed to `git apply`): same
+    retry-per-budget/BLOCK policy as any other run failure, audited
+    distinctly from `handoff.rejected` since control.json's handoffs were
+    never even reached.
+
+    When `artifact_contents` is non-empty, those bytes are still written to
+    the failed run's ledger namespace in the same transaction as
+    `run.artifact_rejected` — tracing evidence without setting
+    `run.artifacts` (which stays `[]` so reject evidence cannot unlock
+    handoff children via `_inputs_ready`). Does not land, post PR comments,
+    or mark SUCCEEDED."""
     run_id = run["run_id"]
+    contents = artifact_contents or {}
     eng._mark_failed(store, ticket_id, run_id, "run.failed", "failed")
-    store.write(
-        lambda txn: txn.append_event(
+
+    def fn(txn) -> None:
+        if contents:
+            _ledger_artifacts(txn, ticket_id, run_id, contents)
+        txn.append_event(
             ticket_id,
             Event(
                 event_id=f"{run_id}:artifact_rejected",
@@ -1058,7 +1103,8 @@ def _fail_execute_artifact(
                 detail=reason,
             ).to_dict(),
         )
-    )
+
+    store.write(fn)
     _handle_failure(
         store,
         config,
@@ -1177,7 +1223,24 @@ def _collect_success(
     declared = [subst(a, ticket_id) for a in taskdef.get("outputs", {}).get("artifacts", [])]
     bad = _validate_staged_declared(staging_dir, declared)
     if bad is not None:
-        _fail_execute_artifact(store, config, taskdefs, taskdef, ticket_id, run, adapter_fn, bad)
+        # Best-effort: keep whatever did arrive so reject evidence is
+        # inspectable on the state branch (may be empty).
+        partial = {
+            rel_path: (staging_dir / rel_path).read_bytes()
+            for rel_path in _expand_declared(staging_dir.resolve(), declared)
+            if (staging_dir / rel_path).is_file()
+        }
+        _fail_execute_artifact(
+            store,
+            config,
+            taskdefs,
+            taskdef,
+            ticket_id,
+            run,
+            adapter_fn,
+            bad,
+            artifact_contents=partial,
+        )
         return
 
     # Ledger for THIS run: every declared output, plus any inherited
@@ -1219,6 +1282,7 @@ def _collect_success(
                 run,
                 adapter_fn,
                 bad_report,
+                artifact_contents=artifact_contents,
             )
             return
 
@@ -1257,6 +1321,7 @@ def _collect_success(
                 run,
                 adapter_fn,
                 f"work patch failed to apply: {exc}",
+                artifact_contents=artifact_contents,
             )
             return
     land = agent.land_branch(
@@ -1333,8 +1398,7 @@ def _collect_success(
             recorded_head=output_commit,
             pr_ref=pr_ref,
         )
-        for rel_path, content in artifact_contents.items():
-            txn.write_artifact(ticket_id, run_id, rel_path, content)
+        _ledger_artifacts(txn, ticket_id, run_id, artifact_contents)
 
         # A declared gate always posts its request comment, auto-approved or
         # not -- that comment is where the run's artifacts become readable to
