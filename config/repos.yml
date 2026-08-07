@@ -75,10 +75,18 @@ yash-learner/care_fe_agent_hq:
       - care backend: http://localhost:9000, seeded via `make load-fixtures`
       - Start the frontend with `npm run preview` -> http://localhost:4000
         (already built; do NOT point it at any non-localhost API)
-      - Signed-in browser state: `tests/.auth/user.json`. Load it with
-        `browser.newContext({ storageState: 'tests/.auth/user.json',
-          recordVideo: { dir: '.agent-hq/pw-videos', size: { width: 1440, height: 900 } } })`
-        -- the login and a seeded facility/patient/questionnaire already exist.
+      - Signed-in browser state: `tests/.auth/user.json`. Load it with a
+        shared size so viewport and recordVideo match exactly (mismatched
+        sizes grey-letterbox the clip — do not set video size with a
+        smaller or default viewport):
+          const size = { width: 1440, height: 900 };
+          browser.newContext({
+            storageState: 'tests/.auth/user.json',
+            viewport: size,
+            recordVideo: { dir: '.agent-hq/pw-videos', size },
+          })
+        -- sidebar is md+; 1440×900 is the standard. The login and a
+        seeded facility/patient/questionnaire already exist.
         After `page = await context.newPage()`, and **before driving** each
         recorded flow, enable the native cursor/click overlay (Playwright
         1.61+; this repo resolves 1.61.1):
@@ -88,9 +96,34 @@ yash-learner/care_fe_agent_hq:
         (basename must equal the criterion `id` in qa-report.json; keep
         clips under ~30s). Collect may derive a sibling lite `.gif` for
         the PR comment; you only need the WebM.
+      - Auth shell readiness (hard gate before facility criteria): after
+        storageState + navigate to a facility route from getFacilityId() /
+        fixtures, wait for spinner gone AND (facility nav label like
+        Overview/Patients OR `[data-sidebar="sidebar"]` visible). Ban:
+        treating "URL has no /login" or title "CARE" as auth. If Username /
+        Password / Sign in appears on a facility URL → auth failure; recover
+        before scoring.
+      - Mid-session token recovery (before any auth-failure): on
+        token_not_valid / expired from API seed, POST
+        `/api/v1/auth/token/refresh/` with `care_refresh_token` from the same
+        storageState, rewrite access/refresh in `tests/.auth/user.json` (or
+        in-memory headers), retry once. If refresh fails → UI login with
+        fixture credentials, persist fresh storageState, re-check shell,
+        retry. Prefer continuing in the browser if the file token is stale
+        but the context is still authenticated. Ban filing auth-failure
+        without refresh + re-login attempts (log status codes, not secrets).
       - Chromium is installed. Drive it with Playwright directly; you do not
         need to add tests to the repo's suite. Screenshots are optional; video
         is the required pass evidence unless the repo disables it.
+      - Seed ladder: fixtures → execute numbered qa-plan UI Data setup steps
+        → facility-scoped API escape. Start qa-drivers/{id}.mjs +
+        qa-logs/{id}.log before seeding; append fixture/UI/API/auth attempts.
+      - Discovery (thin): prefer qa-plan Data setup; then
+        `tests/PLAYWRIGHT_GUIDE.md` + `rg` under `tests/` for beforeAll /
+        apiSetup / helpers; then `src/types/**/*Api.ts` (verbatim paths).
+        Valueset codes via UI picker — never invent LOINC. On API 4xx, retry
+        from a known-working test payload before missing-test-data;
+        proven-plan validation reject → validation-error.
       - API seed (escape hatch): auth via `getApiUrl` / `getApiHeaders` from
         `tests/helper/utils.ts` with `tests/.auth/user.json`. Facility-scoped
         paths live in `src/types/**/*Api.ts` — prefer paths pasted in

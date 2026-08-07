@@ -1858,6 +1858,88 @@ def test_collect_rejects_a_dishonest_qa_report(config, taskdefs, store, tmp_path
     assert agent.opened_prs == []
 
 
+def test_collect_rejects_prose_only_missing_test_data_and_retries(
+    config, taskdefs, store, tmp_path
+):
+    """missing-test-data without plan_steps_run / driver / log is prose-only:
+    collect artifact-rejects and the retry gets rework feedback (same channel
+    as dishonest qa-report / handoff.rejected). Uses build (retries: 1); the
+    fixture spec task has retries: 0 so it cannot prove the rework path."""
+    taskdefs["build"]["outputs"]["artifacts"] = [
+        "specs/{ticket}/qa.md",
+        "specs/{ticket}/qa-report.json",
+        "specs/{ticket}/videos/",
+        "specs/{ticket}/qa-drivers/",
+        "specs/{ticket}/qa-logs/",
+    ]
+    taskdefs["build"]["writes_code"] = False
+    prose_only = {
+        "criteria": [
+            {
+                "id": "seed-wall",
+                "title": "Needs seeded encounter",
+                "verdict": "not-exercised",
+                "evidence_kind": "unreachable",
+                "blocker": "multi-entity seed is too complex",
+                "blocker_category": "missing-test-data",
+                "plan_steps_run": [],
+                "videos": [],
+                "screenshots": [],
+                "seed_attempt": {
+                    "method": "ui",
+                    "summary": "inspected the form; impractical to seed",
+                },
+            }
+        ],
+        "summary": {"all_passed": False, "pass": 0, "fail": 0, "not_exercised": 1},
+    }
+    _seed(
+        store,
+        _run_dict(
+            "qarun",
+            "build",
+            state="RUNNING",
+            attempt=0,
+            parent_run_id="p",
+            source_event_id="evt",
+            enqueue_index=0,
+        ),
+    )
+    _stage(config, "qarun", "specs/7/qa.md", "# QA\nprose-only missing-test-data\n")
+    _stage(config, "qarun", "specs/7/qa-report.json", json.dumps(prose_only))
+    _write_execute_result(config, "qarun", cost_usd=1.0, tokens=10)
+    _write_control(config, "qarun", {"outcome": "queue", "queue": []}, patch="")
+
+    agent = FakeAgent(tmp_path / "work")
+    adapters = _adapters(tracker=FakeTracker(_details()), agent=agent)
+    run_task(
+        "qarun",
+        "collect",
+        config,
+        taskdefs,
+        store,
+        adapter_fn=adapters,
+    )
+
+    runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
+    assert runs["qarun"]["state"] == "FAILED"
+    events = store.read_events("7")
+    assert any(
+        e.get("kind") == "run.artifact_rejected" and "plan_steps_run" in (e.get("detail") or "")
+        for e in events
+    )
+    retries = [r for r in runs.values() if r["task_id"] == "build" and r["attempt"] == 1]
+    assert len(retries) == 1
+    new_id = retries[0]["run_id"]
+    rework = [e for e in events if e.get("kind") == "run.rework" and e.get("run_id") == new_id]
+    assert len(rework) == 1
+    assert rework[0]["actor"] == "engine"
+    assert rework[0]["source"] == "qarun:artifact_rejected"
+    assert "Previous attempt rejected:" in rework[0]["detail"]
+    assert "plan_steps_run" in rework[0]["detail"]
+    assert agent.opened_prs == []
+
+
 def test_collect_failure_records_spend_then_retries(config, taskdefs, store, tmp_path):
     """A `failure` execute-result never reaches apply/land/push (Task 12)."""
     _seed(
