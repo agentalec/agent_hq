@@ -25,7 +25,7 @@
       },
       "qa": {
         "type": "object",
-        "description": "Evidence media policy for QA runs against this repo. Defaults when omitted: video=true, screenshots=false, video_max_seconds=30. At least one of video or screenshots must be true after defaults (enforced at config load).",
+        "description": "Evidence media policy for QA runs against this repo. Defaults when omitted: video=true, screenshots=false, video_max_seconds=120. At least one of video or screenshots must be true after defaults (enforced at config load).",
         "additionalProperties": false,
         "properties": {
           "video": {

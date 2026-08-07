@@ -96,7 +96,7 @@ def test_resolve_qa_media_defaults_video_on():
     assert resolve_qa_media({}) == {
         "video": True,
         "screenshots": False,
-        "video_max_seconds": 30,
+        "video_max_seconds": 120,
     }
     assert resolve_qa_media({"qa": {"video": False, "screenshots": True}})["video"] is False
 
@@ -202,7 +202,7 @@ def test_screenshots_escape_hatch_when_video_off():
         ]
     )
     ledger = {f"specs/{TICKET}/screenshots/dropdown.png"}
-    media = {"video": False, "screenshots": True, "video_max_seconds": 30}
+    media = {"video": False, "screenshots": True, "video_max_seconds": 120}
     assert _validate(doc, ledger=ledger, media=media, contents={}) is None
     assert "≥1 screenshot" in _validate(
         _report([_criterion(videos=[], screenshots=[])]),
