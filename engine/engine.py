@@ -842,15 +842,26 @@ def _handle_failure(
     # is the failure mode that most needs a human -- the ticket stops dead and
     # only a manual re-enqueue restarts it -- and it was the one that told
     # nobody: the block landed on the state branch while the issue still read
-    # "work has been queued".
+    # "work has been queued". When the last attempt was an artifact rejection
+    # (e.g. dishonest qa-report), surface that detail so the issue is not only
+    # "retries exhausted".
+    escalate_msg = (
+        f"`{taskdef['id']}` failed {run['attempt'] + 1} time(s) and exhausted its retry budget; "
+        "the ticket is blocked pending human review."
+    )
+    pred = _predecessor_rejection(store, ticket_id, run_id)
+    if pred is not None and pred[0] == "artifact_rejected":
+        concise = " ".join(str(pred[1]).split())
+        if len(concise) > 500:
+            concise = concise[:497] + "..."
+        escalate_msg = f"{escalate_msg} Rejected: {concise}"
     _escalate(
         store,
         config,
         adapter_fn,
         ticket_id,
         run_id,
-        f"`{taskdef['id']}` failed {run['attempt'] + 1} time(s) and exhausted its retry budget; "
-        "the ticket is blocked pending human review.",
+        escalate_msg,
     )
 
 

@@ -246,6 +246,56 @@ def _derive_qa_gifs(artifact_contents: dict[str, bytes], max_seconds: int) -> di
     return derived
 
 
+def _concise_reject_detail(detail: str, *, limit: int = 500) -> str:
+    """Collapse whitespace and cap length for PR/issue surfaces."""
+    concise = " ".join(str(detail).split())
+    if len(concise) > limit:
+        return concise[: limit - 3] + "..."
+    return concise
+
+
+def _post_qa_pr_comment(
+    config,
+    adapter_fn,
+    *,
+    pr_ref: str,
+    ticket_id: str,
+    run_id: str,
+    artifact_contents: dict[str, bytes],
+    rejected: bool = False,
+    reason: str | None = None,
+) -> None:
+    """Post qa.md (+ summary footer) on the work PR.
+
+    Success uses event `{run_id}:pr-qa`. A collect-rejected report uses
+    `{run_id}:pr-qa-rejected` and a clearly labeled not-a-pass header — still
+    visible on the PR, never a greenwashed pass.
+    """
+    qa_path = subst("specs/{ticket}/qa.md", ticket_id)
+    if qa_path not in artifact_contents:
+        return
+    if rejected:
+        header = "### agent-hq QA — rejected (not a pass)"
+        if reason:
+            header = f"{header}\n\n**Reject reason:** {_concise_reject_detail(reason)}"
+        event_id = f"{run_id}:pr-qa-rejected"
+    else:
+        header = "### agent-hq QA"
+        event_id = f"{run_id}:pr-qa"
+    body = f"{header}\n\n" + _ledger_image_urls(
+        _as_text(artifact_contents.get(qa_path)),
+        intake_repo(config),
+        ticket_id,
+        run_id,
+        set(artifact_contents),
+    )
+    qa_report_path = subst("specs/{ticket}/qa-report.json", ticket_id)
+    footer = format_qa_summary_footer(artifact_contents.get(qa_report_path))
+    if footer:
+        body = f"{body}\n\n**{footer}**"
+    eng.post_pr_comment(config, adapter_fn, pr_ref, body, event_id)
+
+
 def _ledger_image_urls(
     md: str, engine_repo: str, ticket_id: str, run_id: str, ledger: set[str]
 ) -> str:
@@ -1260,8 +1310,9 @@ def _collect_success(
     }
 
     # Filename convention (like review.md / qa.md posting): when a run produced
-    # qa-report.json, collect refuses a dishonest report before anything is
-    # marked SUCCEEDED or posted to the PR.
+    # qa-report.json, collect refuses a dishonest report before SUCCEEDED /
+    # green `:pr-qa`. Rejected evidence is still ledgered and announced on the
+    # PR as `:pr-qa-rejected` (not a pass).
     qa_report_path = subst("specs/{ticket}/qa-report.json", ticket_id)
     media = resolve_qa_media(config.repos.get(repo, {}))
     if qa_report_path in artifact_contents:
@@ -1273,6 +1324,43 @@ def _collect_success(
             contents=artifact_contents,
         )
         if bad_report is not None:
+            # Retain evidence + announce on the PR before failing: a near-miss
+            # (e.g. 6/7 pass with one dishonest criterion) must not vanish —
+            # but the run stays FAILED (no soft-pass, no SUCCEEDED, no :pr-qa).
+            for gif_rel, gif_bytes in _derive_qa_gifs(
+                artifact_contents, media["video_max_seconds"]
+            ).items():
+                artifact_contents[gif_rel] = gif_bytes
+                if gif_rel not in declared:
+                    declared.append(gif_rel)
+
+            def retain_rejected(txn) -> None:
+                # Ledger only — do not set run.artifacts (must stay [] so
+                # reject evidence cannot unlock `_inputs_ready` handoffs).
+                _ledger_artifacts(txn, ticket_id, run_id, artifact_contents)
+
+            store.write(retain_rejected)
+
+            existing_work_repo = next(
+                (
+                    wr
+                    for wr in (store.read_state(ticket_id) or {}).get("work_repos", [])
+                    if wr["repo"] == repo
+                ),
+                None,
+            )
+            pr_ref = (existing_work_repo or {}).get("pr_ref")
+            if pr_ref:
+                _post_qa_pr_comment(
+                    config,
+                    adapter_fn,
+                    pr_ref=pr_ref,
+                    ticket_id=ticket_id,
+                    run_id=run_id,
+                    artifact_contents=artifact_contents,
+                    rejected=True,
+                    reason=bad_report,
+                )
             _fail_execute_artifact(
                 store,
                 config,
@@ -1644,17 +1732,14 @@ def _collect_success(
     # present) adds honest pass/fail/not-exercised counts.
     qa_path = subst("specs/{ticket}/qa.md", ticket_id)
     if pr_ref and qa_path in declared:
-        body = "### agent-hq QA\n\n" + _ledger_image_urls(
-            _as_text(artifact_contents.get(qa_path)),
-            intake_repo(config),
-            ticket_id,
-            run_id,
-            set(artifact_contents),
+        _post_qa_pr_comment(
+            config,
+            adapter_fn,
+            pr_ref=pr_ref,
+            ticket_id=ticket_id,
+            run_id=run_id,
+            artifact_contents=artifact_contents,
         )
-        footer = format_qa_summary_footer(artifact_contents.get(qa_report_path))
-        if footer:
-            body = f"{body}\n\n**{footer}**"
-        eng.post_pr_comment(config, adapter_fn, pr_ref, body, f"{run_id}:pr-qa")
 
     _complete_if_queue_empty(
         store, config, adapter_fn, ticket_id, {**run, "state": "SUCCEEDED", "artifacts": declared}

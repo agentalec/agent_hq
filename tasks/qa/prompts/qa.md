@@ -385,7 +385,9 @@ Omit `seed_attempt` unless `missing-test-data` (then require `{method, summary}`
 ```
 
 Collect validates this against the schema and media policy. A dishonest
-report fails the run (retry) — it is never posted as a greenwashed PR comment.
+report fails the run (retry) — it is never posted as a greenwashed pass.
+Rejected reports **are** posted on the PR as **rejected (not a pass)** so
+near-miss evidence stays visible.
 
 ## Decide what runs next (see Control output below)
 

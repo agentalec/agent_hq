@@ -1913,7 +1913,10 @@ def test_qa_setup_notes_and_prompt_require_screencast_show_actions():
 
 def test_collect_rejects_a_dishonest_qa_report(config, taskdefs, store, tmp_path):
     """Filename convention: qa-report.json in the ledger is validated at
-    collect; a code-inspection 'pass' fails the run before any PR comment."""
+    collect; a code-inspection 'pass' fails the run. Evidence is still
+    ledgered and announced on the work PR as rejected (not a pass) — never
+    a green `:pr-qa`. Fixture `spec` has retries: 0, so this also exercises
+    retries-exhausted escalation with the reject detail."""
     taskdefs["spec"]["outputs"]["artifacts"] = [
         "specs/{ticket}/qa.md",
         "specs/{ticket}/qa-report.json",
@@ -1936,17 +1939,32 @@ def test_collect_rejects_a_dishonest_qa_report(config, taskdefs, store, tmp_path
         ],
         "summary": {"all_passed": True, "pass": 1, "fail": 0, "not_exercised": 0},
     }
-    _seed(
-        store,
-        _run_dict(
-            "qarun",
-            "spec",
-            state="RUNNING",
-            attempt=0,
-            parent_run_id="p",
-            source_event_id="evt",
-            enqueue_index=0,
-        ),
+    store.write(
+        lambda txn: (
+            txn.set_ticket(
+                "7",
+                status="ACTIVE",
+                pinned_comment_id=None,
+                work_repos=[
+                    {
+                        "repo": "yash-learner/care_fe_agent_hq",
+                        "pr_ref": "yash-learner/care_fe_agent_hq#1",
+                    }
+                ],
+            ),
+            txn.put_run(
+                "7",
+                _run_dict(
+                    "qarun",
+                    "spec",
+                    state="RUNNING",
+                    attempt=0,
+                    parent_run_id="p",
+                    source_event_id="evt",
+                    enqueue_index=0,
+                ),
+            ),
+        )
     )
     _stage(config, "qarun", "specs/7/qa.md", "# QA\npass via reading code\n")
     _stage(config, "qarun", "specs/7/qa-report.json", json.dumps(dishonest))
@@ -1954,13 +1972,14 @@ def test_collect_rejects_a_dishonest_qa_report(config, taskdefs, store, tmp_path
     _write_control(config, "qarun", {"outcome": "queue", "queue": []}, patch="")
 
     agent = FakeAgent(tmp_path / "work")
+    adapters = _adapters(tracker=FakeTracker(_details()), agent=agent)
     run_task(
         "qarun",
         "collect",
         config,
         taskdefs,
         store,
-        adapter_fn=_adapters(tracker=FakeTracker(_details()), agent=agent),
+        adapter_fn=adapters,
     )
 
     runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
@@ -1977,6 +1996,29 @@ def test_collect_rejects_a_dishonest_qa_report(config, taskdefs, store, tmp_path
     assert json.loads(retained) == dishonest
     assert store.read_artifact("7", "qarun", "specs/7/qa.md") == b"# QA\npass via reading code\n"
     assert agent.opened_prs == []
+    assert not any(
+        eid.endswith(":pr-qa") and not eid.endswith(":pr-qa-rejected")
+        for _, _, eid in adapters.messaging.calls
+    )
+    rejected_pr = [
+        (aud, msg, eid)
+        for aud, msg, eid in adapters.messaging.calls
+        if eid == "qarun:pr-qa-rejected"
+    ]
+    assert len(rejected_pr) == 1
+    _, body, _ = rejected_pr[0]
+    assert "rejected (not a pass)" in body
+    assert "Reject reason:" in body
+    assert "live-flow" in body
+    assert "1 pass" in body  # summary footer still present
+    escalations = [
+        (aud, msg, eid) for aud, msg, eid in adapters.messaging.calls if eid == "qarun:escalation"
+    ]
+    assert len(escalations) == 1
+    _, esc_msg, _ = escalations[0]
+    assert "exhausted its retry budget" in esc_msg
+    assert "Rejected:" in esc_msg
+    assert "live-flow" in esc_msg
 
 
 def test_collect_rejects_prose_only_missing_test_data_and_retries(
@@ -1985,7 +2027,8 @@ def test_collect_rejects_prose_only_missing_test_data_and_retries(
     """missing-test-data without plan_steps_run / driver / log is prose-only:
     collect artifact-rejects and the retry gets rework feedback (same channel
     as dishonest qa-report / handoff.rejected). Uses build (retries: 1); the
-    fixture spec task has retries: 0 so it cannot prove the rework path."""
+    fixture spec task has retries: 0 so it cannot prove the rework path.
+    Rejected evidence is ledgered + posted on the existing work PR."""
     taskdefs["build"]["outputs"]["artifacts"] = [
         "specs/{ticket}/qa.md",
         "specs/{ticket}/qa-report.json",
@@ -2014,17 +2057,32 @@ def test_collect_rejects_prose_only_missing_test_data_and_retries(
         ],
         "summary": {"all_passed": False, "pass": 0, "fail": 0, "not_exercised": 1},
     }
-    _seed(
-        store,
-        _run_dict(
-            "qarun",
-            "build",
-            state="RUNNING",
-            attempt=0,
-            parent_run_id="p",
-            source_event_id="evt",
-            enqueue_index=0,
-        ),
+    store.write(
+        lambda txn: (
+            txn.set_ticket(
+                "7",
+                status="ACTIVE",
+                pinned_comment_id=None,
+                work_repos=[
+                    {
+                        "repo": "yash-learner/care_fe_agent_hq",
+                        "pr_ref": "yash-learner/care_fe_agent_hq#9",
+                    }
+                ],
+            ),
+            txn.put_run(
+                "7",
+                _run_dict(
+                    "qarun",
+                    "build",
+                    state="RUNNING",
+                    attempt=0,
+                    parent_run_id="p",
+                    source_event_id="evt",
+                    enqueue_index=0,
+                ),
+            ),
+        )
     )
     _stage(config, "qarun", "specs/7/qa.md", "# QA\nprose-only missing-test-data\n")
     _stage(config, "qarun", "specs/7/qa-report.json", json.dumps(prose_only))
@@ -2063,6 +2121,17 @@ def test_collect_rejects_prose_only_missing_test_data_and_retries(
     assert "Previous attempt rejected:" in rework[0]["detail"]
     assert "plan_steps_run" in rework[0]["detail"]
     assert agent.opened_prs == []
+    rejected_pr = [
+        (aud, msg, eid)
+        for aud, msg, eid in adapters.messaging.calls
+        if eid == "qarun:pr-qa-rejected"
+    ]
+    assert len(rejected_pr) == 1
+    assert "rejected (not a pass)" in rejected_pr[0][1]
+    assert "plan_steps_run" in rejected_pr[0][1]
+    assert not any(eid == "qarun:pr-qa" for _, _, eid in adapters.messaging.calls)
+    # Retries remain — no exhausted escalation on this attempt.
+    assert not any(eid.endswith(":escalation") for _, _, eid in adapters.messaging.calls)
 
 
 def test_collect_failure_records_spend_then_retries(config, taskdefs, store, tmp_path):
