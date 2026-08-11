@@ -29,15 +29,22 @@ confirm:
       “exceeds budget” without a concrete failed UI/API attempt.
 - [ ] Fixture-independent criteria were exercised independently even when a
       sibling seed graph stayed blocked.
-- [ ] **Auth shell readiness** passed before facility criteria: storageState
-      loaded, viewport matches `recordVideo.size` (care_fe: 1440×900; no grey
-      letterboxing), spinner gone, facility nav label or
-      `[data-sidebar="sidebar"]` visible. Ban: URL without `/login` or title
-      “CARE” as auth proof. Login UI on a facility URL ⇒ auth failure path.
-- [ ] **Auth recovery** on `token_not_valid` / expired: JWT refresh via
-      `/api/v1/auth/token/refresh/` rewriting storageState, else UI re-login;
-      prefer browser continuation if file token is stale. Ban: `auth-failure`
-      without recovery attempt, or cascading siblings without one recovery.
+- [ ] **Auth shell readiness** passed before facility criteria: prefer
+      `.agent-hq/qa-auth.mjs` `openAuthedContext` when setup-notes say it
+      exists; storageState loaded, viewport matches `recordVideo.size`
+      (care_fe: 1440×900; no grey letterboxing), spinner gone, facility nav
+      label or `[data-sidebar="sidebar"]` or `Hey …` visible, login tabs
+      absent. Ban: URL without `/login`, title “CARE”, or “refresh 200” as
+      auth/shell proof. Login UI on a facility URL ⇒ recovery (UI login),
+      not an immediate throw.
+- [ ] **Auth recovery** on login UI **or** `token_not_valid` / expired: JWT
+      refresh rewriting storageState, then **new context**, then UI re-login
+      when the shell is still unauthenticated **even if refresh returned
+      200**; prefer the setup helper over a weaker custom path. Ban:
+      `auth-failure` / throw before UI login on first login-tab sighting;
+      `auth-failure` without refresh + UI login attempts logged; cascading
+      siblings without one recovery; PR/report claims of UI login without
+      matching `qa-logs` lines.
 - [ ] Criteria ran **serially**, one isolated driver at a time. No parallel
       Playwright workers, no multi-file suite in one invocation, no shared
       browser context or shared recording across ACs. You did not run the

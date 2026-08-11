@@ -29,6 +29,7 @@ from test_state import _clone_worktree, _make_origin
 
 from engine.config import load_config
 from engine.engine import (
+    ENGINE_ISSUE_UNAVAILABLE,
     _complete_if_queue_empty,
     dispatch,
     post_pr_comment,
@@ -203,13 +204,22 @@ class FakeMessaging:
     list would have one comment queue two runs. `by_subject` is how a test says
     which thread a comment is on; `comments` remains the default for the
     subjects it does not name.
+
+    `errors_by_subject` maps a subject id to a `RuntimeError` (or message
+    string) raised from `list_comments`, matching the real client's
+    `GitHub GET ... -> 404: ...` form so orphan / auth-failure paths can be
+    exercised without a live API.
     """
 
-    def __init__(self, comments=None, by_subject=None):
+    def __init__(self, comments=None, by_subject=None, errors_by_subject=None):
         self.calls = []
         # [{"id", "body", "author", "created_at"}], as the adapter returns them.
         self.comments = list(comments or [])
         self.by_subject = {str(k): list(v) for k, v in (by_subject or {}).items()}
+        self.errors_by_subject = {
+            str(k): (v if isinstance(v, BaseException) else RuntimeError(v))
+            for k, v in (errors_by_subject or {}).items()
+        }
         self.listed: list[tuple] = []
         self.reactions: list[tuple] = []
 
@@ -221,6 +231,9 @@ class FakeMessaging:
 
     def list_comments(self, subject_id, since=None):
         self.listed.append((subject_id, since))
+        err = self.errors_by_subject.get(str(subject_id))
+        if err is not None:
+            raise err
         thread = self.by_subject.get(str(subject_id), self.comments)
         return [c for c in thread if since is None or c["created_at"] >= since]
 
@@ -1911,6 +1924,30 @@ def test_qa_setup_notes_and_prompt_require_screencast_show_actions():
     assert 'cursor: "pointer"' in prompt
 
 
+def test_qa_auth_helper_and_recovery_order_pinned():
+    """Ticket 41: refresh can succeed while the SPA still shows login.
+    care_fe setup must emit `.agent-hq/qa-auth.mjs` with openAuthedContext,
+    and the QA prompt must require UI login even after refresh 200 and ban
+    throw-before-login."""
+    repos = Path("config/repos.yml").read_text()
+    prompt = Path("tasks/qa/prompts/qa.md").read_text()
+    checklist = Path("tasks/qa/checklists/qa-coverage.md").read_text()
+
+    assert ".agent-hq/qa-auth.mjs" in repos
+    assert "openAuthedContext" in repos
+    assert "refreshJwt" in repos
+    assert "uiLogin" in repos
+    assert "readAccessToken" in repos
+    assert "qa-auth.mjs" in repos  # setup-notes require the helper import
+
+    assert "even if refresh returned 200" in prompt or "even if refresh" in prompt
+    assert "throw" in prompt.lower() and "before" in prompt.lower()
+    assert "openAuthedContext" in prompt or "qa-auth.mjs" in prompt
+
+    assert "openAuthedContext" in checklist or "qa-auth.mjs" in checklist
+    assert "even if refresh returned" in checklist or "refresh returned 200" in checklist
+
+
 def test_collect_rejects_a_dishonest_qa_report(config, taskdefs, store, tmp_path):
     """Filename convention: qa-report.json in the ledger is validated at
     collect; a code-inspection 'pass' fails the run. Evidence is still
@@ -3341,3 +3378,97 @@ def test_sweep_pr_feedback_waits_while_a_run_is_in_flight(config, taskdefs, stor
     assert [r for r in state["runs"] if r["state"] == "QUEUED"] == []
     assert messaging.listed == []  # not even read
     assert state["work_repos"][0].get("comments_polled_at") is None
+
+
+# --------------------------------------------------------------------------
+# Missing engine-issue isolation (issue #68).
+# --------------------------------------------------------------------------
+
+
+def _missing_issue_error(ticket_id: str, status: int = 404) -> RuntimeError:
+    return RuntimeError(
+        f"GitHub GET /repos/agentalec/agent_hq/issues/{ticket_id}/comments -> {status}: gone"
+    )
+
+
+def test_sweep_orphans_missing_engine_issue_and_continues(config, taskdefs, store, tmp_path):
+    """A 404 on one ticket's engine issue must not abort the whole sweep."""
+    _feedback_config(config)
+    _seed(store, _run_dict("specrun", "spec", state="QUEUED", ticket_id="7"), ticket_id="7")
+    store.write(lambda txn: txn.set_ticket("38", status="ACTIVE", pinned_comment_id=None))
+
+    tracker = FakeTracker(_details())
+    messaging = FakeMessaging(errors_by_subject={"38": _missing_issue_error("38")})
+    adapters = _adapters(tracker=tracker, agent=FakeAgent(tmp_path / "work"), messaging=messaging)
+    wf = FakeWorkflowApi()
+
+    triggered = dispatch(
+        config, taskdefs, store, wf, now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters
+    )
+
+    orphan = store.read_state("38")
+    assert orphan["status"] == "BLOCKED"
+    assert orphan["block_reason"] == ENGINE_ISSUE_UNAVAILABLE
+    assert orphan["block_source"] == "engine"
+    blocked_events = [
+        e for e in store.read_events("38") if e["event_id"] == "38:engine-issue-unavailable"
+    ]
+    assert len(blocked_events) == 1
+    assert blocked_events[0]["kind"] == "ticket.blocked"
+    # Silent: no status label, no notify -- both would 404 on the same issue.
+    assert not any(tid == "38" for tid, *_ in tracker.label_sets)
+    assert not any((c[0] or {}).get("ticket_id") == "38" for c in messaging.calls)
+
+    assert triggered == ["specrun"]
+    assert wf.triggered == ["specrun"]
+    assert store.read_state("7")["status"] == "ACTIVE"
+
+
+def test_sweep_orphaned_engine_issue_is_idempotent_on_resweep(config, taskdefs, store, tmp_path):
+    """Later sweeps must skip the gone issue so dispatch stays green."""
+    _feedback_config(config)
+    store.write(lambda txn: txn.set_ticket("38", status="ACTIVE", pinned_comment_id=None))
+    messaging = FakeMessaging(errors_by_subject={"38": _missing_issue_error("38", status=410)})
+    adapters = _adapters(
+        tracker=FakeTracker(_details()),
+        agent=FakeAgent(tmp_path / "work"),
+        messaging=messaging,
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+    assert store.read_state("38")["block_reason"] == ENGINE_ISSUE_UNAVAILABLE
+    listed_after_orphan = list(messaging.listed)
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    assert messaging.listed == listed_after_orphan  # no re-poll
+    assert [
+        e for e in store.read_events("38") if e["event_id"] == "38:engine-issue-unavailable"
+    ] == [e for e in store.read_events("38") if e["kind"] == "ticket.blocked"]
+    assert len(store.read_events("38")) == 1
+
+
+def test_sweep_non_missing_comment_errors_still_raise(config, taskdefs, store, tmp_path):
+    """Auth / other GitHub failures must not silently orphan every ticket."""
+    _feedback_config(config)
+    store.write(lambda txn: txn.set_ticket("7", status="ACTIVE", pinned_comment_id=None))
+    messaging = FakeMessaging(
+        errors_by_subject={
+            "7": RuntimeError(
+                "GitHub GET /repos/agentalec/agent_hq/issues/7/comments -> 401: Bad credentials"
+            )
+        }
+    )
+    adapters = _adapters(
+        tracker=FakeTracker(_details()),
+        agent=FakeAgent(tmp_path / "work"),
+        messaging=messaging,
+    )
+
+    with pytest.raises(RuntimeError, match=r"-> 401"):
+        _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    state = store.read_state("7")
+    assert state["status"] == "ACTIVE"
+    assert state.get("block_reason") is None
+    assert store.read_events("7") == []

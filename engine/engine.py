@@ -55,6 +55,21 @@ STATUS_LABELS = {
 }
 _OWNED_LABELS = frozenset(STATUS_LABELS.values())
 
+# Ticket whose engine-issue comments/labels cannot be reached (deleted /
+# transferred). Silent orphan path -- see `_orphan_missing_engine_issue`.
+ENGINE_ISSUE_UNAVAILABLE = "engine_issue_unavailable"
+
+
+def _github_resource_missing(exc: BaseException) -> bool:
+    """True when a GitHubClient RuntimeError reports a gone resource.
+
+    Matches the same `-> <status>` string form as the `-> 422` ponytail in
+    `engine.adapters._github.request_reviewers`. 404 is comments on a deleted
+    issue; 410 is the issue itself gone.
+    """
+    text = str(exc)
+    return "-> 404" in text or "-> 410" in text
+
 
 def queue_positions(runs: list[dict]) -> dict[str, int]:
     """Effective queue position per run_id.
@@ -561,6 +576,35 @@ def _block_ticket(
 
     store.write(fn)
     set_status_label(config, adapter_fn, ticket_id, "BLOCKED")
+
+
+def _orphan_missing_engine_issue(store, ticket_id: str) -> None:
+    """Block a ticket whose engine issue is gone, with no GitHub side effects.
+
+    Must not call `_block_ticket`: that always runs `set_status_label`, which
+    would 404 on the same missing issue and abort the sweep for every other
+    ticket. No `notify_ticket` either -- there is nowhere to post.
+    """
+
+    def fn(txn: Txn) -> None:
+        txn.set_block(
+            ticket_id,
+            reason=ENGINE_ISSUE_UNAVAILABLE,
+            source="engine",
+            interrupted_run=None,
+        )
+        txn.append_event(
+            ticket_id,
+            Event(
+                event_id=f"{ticket_id}:engine-issue-unavailable",
+                kind="ticket.blocked",
+                ticket_id=ticket_id,
+                run_id="",
+                detail=ENGINE_ISSUE_UNAVAILABLE,
+            ).to_dict(),
+        )
+
+    store.write(fn)
 
 
 def reenqueue_same(store, run: dict, taskdef: dict, attempt: int) -> str:
@@ -1158,7 +1202,13 @@ def sweep(
         # FRONT of a non-empty queue -- which is the whole point of a comment
         # being an interjection.
         working = any(r["state"] in EXCLUSIVE_STATES for r in state.get("runs", []))
-        if state.get("status") in ("ACTIVE", "AWAITING_MERGE", "BLOCKED") and not working:
+        # An orphaned engine issue cannot be polled, labelled, or unblocked by
+        # comments -- re-hitting it every sweep would crash dispatch again.
+        if (
+            state.get("status") in ("ACTIVE", "AWAITING_MERGE", "BLOCKED")
+            and not working
+            and state.get("block_reason") != ENGINE_ISSUE_UNAVAILABLE
+        ):
             poll_comments(store, config, taskdefs, adapter_fn, ticket_id, state)
             state = store.read_state(ticket_id) or state
         if state.get("status") == "AWAITING_MERGE":
@@ -1413,54 +1463,67 @@ def poll_comments(store, config, taskdefs, adapter_fn, ticket_id: str, state: di
     # bare approver comment (no command) may act, because it is a narrower
     # audience than a work PR.
     if feedback_task or default_task:
-        _poll_comment_subject(
-            store,
-            config,
-            taskdefs,
-            adapter_fn,
-            ticket_id,
-            repo=intake_repo(config),
-            number=ticket_id,
-            source_prefix="issue-comment",
-            watermark=state.get("comments_polled_at"),
-            save_watermark=lambda txn, w: txn.set_ticket(ticket_id, comments_polled_at=w),
-            members=members,
-            feedback_task=feedback_task,
-            default_task=default_task,
-            ack=lambda message, event_id: notify_ticket(
-                config, adapter_fn, ticket_id, message, event_id
-            ),
-        )
+        try:
+            _poll_comment_subject(
+                store,
+                config,
+                taskdefs,
+                adapter_fn,
+                ticket_id,
+                repo=intake_repo(config),
+                number=ticket_id,
+                source_prefix="issue-comment",
+                watermark=state.get("comments_polled_at"),
+                save_watermark=lambda txn, w: txn.set_ticket(ticket_id, comments_polled_at=w),
+                members=members,
+                feedback_task=feedback_task,
+                default_task=default_task,
+                ack=lambda message, event_id: notify_ticket(
+                    config, adapter_fn, ticket_id, message, event_id
+                ),
+            )
+        except RuntimeError as exc:
+            if not _github_resource_missing(exc):
+                raise
+            # Issue gone: isolate this ticket and skip PR polls this pass so
+            # the rest of the sweep can continue.
+            _orphan_missing_engine_issue(store, ticket_id)
+            return
 
     for work_repo in list(state.get("work_repos", [])):
         pr_ref = work_repo.get("pr_ref")
         if not pr_ref:
             continue
         repo, _, number = pr_ref.rpartition("#")
-        _poll_comment_subject(
-            store,
-            config,
-            taskdefs,
-            adapter_fn,
-            ticket_id,
-            repo=repo,
-            number=number,
-            source_prefix="pr-comment",
-            watermark=work_repo.get("comments_polled_at"),
-            save_watermark=lambda txn, w, r=repo: txn.upsert_work_repo(
-                ticket_id, r, comments_polled_at=w
-            ),
-            members=members,
-            feedback_task=feedback_task,
-            # A PR is a wider, lower-trust audience than the engine issue, so an
-            # explicit command is still required there -- "an approver said
-            # something" never spends budget from a PR thread.
-            default_task=None,
-            run_repo=repo,
-            ack=lambda message, event_id, pr=pr_ref: post_pr_comment(
-                config, adapter_fn, pr, message, event_id
-            ),
-        )
+        try:
+            _poll_comment_subject(
+                store,
+                config,
+                taskdefs,
+                adapter_fn,
+                ticket_id,
+                repo=repo,
+                number=number,
+                source_prefix="pr-comment",
+                watermark=work_repo.get("comments_polled_at"),
+                save_watermark=lambda txn, w, r=repo: txn.upsert_work_repo(
+                    ticket_id, r, comments_polled_at=w
+                ),
+                members=members,
+                feedback_task=feedback_task,
+                # A PR is a wider, lower-trust audience than the engine issue, so an
+                # explicit command is still required there -- "an approver said
+                # something" never spends budget from a PR thread.
+                default_task=None,
+                run_repo=repo,
+                ack=lambda message, event_id, pr=pr_ref: post_pr_comment(
+                    config, adapter_fn, pr, message, event_id
+                ),
+            )
+        except RuntimeError as exc:
+            if not _github_resource_missing(exc):
+                raise
+            # Missing PR thread only: leave the ticket alone and try the next.
 
 
 def _acknowledge(messaging, considered: list[dict], queued_ids: set) -> None:

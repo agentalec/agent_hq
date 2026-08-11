@@ -95,44 +95,62 @@ login PublicRouter when `currentUser` fails silently — **URL without
    - loading spinner gone
    - at least one known facility nav label visible (e.g. Overview / Patients),
      **or** `[data-sidebar="sidebar"]` visible on desktop
-5. Also probe for login UI (`Username` / `Password` / Sign in). If present
-   while the URL is still a facility path → treat as auth failure and run
-   **mid-session token recovery** (fresh UI login) before scoring.
+5. Also probe for login UI (`Username` / `Password` / “Log in as Staff”).
+   If present while the URL is still a facility path → run **mid-session
+   token recovery** (including UI login) before scoring. **Ban:** throwing
+   `auth-failure` on first login-tab sighting before UI login runs.
 
 **Ban:** treating “URL has no `/login`” or “title is CARE” as proof of auth.
+**Ban:** treating “refresh returned 200” alone as shell proof.
 
 Blocker taxonomy:
 
-- Shell never authenticates after storageState + refresh + fresh login →
+- Shell never authenticates after storageState + refresh + fresh UI login →
   `auth-failure`
 - Authenticated shell present but expected nav/control missing →
   `navigation-mismatch` (or fail the AC), **not** `auth-failure`
 - Expired access token on API seed **without** a refresh attempt → dishonest;
   log must show the refresh try
+- Claiming UI login in the PR/`qa.md` without matching `qa-logs` lines →
+  dishonest
 
-### Mid-session token recovery (ticket 20 — refresh, do not surrender)
+### Mid-session token recovery (tickets 20 / 41 — refresh, then prove shell)
 
 Node seed scripts that read a static `care_access_token` from
 `tests/.auth/user.json` do **not** auto-refresh. Filing `auth-failure` on the
-first `token_not_valid` / “Token is expired” is **banned**.
+first `token_not_valid` / “Token is expired” **or** on the first sight of
+login tabs without attempting UI login is **banned**.
+
+Trigger recovery on **login UI** (Staff/Patient tabs, Username+Password on a
+facility URL) **or** API `token_not_valid` / expired — not only API expiry.
+API Bearer success does not imply a hydrated SPA shell.
+
+When setup-notes say `.agent-hq/qa-auth.mjs` exists, **prefer**
+`openAuthedContext` / `refreshJwt` / `uiLogin` / `readAccessToken` from that
+helper. Do **not** reimplement a weaker refresh-only path that throws before
+UI login.
 
 Ordered recovery before any `auth-failure`:
 
 1. **Refresh JWT** — `POST /api/v1/auth/token/refresh/` with
    `care_refresh_token` from the same storageState; write new access/refresh
    back into `tests/.auth/user.json` (or an in-memory header helper for the
-   rest of the run). Retry the failed API call once. Log status codes, not
-   secrets.
-2. **If refresh fails** — UI login with fixture credentials; persist a fresh
-   storageState (Playwright `storageState` save or rewrite the auth JSON);
-   re-check authenticated shell; retry seed/API.
-3. **Prefer UI continuation** when the browser context is still authenticated
+   rest of the run). Log status codes, not secrets.
+2. **New browser context** with the updated storageState (and matching
+   viewport/`recordVideo` size) **before** retrying UI — do not reuse a
+   context that already showed login tabs without reloading auth.
+3. **UI login when the shell is still unauthenticated — even if refresh
+   returned 200** (ticket 41). Mirror fixture login (`/login`, username /
+   password, wait for `Hey …` or sidebar); persist a fresh storageState;
+   open another fresh context; re-check authenticated shell; retry seed/API.
+4. **Prefer UI continuation** when the browser context is still authenticated
    even if a seed script’s file token expired — do not abandon live criteria
    solely because a Node `fetch` used a stale header.
-4. **Only then** `not-exercised` + `auth-failure`, with log proof that refresh
-   and re-login were attempted.
+5. **Only then** `not-exercised` + `auth-failure`, with log proof that refresh
+   **and** UI re-login were both attempted (log both).
 
 Ban cascading sibling ACs as `auth-failure` without attempting recovery once.
+Ban early `throw` / `auth-failure` before UI login when login UI appeared.
 
 ### Thin discovery cookbook (how to find things — not a CARE encyclopedia)
 

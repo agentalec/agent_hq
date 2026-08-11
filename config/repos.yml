@@ -69,16 +69,275 @@ yash-learner/care_fe_agent_hq:
       NODE_ENV=production npm run build
       npx playwright install --with-deps chromium
       NODE_ENV=production npx playwright test --project=setup --workers=1
+      cat > .agent-hq/qa-auth.mjs <<'QAAUTH'
+      import fs from "node:fs";
+      import path from "node:path";
+
+      const ACCESS_TOKEN_KEY = "care_access_token";
+      const REFRESH_TOKEN_KEY = "care_refresh_token";
+      const DEFAULT_ORIGIN = "http://localhost:4000";
+      const SIZE = { width: 1440, height: 900 };
+
+      function _readState(authFile) {
+        return JSON.parse(fs.readFileSync(authFile, "utf-8"));
+      }
+
+      function _originLocalStorage(state, origin = DEFAULT_ORIGIN) {
+        if (!Array.isArray(state.origins)) state.origins = [];
+        let entry = state.origins.find((o) => o.origin === origin);
+        if (!entry) {
+          entry = { origin, localStorage: [] };
+          state.origins.push(entry);
+        }
+        if (!Array.isArray(entry.localStorage)) entry.localStorage = [];
+        return entry.localStorage;
+      }
+
+      function _getToken(localStorage, name) {
+        return localStorage.find((item) => item.name === name)?.value ?? null;
+      }
+
+      function _setToken(localStorage, name, value) {
+        const idx = localStorage.findIndex((item) => item.name === name);
+        if (idx === -1) localStorage.push({ name, value });
+        else localStorage[idx].value = value;
+      }
+
+      /** Read Bearer access token from a Playwright storageState file. */
+      export function readAccessToken(authFile = "tests/.auth/user.json") {
+        const state = _readState(authFile);
+        const ls = _originLocalStorage(state);
+        const token = _getToken(ls, ACCESS_TOKEN_KEY);
+        if (!token) throw new Error(`No ${ACCESS_TOKEN_KEY} in ${authFile}`);
+        return token;
+      }
+
+      /**
+       * POST /api/v1/auth/token/refresh/ and rewrite care_access_token /
+       * care_refresh_token in origins[].localStorage for localhost:4000.
+       * Logs status only — never tokens. Returns { ok, status }.
+       */
+      export async function refreshJwt({
+        authFile = "tests/.auth/user.json",
+        apiBase = process.env.REACT_CARE_API_URL || "http://localhost:9000",
+      } = {}) {
+        const state = _readState(authFile);
+        const ls = _originLocalStorage(state);
+        const refresh = _getToken(ls, REFRESH_TOKEN_KEY);
+        if (!refresh) {
+          console.log("[qa-auth] refreshJwt: no refresh token in storageState");
+          return { ok: false, status: 0 };
+        }
+        const res = await fetch(`${apiBase}/api/v1/auth/token/refresh/`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refresh }),
+        });
+        console.log(`[qa-auth] refreshJwt: status ${res.status}`);
+        if (!res.ok) return { ok: false, status: res.status };
+        const data = await res.json();
+        if (data.access) _setToken(ls, ACCESS_TOKEN_KEY, data.access);
+        if (data.refresh) _setToken(ls, REFRESH_TOKEN_KEY, data.refresh);
+        fs.writeFileSync(authFile, JSON.stringify(state, null, 2));
+        return { ok: true, status: res.status };
+      }
+
+      /**
+       * Mirror tests/setup/auth.setup.ts: /login → fill → wait for Hey …
+       * then persist context.storageState({ path }).
+       */
+      export async function uiLogin(
+        page,
+        {
+          username = "admin",
+          password = "admin",
+          authFile = "tests/.auth/user.json",
+          baseUrl = DEFAULT_ORIGIN,
+        } = {},
+      ) {
+        console.log("[qa-auth] uiLogin: starting UI login");
+        await page.goto(`${baseUrl}/login`);
+        await page.getByRole("textbox", { name: /username/i }).fill(username);
+        await page.getByLabel(/password/i).fill(password);
+        await page.getByRole("button", { name: /login/i }).click();
+        await page.waitForURL((url) => !url.pathname.includes("/login"), {
+          timeout: 15000,
+        });
+        const hey = page.getByRole("heading", { name: /^Hey .+/ });
+        const sidebar = page.locator('[data-sidebar="sidebar"]');
+        await Promise.race([
+          hey.waitFor({ state: "visible", timeout: 15000 }),
+          sidebar.waitFor({ state: "visible", timeout: 15000 }),
+        ]);
+        await page.context().storageState({ path: authFile });
+        console.log("[qa-auth] uiLogin: storageState saved");
+      }
+
+      async function _looksLikeLogin(page) {
+        const staffTab = page.getByText(/Log in as Staff/i);
+        const username = page.getByRole("textbox", { name: /username/i });
+        const password = page.getByLabel(/^password$/i);
+        return (
+          (await staffTab.isVisible().catch(() => false)) ||
+          ((await username.isVisible().catch(() => false)) &&
+            (await password.isVisible().catch(() => false)))
+        );
+      }
+
+      async function _shellReady(page) {
+        const spinner = page.locator(".animate-spin, [data-loading='true']");
+        if (await spinner.first().isVisible().catch(() => false)) {
+          await spinner
+            .first()
+            .waitFor({ state: "hidden", timeout: 15000 })
+            .catch(() => {});
+        }
+        if (await _looksLikeLogin(page)) return false;
+        const sidebar = page.locator('[data-sidebar="sidebar"]');
+        const hey = page.getByRole("heading", { name: /^Hey .+/ });
+        const nav = page.getByRole("link", {
+          name: /^(Overview|Patients)$/i,
+        });
+        return (
+          (await sidebar.isVisible().catch(() => false)) ||
+          (await hey.isVisible().catch(() => false)) ||
+          (await nav.first().isVisible().catch(() => false))
+        );
+      }
+
+      async function _injectTokens(context, authFile) {
+        const state = _readState(authFile);
+        const ls = _originLocalStorage(state);
+        const access = _getToken(ls, ACCESS_TOKEN_KEY);
+        const refresh = _getToken(ls, REFRESH_TOKEN_KEY);
+        await context.addInitScript(
+          ({ access, refresh, ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY }) => {
+            if (access) localStorage.setItem(ACCESS_TOKEN_KEY, access);
+            if (refresh) localStorage.setItem(REFRESH_TOKEN_KEY, refresh);
+          },
+          { access, refresh, ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY },
+        );
+      }
+
+      /**
+       * Ordered auth recovery for every care_fe QA driver:
+       * refreshJwt → newContext(storageState) → initScript tokens → goto →
+       * if login UI, uiLogin even when refresh was 200 → fresh context →
+       * shell proof. Throws auth-failure only after both were attempted.
+       */
+      export async function openAuthedContext(
+        browser,
+        {
+          authFile = "tests/.auth/user.json",
+          apiBase = process.env.REACT_CARE_API_URL || "http://localhost:9000",
+          baseUrl = DEFAULT_ORIGIN,
+          gotoPath,
+          facilityId,
+          credentials = { username: "admin", password: "admin" },
+          videoDir = ".agent-hq/pw-videos",
+          size = SIZE,
+        } = {},
+      ) {
+        const targetPath =
+          gotoPath ||
+          (facilityId
+            ? `/facility/${facilityId}/overview`
+            : (() => {
+                const idFile = path.resolve("tests/.auth/facilityMeta.json");
+                if (fs.existsSync(idFile)) {
+                  const meta = JSON.parse(fs.readFileSync(idFile, "utf-8"));
+                  const fid =
+                    typeof meta === "string"
+                      ? meta
+                      : meta.id || meta.facilityId;
+                  if (fid) return `/facility/${fid}/overview`;
+                }
+                throw new Error(
+                  "openAuthedContext: pass gotoPath or facilityId (or seed tests/.auth/facilityMeta.json)",
+                );
+              })());
+
+        const refreshResult = await refreshJwt({ authFile, apiBase });
+        console.log(
+          `[qa-auth] openAuthedContext: refresh ok=${refreshResult.ok} status=${refreshResult.status}`,
+        );
+
+        async function openOnce() {
+          const context = await browser.newContext({
+            storageState: authFile,
+            viewport: size,
+            recordVideo: { dir: videoDir, size },
+          });
+          await _injectTokens(context, authFile);
+          const page = await context.newPage();
+          await page.goto(`${baseUrl}${targetPath}`);
+          return { context, page };
+        }
+
+        let { context, page } = await openOnce();
+        let didUiLogin = false;
+
+        if (await _looksLikeLogin(page)) {
+          console.log(
+            "[qa-auth] openAuthedContext: login UI visible after refresh — running uiLogin",
+          );
+          await uiLogin(page, { ...credentials, authFile, baseUrl });
+          didUiLogin = true;
+          await context.close();
+          ({ context, page } = await openOnce());
+        }
+
+        if (!(await _shellReady(page))) {
+          if (!didUiLogin) {
+            console.log(
+              "[qa-auth] openAuthedContext: shell not ready — attempting uiLogin",
+            );
+            await uiLogin(page, { ...credentials, authFile, baseUrl });
+            didUiLogin = true;
+            await context.close();
+            ({ context, page } = await openOnce());
+          }
+        }
+
+        if (!(await _shellReady(page))) {
+          const msg =
+            `auth-failure: shell unauthenticated after refresh ` +
+            `(ok=${refreshResult.ok}, status=${refreshResult.status}) ` +
+            `and uiLogin (attempted=${didUiLogin})`;
+          console.log(`[qa-auth] ${msg}`);
+          await context.close().catch(() => {});
+          throw new Error(msg);
+        }
+
+        console.log("[qa-auth] openAuthedContext: authenticated shell proven");
+        return { context, page, size };
+      }
+      QAAUTH
       cat > .agent-hq/setup-notes.md <<'NOTES'
       # Environment (prepared for you -- do not rebuild it)
 
       - care backend: http://localhost:9000, seeded via `make load-fixtures`
       - Start the frontend with `npm run preview` -> http://localhost:4000
         (already built; do NOT point it at any non-localhost API)
-      - Signed-in browser state: `tests/.auth/user.json`. Load it with a
-        shared size so viewport and recordVideo match exactly (mismatched
-        sizes grey-letterbox the clip — do not set video size with a
-        smaller or default viewport):
+      - **Auth helper (required):** import from setup-emitted
+        `.agent-hq/qa-auth.mjs` (path from `specs/<ticket>/qa-drivers/`):
+          `import { openAuthedContext, readAccessToken } from '../../../.agent-hq/qa-auth.mjs';`
+        Use `openAuthedContext(browser, { facilityId | gotoPath })` to open
+        the recorded context — it already does JWT refresh, matching
+        viewport/`recordVideo` size `{ width: 1440, height: 900 }`,
+        storageState, initScript token inject, facility goto, and UI login
+        when the SPA still shows login even after refresh 200. Use
+        `readAccessToken(...)` for API seed Bearer headers.
+        **Ban:** throw / `auth-failure` on first login-tab sighting without
+        going through `openAuthedContext` recovery. **Ban:** treating
+        facility URL or “refresh 200” as shell proof (ticket 41: refresh
+        success + login UI ⇒ still UI login). Do not reimplement a weaker
+        refresh-only path.
+      - Signed-in browser state: `tests/.auth/user.json`. Prefer the helper
+        above; if you must open a context yourself, load it with a shared
+        size so viewport and recordVideo match exactly (mismatched sizes
+        grey-letterbox the clip — do not set video size with a smaller or
+        default viewport):
           const size = { width: 1440, height: 900 };
           browser.newContext({
             storageState: 'tests/.auth/user.json',
@@ -97,21 +356,22 @@ yash-learner/care_fe_agent_hq:
         clips under ~30s). Collect may derive a sibling lite `.gif` for
         the PR comment; you only need the WebM.
       - Auth shell readiness (hard gate before facility criteria): after
-        storageState + navigate to a facility route from getFacilityId() /
-        fixtures, wait for spinner gone AND (facility nav label like
-        Overview/Patients OR `[data-sidebar="sidebar"]` visible). Ban:
-        treating "URL has no /login" or title "CARE" as auth. If Username /
-        Password / Sign in appears on a facility URL → auth failure; recover
-        before scoring.
-      - Mid-session token recovery (before any auth-failure): on
-        token_not_valid / expired from API seed, POST
-        `/api/v1/auth/token/refresh/` with `care_refresh_token` from the same
-        storageState, rewrite access/refresh in `tests/.auth/user.json` (or
-        in-memory headers), retry once. If refresh fails → UI login with
-        fixture credentials, persist fresh storageState, re-check shell,
-        retry. Prefer continuing in the browser if the file token is stale
-        but the context is still authenticated. Ban filing auth-failure
-        without refresh + re-login attempts (log status codes, not secrets).
+        `openAuthedContext` (or storageState + navigate to a facility route
+        from getFacilityId() / fixtures), wait for spinner gone AND
+        (facility nav label like Overview/Patients OR
+        `[data-sidebar="sidebar"]` OR `Hey …` visible) and login tabs
+        absent. Ban: treating "URL has no /login" or title "CARE" as auth.
+        If Username / Password / “Log in as Staff” appears on a facility
+        URL → run helper UI login recovery before scoring — do not throw
+        yet.
+      - Mid-session token recovery (before any auth-failure): prefer
+        `.agent-hq/qa-auth.mjs` (`openAuthedContext` / `refreshJwt` /
+        `uiLogin`). Trigger on login UI **or** API `token_not_valid` /
+        expired — not only API expiry. After refresh: open a **new**
+        context before retrying UI. Refresh success + login UI still visible
+        ⇒ still UI login (ticket 41). Ban filing auth-failure without
+        refresh + UI re-login attempts (log status codes, not secrets).
+        Ban PR/report claims of UI login without matching `qa-logs` lines.
       - Chromium is installed. Drive it with Playwright directly; you do not
         need to add tests to the repo's suite. Screenshots are optional; video
         is the required pass evidence unless the repo disables it.
@@ -124,8 +384,9 @@ yash-learner/care_fe_agent_hq:
         Valueset codes via UI picker — never invent LOINC. On API 4xx, retry
         from a known-working test payload before missing-test-data;
         proven-plan validation reject → validation-error.
-      - API seed (escape hatch): auth via `getApiUrl` / `getApiHeaders` from
-        `tests/helper/utils.ts` with `tests/.auth/user.json`. Facility-scoped
+      - API seed (escape hatch): auth via `readAccessToken` from
+        `.agent-hq/qa-auth.mjs` (or `getApiUrl` / `getApiHeaders` from
+        `tests/helper/utils.ts`) with `tests/.auth/user.json`. Facility-scoped
         paths live in `src/types/**/*Api.ts` — prefer paths pasted in
         qa-plan Data setup; else see the QA prompt discovery recipe. Never
         invent unscoped `/api/v1/<resource>/` routes.
