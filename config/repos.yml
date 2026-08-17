@@ -13,11 +13,7 @@
 # `format` is the same shape, run AFTER a successful agent and BEFORE the work
 # patch is materialized (execute only; collect does not reformat). Only used
 # when the task `writes_code`.
-#
-# `format` is the same shape, run AFTER a successful agent and BEFORE the work
-# patch is materialized (execute only; collect does not reformat). Only used
-# when the task `writes_code`.
-yash-learner/care_fe_agent_hq:
+agentalec/care_fe:
   role: fe
   branch_prefix: agent-hq
   product_area: frontend
@@ -29,14 +25,6 @@ yash-learner/care_fe_agent_hq:
     screenshots: false
     video_max_seconds: 120
   setup:
-    # Install deps so implement can run tools and so format's prettier resolves.
-    # HUSKY=0: git hooks have no business installing in a throwaway worktree.
-    # Do not set NODE_ENV=production here -- that skips devDependencies and
-    # breaks husky's prepare script the same way it would without HUSKY=0.
-    implement: |
-      set -euo pipefail
-      export CI=1 HUSKY=0
-      npm ci --prefer-offline
     # Install deps so implement can run tools and so format's prettier resolves.
     # HUSKY=0: git hooks have no business installing in a throwaway worktree.
     # Do not set NODE_ENV=production here -- that skips devDependencies and
@@ -410,7 +398,7 @@ yash-learner/care_fe_agent_hq:
 # Care Django backend (API). Intake routes tickets whose title/body/labels
 # contain the product_area keyword (first match wins across this file).
 # Spec/breakdown may also pin this repo on a queue entry's `repo` field.
-yash-learner/care_agent_hq:
+agentalec/care:
   role: be
   branch_prefix: agent-hq
   product_area: backend
@@ -451,3 +439,9 @@ yash-learner/care_agent_hq:
         python -m ruff format -- "${files[@]}"
         python -m ruff check --fix -- "${files[@]}"
       fi
+
+agentalec/care_docs:
+  role: docs
+  branch_prefix: agent-hq
+  product_area: docs
+  base_branch: main

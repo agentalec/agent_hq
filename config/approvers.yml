@@ -1,12 +1,12 @@
 # Approvers config (§6). Add real reviewers per group as the deployment grows.
 #
-# Keep the account behind AGENT_HQ_TOKEN absent from every group: that account
-# is the identity the engine itself comments as. An approver group containing
-# the engine means the engine can authorize its own spend --
-# `_poll_comment_subject` skips engine-authored comments by their `<!--hq:`
-# marker, but that guard is one bug away from being the only thing standing
-# between an escalation comment and the run it triggers. Membership is the
-# second, independent guard, and it only works if this file stays clean.
+# `agentalec` is deliberately absent from every group: AGENT_HQ_TOKEN is that
+# account's PAT, so it is the identity the engine itself comments as. An
+# approver group containing the engine means the engine can authorize its own
+# spend -- `_poll_comment_subject` skips engine-authored comments by their
+# `<!--hq:` marker, but that guard is one bug away from being the only thing
+# standing between an escalation comment and the run it triggers. Membership is
+# the second, independent guard, and it only works if this file stays clean.
 #
 # Gates a task marks `auto_approve` are unaffected: both auto-approve paths
 # (`runner._collect` at collect time, `engine.handle_gate` for a run already
@@ -14,13 +14,13 @@
 # these groups.
 groups:
   product-owners:
-    members: [yash-learner]
+    members: [gigincg]
   architects:
-    members: [yash-learner]
+    members: [gigincg]
   clinical-reviewers:
-    members: [yash-learner]
+    members: [gigincg]
   escalation:
-    members: [yash-learner]
+    members: [gigincg]
 working_hours:
   timezone: Asia/Kolkata
   start: 9

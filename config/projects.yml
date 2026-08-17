@@ -1,10 +1,10 @@
 # Projects config (§6).
 repos:
-  - yash-learner/care_fe_agent_hq
-  - yash-learner/care_agent_hq
-
+  - agentalec/care
+  - agentalec/care_fe
+  - agentalec/care_docs
 intake_label: hq:intake
-engine_repo: yash-learner/agent_hq
+engine_repo: agentalec/agent_hq
 initial_task: spec
 # The route's designed end. Queue-empty completion posts the closing summary
 # and finishes the ticket only when the last run was THIS task; a queue that

@@ -385,10 +385,10 @@ def test_resolve_target_repo_picks_backend_over_frontend_when_keyword_matches():
     config = Config(
         components={},
         repos={
-            "yash-learner/care_fe_agent_hq": {"product_area": "frontend"},
-            "yash-learner/care_agent_hq": {"product_area": "backend"},
+            "agentalec/care_fe": {"product_area": "frontend"},
+            "agentalec/care": {"product_area": "backend"},
         },
-        projects={"engine_repo": "yash-learner/agent_hq"},
+        projects={"engine_repo": "agentalec/agent_hq"},
         approvers={},
         budgets={},
     )
@@ -398,8 +398,8 @@ def test_resolve_target_repo_picks_backend_over_frontend_when_keyword_matches():
     fe = TicketDetails(
         ticket_id="2", title="Button layout", body="frontend polish", labels=[]
     )
-    assert resolve_target_repo(config, be) == "yash-learner/care_agent_hq"
-    assert resolve_target_repo(config, fe) == "yash-learner/care_fe_agent_hq"
+    assert resolve_target_repo(config, be) == "agentalec/care"
+    assert resolve_target_repo(config, fe) == "agentalec/care_fe"
 
 
 class _FakeWorkflowApi:

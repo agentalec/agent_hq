@@ -451,9 +451,9 @@ def test_intake_eligible_enqueues_spec(config, taskdefs, store):
     assert len(spec_runs) == 1
     assert spec_runs[0]["source_event_id"] == "evt-1"
     assert spec_runs[0]["state"] == "QUEUED"
-    # Root run repo resolved from the ticket (title mentions "backend") --
+    # Root run repo resolved from the ticket (title mentions "frontend") --
     # never null, so every downstream handoff has a concrete repo to inherit.
-    assert spec_runs[0]["repo"] == "yash-learner/care_fe_agent_hq"
+    assert spec_runs[0]["repo"] == "agentalec/care_fe"
 
 
 def test_intake_injection_flag_blocks_and_skips_enqueue(config, taskdefs, store):
@@ -534,7 +534,7 @@ def test_prepare_claims_and_writes_bundle(config, taskdefs, store, tmp_path):
     assert bundle.exists()
     written = json.loads(bundle.read_text())
     assert "control.json" in written["prompt"]
-    assert written["repo"] == "yash-learner/care_fe_agent_hq"
+    assert written["repo"] == "agentalec/care_fe"
     # no work_repos entry yet -> resolved SHA of the configured base branch
     assert written["base_commit"] == "sha-develop"
     assert written["output_paths"] == ["specs/7/spec.md"]
@@ -685,7 +685,7 @@ def test_prepare_base_commit_uses_recorded_head_and_survives_downstream_failure(
     recorded_head = next(
         wr
         for wr in store.read_state("7")["work_repos"]
-        if wr["repo"] == "yash-learner/care_fe_agent_hq"
+        if wr["repo"] == "agentalec/care_fe"
     )["recorded_head"]
     assert recorded_head == "commit-buildrun"
 
@@ -911,16 +911,16 @@ def test_collect_opens_pr_records_pr_ref(config, taskdefs, store, tmp_path):
 
     runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
     assert runs["buildrun"]["state"] == "SUCCEEDED"
-    assert runs["buildrun"]["pr_ref"] == "yash-learner/care_fe_agent_hq#1"
+    assert runs["buildrun"]["pr_ref"] == "agentalec/care_fe#1"
     assert len(agent.opened_prs) == 1
     repo, branch, base, _title, body = agent.opened_prs[0]
-    assert repo == "yash-learner/care_fe_agent_hq"
+    assert repo == "agentalec/care_fe"
     assert branch == "agent-hq/7"  # stable per-issue branch, not per-run
     assert base == "develop"
     # The PR names the engine-repo ticket it came from -- the work repo has
     # nothing else pointing back at it. A reference, never a closing keyword:
     # the engine closes the issue itself, and one ticket can open several PRs.
-    assert "[yash-learner/agent_hq#7](https://github.com/yash-learner/agent_hq/issues/7)" in body
+    assert "[agentalec/agent_hq#7](https://github.com/agentalec/agent_hq/issues/7)" in body
     assert "closes" not in body.lower()
     assert _LONG_BODY in body  # the ticket's own text still rides along
 
@@ -963,7 +963,7 @@ def test_landed_commit_message_is_the_run_s_own_summary(config, taskdefs, store,
     assert subject == "feat: add the patient-age formatter"
     assert "Covers the under-1y case." in rest
     assert "Add frontend endpoint" not in message  # not the ticket title
-    assert "agent-hq-ticket: yash-learner/agent_hq#7" in rest
+    assert "agent-hq-ticket: agentalec/agent_hq#7" in rest
     assert "agent-hq-run: build buildrun" in rest
 
 
@@ -1035,12 +1035,12 @@ def test_collect_reuses_stable_branch_and_pr_across_tasks(config, taskdefs, stor
     work_repos = [
         wr
         for wr in store.read_state("7")["work_repos"]
-        if wr["repo"] == "yash-learner/care_fe_agent_hq"
+        if wr["repo"] == "agentalec/care_fe"
     ]
     assert len(work_repos) == 1  # one branch/PR record, not two
     assert work_repos[0]["branch"] == "agent-hq/7"
     assert work_repos[0]["recorded_head"] == "commit-buildrun2"
-    assert work_repos[0]["pr_ref"] == "yash-learner/care_fe_agent_hq#1"
+    assert work_repos[0]["pr_ref"] == "agentalec/care_fe#1"
     assert len(agent.opened_prs) == 1  # the second task never opens a second PR
 
 
@@ -1531,7 +1531,7 @@ def test_no_setup_configured_is_not_a_failure(tmp_path):
 
 
 def test_resolve_setup_prefers_the_task_over_default(config):
-    repo = "yash-learner/care_fe_agent_hq"
+    repo = "agentalec/care_fe"
     config.repos[repo]["setup"] = {"default": "npm ci", "qa": "make qa-env"}
 
     assert resolve_setup(config, repo, "qa") == "make qa-env"
@@ -1541,7 +1541,7 @@ def test_resolve_setup_prefers_the_task_over_default(config):
 
 
 def test_resolve_format_prefers_the_task_over_default(config):
-    repo = "yash-learner/care_fe_agent_hq"
+    repo = "agentalec/care_fe"
     config.repos[repo]["format"] = {
         "default": "prettier --write .",
         "implement": "prettier --write src",
@@ -1588,7 +1588,7 @@ def test_execute_runs_format_before_materialize_when_writes_code(
                 "prompt": "p",
                 "tools": [],
                 "deadline": None,
-                "repo": "yash-learner/care_fe_agent_hq",
+                "repo": "agentalec/care_fe",
                 "base_commit": "abc",
                 "format": "echo format-me",
                 "output_paths": [],
@@ -1629,7 +1629,7 @@ def test_execute_skips_format_when_writes_code_false(
                 "prompt": "p",
                 "tools": [],
                 "deadline": None,
-                "repo": "yash-learner/care_fe_agent_hq",
+                "repo": "agentalec/care_fe",
                 "base_commit": "abc",
                 "format": "echo should-not-run",
                 "output_paths": [],
@@ -1669,7 +1669,7 @@ def test_execute_format_failure_fails_the_run(config, taskdefs, store, tmp_path,
                 "prompt": "p",
                 "tools": [],
                 "deadline": None,
-                "repo": "yash-learner/care_fe_agent_hq",
+                "repo": "agentalec/care_fe",
                 "base_commit": "abc",
                 "format": "false",
                 "output_paths": [],
@@ -1984,8 +1984,8 @@ def test_collect_rejects_a_dishonest_qa_report(config, taskdefs, store, tmp_path
                 pinned_comment_id=None,
                 work_repos=[
                     {
-                        "repo": "yash-learner/care_fe_agent_hq",
-                        "pr_ref": "yash-learner/care_fe_agent_hq#1",
+                        "repo": "agentalec/care_fe",
+                        "pr_ref": "agentalec/care_fe#1",
                     }
                 ],
             ),
@@ -2102,8 +2102,8 @@ def test_collect_rejects_prose_only_missing_test_data_and_retries(
                 pinned_comment_id=None,
                 work_repos=[
                     {
-                        "repo": "yash-learner/care_fe_agent_hq",
-                        "pr_ref": "yash-learner/care_fe_agent_hq#9",
+                        "repo": "agentalec/care_fe",
+                        "pr_ref": "agentalec/care_fe#9",
                     }
                 ],
             ),
@@ -3052,7 +3052,7 @@ def test_intake_blocked_bare_comment_readmits_when_eligible(config, taskdefs, st
     queued = [r for r in state["runs"] if r["state"] == "QUEUED"]
     assert len(queued) == 1
     assert queued[0]["task_id"] == "spec"  # initial_task, not comment_default
-    assert queued[0]["repo"] == "yash-learner/care_fe_agent_hq"
+    assert queued[0]["repo"] == "agentalec/care_fe"
     assert any("Re-admitted" in msg for _, msg, _ in messaging.calls)
     assert dict(messaging.reactions)[301] == "rocket"
     rework = [e for e in store.read_events("7") if e["kind"] == "run.rework"]

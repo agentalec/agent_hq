@@ -35,7 +35,7 @@ arrives at view time, so a state write neither triggers nor needs a deploy.
 One line in `index.html`:
 
 ```html
-<meta name="agent-hq:engine-repo" content="yash-learner/agent_hq">
+<meta name="agent-hq:engine-repo" content="agentalec/agent_hq">
 ```
 
 The engine repo must be **public** — that is what makes the state branch
