@@ -8,7 +8,10 @@ a document:
 
 - Problem statement, 2-3 sentences.
 - Testable acceptance criteria, at most 7, **one line each**, phrased
-  `Given X, when Y, then Z.`
+  `Given X, when Y, then Z.` Prefer criteria a human can see in the running
+  app. "Playwright suite / CI must pass" is implement/CI work — put it in
+  capability notes or leave it for implement's Test plan / notes, not as a
+  live UI acceptance criterion that later becomes a `qa-plan.md` section.
 - Capability notes, at most 5 bullets, each naming a real path --
   `src/Utils/utils.ts:formatPatientAge -- exists` or `-- needs building`.
   Name real files/functions, don't guess. No prose tour of the codebase.

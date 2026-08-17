@@ -20,6 +20,8 @@ the prior single-job model.
 """
 
 import json
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -27,19 +29,25 @@ from test_state import _clone_worktree, _make_origin
 
 from engine.config import load_config
 from engine.engine import (
+    ENGINE_ISSUE_UNAVAILABLE,
     _complete_if_queue_empty,
     dispatch,
     post_pr_comment,
+    resolve_format,
     resolve_setup,
     sweep,
 )
 from engine.models import GateDecision, GateRequest, GateStatus, TicketDetails
 from engine.runner import (
+    _derive_qa_gifs,
     _expand_declared,
     _latest_review_round,
     _ledger_image_urls,
     _rework_comments,
+    _run_format,
     _run_setup,
+    _sibling_gif_path,
+    _webm_to_gif,
     execute_dir_for,
     intake_ticket,
     prepare_dir_for,
@@ -88,8 +96,18 @@ class FakeTracker:
 
 
 class FakeAgent:
-    def __init__(self, workdir, outcome="success", usage_known=True, cost_usd=1.5, tokens=100,
-                 control=None, apply_patch_error=None, land_result=None, pr_states=None):
+    def __init__(
+        self,
+        workdir,
+        outcome="success",
+        usage_known=True,
+        cost_usd=1.5,
+        tokens=100,
+        control=None,
+        apply_patch_error=None,
+        land_result=None,
+        pr_states=None,
+    ):
         self.workdir = workdir
         self.outcome = outcome
         self.usage_known = usage_known
@@ -186,13 +204,22 @@ class FakeMessaging:
     list would have one comment queue two runs. `by_subject` is how a test says
     which thread a comment is on; `comments` remains the default for the
     subjects it does not name.
+
+    `errors_by_subject` maps a subject id to a `RuntimeError` (or message
+    string) raised from `list_comments`, matching the real client's
+    `GitHub GET ... -> 404: ...` form so orphan / auth-failure paths can be
+    exercised without a live API.
     """
 
-    def __init__(self, comments=None, by_subject=None):
+    def __init__(self, comments=None, by_subject=None, errors_by_subject=None):
         self.calls = []
         # [{"id", "body", "author", "created_at"}], as the adapter returns them.
         self.comments = list(comments or [])
         self.by_subject = {str(k): list(v) for k, v in (by_subject or {}).items()}
+        self.errors_by_subject = {
+            str(k): (v if isinstance(v, BaseException) else RuntimeError(v))
+            for k, v in (errors_by_subject or {}).items()
+        }
         self.listed: list[tuple] = []
         self.reactions: list[tuple] = []
 
@@ -204,6 +231,9 @@ class FakeMessaging:
 
     def list_comments(self, subject_id, since=None):
         self.listed.append((subject_id, since))
+        err = self.errors_by_subject.get(str(subject_id))
+        if err is not None:
+            raise err
         thread = self.by_subject.get(str(subject_id), self.comments)
         return [c for c in thread if since is None or c["created_at"] >= since]
 
@@ -249,7 +279,7 @@ def store(tmp_path):
     return GitJsonStateStore(worktree)
 
 
-def _details(ticket_id="7", title="Add backend endpoint", body=_LONG_BODY, labels=None):
+def _details(ticket_id="7", title="Add frontend endpoint", body=_LONG_BODY, labels=None):
     return TicketDetails(
         ticket_id, title, body, labels if labels is not None else ["hq:intake", "hq:public-safe"]
     )
@@ -372,15 +402,19 @@ def test_re_admitting_a_blocked_ticket_clears_the_block_fields(config, taskdefs,
     path had to null the lifecycle-block fields explicitly. Without it a
     re-labelled ticket ran ACTIVE while still reporting the old reason."""
     blocked_tracker = FakeTracker(_details(body="too short"))
-    assert intake_ticket(
-        "7", "evt-1", config, taskdefs, store, _adapters(tracker=blocked_tracker)
-    ) == "blocked"
+    assert (
+        intake_ticket("7", "evt-1", config, taskdefs, store, _adapters(tracker=blocked_tracker))
+        == "blocked"
+    )
     assert store.read_state("7")["block_reason"]
 
     # Same ticket, now eligible — re-admitted on a fresh intake event.
-    assert intake_ticket(
-        "7", "evt-2", config, taskdefs, store, _adapters(tracker=FakeTracker(_details()))
-    ) == "enqueued"
+    assert (
+        intake_ticket(
+            "7", "evt-2", config, taskdefs, store, _adapters(tracker=FakeTracker(_details()))
+        )
+        == "enqueued"
+    )
 
     state = store.read_state("7")
     assert state["status"] == "ACTIVE"
@@ -417,9 +451,9 @@ def test_intake_eligible_enqueues_spec(config, taskdefs, store):
     assert len(spec_runs) == 1
     assert spec_runs[0]["source_event_id"] == "evt-1"
     assert spec_runs[0]["state"] == "QUEUED"
-    # Root run repo resolved from the ticket (title mentions "backend") --
+    # Root run repo resolved from the ticket (title mentions "frontend") --
     # never null, so every downstream handoff has a concrete repo to inherit.
-    assert spec_runs[0]["repo"] == "agentalec/care"
+    assert spec_runs[0]["repo"] == "agentalec/care_fe"
 
 
 def test_intake_injection_flag_blocks_and_skips_enqueue(config, taskdefs, store):
@@ -443,8 +477,9 @@ def test_intake_injection_flag_blocks_and_skips_enqueue(config, taskdefs, store)
 def test_dispatch_triggers_queued_run(config, taskdefs, store):
     _seed(store, _run_dict("specrun", "spec", state="QUEUED", source_event_id="evt-1"))
     wf = FakeWorkflowApi()
-    triggered = dispatch(config, taskdefs, store, wf, now_iso="2026-07-18T00:00:00Z",
-                         adapter_fn=_adapters())
+    triggered = dispatch(
+        config, taskdefs, store, wf, now_iso="2026-07-18T00:00:00Z", adapter_fn=_adapters()
+    )
     assert triggered == ["specrun"]
     assert wf.triggered == ["specrun"]
 
@@ -452,8 +487,9 @@ def test_dispatch_triggers_queued_run(config, taskdefs, store):
 def test_dispatch_skips_when_workflow_active(config, taskdefs, store):
     _seed(store, _run_dict("specrun", "spec", state="QUEUED"))
     wf = FakeWorkflowApi(active={"agent-hq/specrun"})
-    triggered = dispatch(config, taskdefs, store, wf, now_iso="2026-07-18T00:00:00Z",
-                         adapter_fn=_adapters())
+    triggered = dispatch(
+        config, taskdefs, store, wf, now_iso="2026-07-18T00:00:00Z", adapter_fn=_adapters()
+    )
     assert triggered == []
     assert wf.triggered == []
 
@@ -462,8 +498,9 @@ def test_dispatch_kill_switch_skips(config, taskdefs, store, monkeypatch):
     monkeypatch.setenv("AGENT_HQ_KILL_SWITCH", "1")
     _seed(store, _run_dict("specrun", "spec", state="QUEUED"))
     wf = FakeWorkflowApi()
-    triggered = dispatch(config, taskdefs, store, wf, now_iso="2026-07-18T00:00:00Z",
-                         adapter_fn=_adapters())
+    triggered = dispatch(
+        config, taskdefs, store, wf, now_iso="2026-07-18T00:00:00Z", adapter_fn=_adapters()
+    )
     assert triggered == []
     assert wf.triggered == []
 
@@ -478,8 +515,15 @@ def test_prepare_claims_and_writes_bundle(config, taskdefs, store, tmp_path):
     agent = FakeAgent(tmp_path / "work")
     adapters = _adapters(tracker=FakeTracker(_details()), agent=agent)
 
-    out = run_task("specrun", "prepare", config, taskdefs, store,
-                   now_iso="2026-07-18T00:00:00Z", adapter_fn=adapters)
+    out = run_task(
+        "specrun",
+        "prepare",
+        config,
+        taskdefs,
+        store,
+        now_iso="2026-07-18T00:00:00Z",
+        adapter_fn=adapters,
+    )
     assert out["claimed"] is True
     run = store.read_state("7")["runs"][0]
     assert run["state"] == "RUNNING"
@@ -490,14 +534,129 @@ def test_prepare_claims_and_writes_bundle(config, taskdefs, store, tmp_path):
     assert bundle.exists()
     written = json.loads(bundle.read_text())
     assert "control.json" in written["prompt"]
-    assert written["repo"] == "agentalec/care"
+    assert written["repo"] == "agentalec/care_fe"
     # no work_repos entry yet -> resolved SHA of the configured base branch
     assert written["base_commit"] == "sha-develop"
     assert written["output_paths"] == ["specs/7/spec.md"]
 
-    again = run_task("specrun", "prepare", config, taskdefs, store,
-                     now_iso="2026-07-18T00:05:00Z", adapter_fn=adapters)
+    again = run_task(
+        "specrun",
+        "prepare",
+        config,
+        taskdefs,
+        store,
+        now_iso="2026-07-18T00:05:00Z",
+        adapter_fn=adapters,
+    )
     assert again["claimed"] is False
+
+
+def test_prepare_root_run_inherits_full_source_ledger(config, taskdefs, store, tmp_path):
+    """Comment-queued root runs inherit the input source's whole ledger
+    namespace, not only `run.artifacts`.
+
+    Collect snapshots forwarded handoff files into the source run's ledger
+    (declared output plus forwarded inputs), while `run.artifacts` stays the
+    declared outputs alone. Ticket 24's comment-requeued qa saw only
+    review.md and marked every criterion not-exercised; handoff-spawned qa
+    on the same source got the full forwarded set."""
+    source = _run_dict(
+        "sourcerun",
+        "spec",
+        state="SUCCEEDED",
+        artifacts=["specs/7/review.md"],
+        input_artifacts=["specs/7/spec.md", "specs/7/qa-plan.md"],
+        queue_seq=0,
+    )
+    root = _run_dict(
+        "commentrun",
+        "build",
+        state="QUEUED",
+        source_event_id="issue-comment:99",
+        queue_seq=1,
+        # Root: no parent_run_id, no declared input_artifacts.
+    )
+    store.write(
+        lambda txn: (
+            txn.set_ticket("7", status="ACTIVE", pinned_comment_id=None),
+            txn.put_run("7", source),
+            txn.put_run("7", root),
+            txn.write_artifact("7", "sourcerun", "specs/7/review.md", b"# review"),
+            txn.write_artifact("7", "sourcerun", "specs/7/spec.md", b"# spec"),
+            txn.write_artifact("7", "sourcerun", "specs/7/qa-plan.md", b"# qa-plan"),
+        )
+    )
+    adapters = _adapters(tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"))
+
+    out = run_task(
+        "commentrun",
+        "prepare",
+        config,
+        taskdefs,
+        store,
+        now_iso="2026-07-18T00:00:00Z",
+        adapter_fn=adapters,
+    )
+    assert out["claimed"] is True
+    run = next(r for r in store.read_state("7")["runs"] if r["run_id"] == "commentrun")
+    assert run["input_from_run_id"] == "sourcerun"
+    assert set(run["input_artifacts"]) == {
+        "specs/7/review.md",
+        "specs/7/spec.md",
+        "specs/7/qa-plan.md",
+    }
+    inputs = prepare_dir_for(config, "commentrun") / "inputs"
+    assert (inputs / "specs/7/spec.md").read_text() == "# spec"
+    assert (inputs / "specs/7/qa-plan.md").read_text() == "# qa-plan"
+    assert (inputs / "specs/7/review.md").read_text() == "# review"
+
+
+def test_prepare_handoff_child_keeps_declared_input_artifacts(config, taskdefs, store, tmp_path):
+    """A handoff-spawned run's declared input_artifacts stay authoritative —
+    even when the source ledger holds extra files the handoff did not forward."""
+    source = _run_dict(
+        "sourcerun",
+        "spec",
+        state="SUCCEEDED",
+        artifacts=["specs/7/review.md"],
+        queue_seq=0,
+    )
+    child = _run_dict(
+        "childrun",
+        "build",
+        state="QUEUED",
+        parent_run_id="sourcerun",
+        handoff_key="build-7",
+        input_artifacts=["specs/7/review.md"],
+        queue_seq=1,
+    )
+    store.write(
+        lambda txn: (
+            txn.set_ticket("7", status="ACTIVE", pinned_comment_id=None),
+            txn.put_run("7", source),
+            txn.put_run("7", child),
+            txn.write_artifact("7", "sourcerun", "specs/7/review.md", b"# review"),
+            txn.write_artifact("7", "sourcerun", "specs/7/spec.md", b"# spec"),
+            txn.write_artifact("7", "sourcerun", "specs/7/qa-plan.md", b"# qa-plan"),
+        )
+    )
+    adapters = _adapters(tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"))
+
+    out = run_task(
+        "childrun",
+        "prepare",
+        config,
+        taskdefs,
+        store,
+        now_iso="2026-07-18T00:00:00Z",
+        adapter_fn=adapters,
+    )
+    assert out["claimed"] is True
+    run = next(r for r in store.read_state("7")["runs"] if r["run_id"] == "childrun")
+    assert run["input_artifacts"] == ["specs/7/review.md"]
+    inputs = prepare_dir_for(config, "childrun") / "inputs"
+    assert (inputs / "specs/7/review.md").exists()
+    assert not (inputs / "specs/7/spec.md").exists()
 
 
 def test_prepare_base_commit_uses_recorded_head_and_survives_downstream_failure(
@@ -514,33 +673,65 @@ def test_prepare_base_commit_uses_recorded_head_and_survives_downstream_failure(
     _write_control(config, "buildrun", {"outcome": "queue", "queue": []})
     agent = FakeAgent(tmp_path / "work")
     adapters = _adapters(tracker=FakeTracker(_details()), agent=agent)
-    run_task("buildrun", "collect", config, taskdefs, store,
-             now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
+    run_task(
+        "buildrun",
+        "collect",
+        config,
+        taskdefs,
+        store,
+        now_iso="2026-07-18T09:00:00Z",
+        adapter_fn=adapters,
+    )
     recorded_head = next(
-        wr for wr in store.read_state("7")["work_repos"] if wr["repo"] == "agentalec/care"
+        wr
+        for wr in store.read_state("7")["work_repos"]
+        if wr["repo"] == "agentalec/care_fe"
     )["recorded_head"]
     assert recorded_head == "commit-buildrun"
 
     # A downstream task fails outright (never reaches collect_success at all).
-    store.write(lambda txn: txn.put_run(
-        "7", _run_dict("downrun", "build", state="RUNNING", parent_run_id="buildrun", attempt=0)
-    ))
-    _write_execute_result(
-        config, "downrun", outcome="failure", cost_usd=1.0, tokens=5, usage_known=True,
+    store.write(
+        lambda txn: txn.put_run(
+            "7", _run_dict("downrun", "build", state="RUNNING", parent_run_id="buildrun", attempt=0)
+        )
     )
-    run_task("downrun", "collect", config, taskdefs, store,
-             now_iso="2026-07-18T09:30:00Z", adapter_fn=adapters)
+    _write_execute_result(
+        config,
+        "downrun",
+        outcome="failure",
+        cost_usd=1.0,
+        tokens=5,
+        usage_known=True,
+    )
+    run_task(
+        "downrun",
+        "collect",
+        config,
+        taskdefs,
+        store,
+        now_iso="2026-07-18T09:30:00Z",
+        adapter_fn=adapters,
+    )
     work_repos = store.read_state("7")["work_repos"]
     assert len(work_repos) == 1
     assert work_repos[0]["recorded_head"] == recorded_head  # unchanged by the failure
 
     # A later task/rework on the same repo bases on that SAME recorded head
     # -- never the configured base branch, even after the downstream failure.
-    store.write(lambda txn: txn.put_run(
-        "7", _run_dict("rework", "build", state="QUEUED", parent_run_id="buildrun")
-    ))
-    out = run_task("rework", "prepare", config, taskdefs, store,
-                   now_iso="2026-07-18T10:00:00Z", adapter_fn=adapters)
+    store.write(
+        lambda txn: txn.put_run(
+            "7", _run_dict("rework", "build", state="QUEUED", parent_run_id="buildrun")
+        )
+    )
+    out = run_task(
+        "rework",
+        "prepare",
+        config,
+        taskdefs,
+        store,
+        now_iso="2026-07-18T10:00:00Z",
+        adapter_fn=adapters,
+    )
     assert out["bundle"]["base_commit"] == recorded_head
 
 
@@ -548,8 +739,15 @@ def test_execute_writes_result(config, taskdefs, store, tmp_path):
     _seed(store, _run_dict("specrun", "spec", state="QUEUED"))
     agent = FakeAgent(tmp_path / "work")
     adapters = _adapters(tracker=FakeTracker(_details()), agent=agent)
-    run_task("specrun", "prepare", config, taskdefs, store,
-             now_iso="2026-07-18T00:00:00Z", adapter_fn=adapters)
+    run_task(
+        "specrun",
+        "prepare",
+        config,
+        taskdefs,
+        store,
+        now_iso="2026-07-18T00:00:00Z",
+        adapter_fn=adapters,
+    )
     result = run_task("specrun", "execute", config, taskdefs, store, adapter_fn=adapters)
     assert result["outcome"] == "success"
     # Transported to execute_dir_for -- never left in the (untransported)
@@ -561,21 +759,43 @@ def test_execute_writes_result(config, taskdefs, store, tmp_path):
 
 
 def test_collect_gated_task_waits_gate(config, taskdefs, store, tmp_path):
-    _seed(store, _run_dict("specrun", "spec", state="RUNNING",
-                           bindings={"agent-session": "claude-code-headless", "gate": "pr-review"}))
+    _seed(
+        store,
+        _run_dict(
+            "specrun",
+            "spec",
+            state="RUNNING",
+            bindings={"agent-session": "claude-code-headless", "gate": "pr-review"},
+        ),
+    )
     _stage(config, "specrun", "specs/7/spec.md", "the spec")
     _write_execute_result(config, "specrun", cost_usd=2.0, tokens=50)
-    _write_control(config, "specrun", {
-        "outcome": "queue",
-        "queue": [
-            {"key": "build-1", "task": "build", "reason": "ready for build",
-             "artifacts": ["specs/7/spec.md"]},
-        ],
-    })
+    _write_control(
+        config,
+        "specrun",
+        {
+            "outcome": "queue",
+            "queue": [
+                {
+                    "key": "build-1",
+                    "task": "build",
+                    "reason": "ready for build",
+                    "artifacts": ["specs/7/spec.md"],
+                },
+            ],
+        },
+    )
     tracker, gate = FakeTracker(_details()), FakeGate(request_id="42")
     adapters = _adapters(tracker=tracker, agent=FakeAgent(tmp_path / "work"), gate=gate)
-    run_task("specrun", "collect", config, taskdefs, store,
-             now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
+    run_task(
+        "specrun",
+        "collect",
+        config,
+        taskdefs,
+        store,
+        now_iso="2026-07-18T09:00:00Z",
+        adapter_fn=adapters,
+    )
     run = store.read_state("7")["runs"][0]
     assert run["state"] == "WAITING_GATE"
     # The approver gets the artifact itself, not just a run id -- plus the
@@ -595,8 +815,13 @@ def test_collect_gated_task_waits_gate(config, taskdefs, store, tmp_path):
     assert run["gate_requested_at"] == "2026-07-18T09:00:00Z"
     assert run["cost_usd"] == 2.0
     assert run["pending_handoffs"] == [
-        {"key": "build-1", "target_task": "build", "reason": "ready for build",
-         "artifacts": ["specs/7/spec.md"], "source_run_id": "specrun"}
+        {
+            "key": "build-1",
+            "target_task": "build",
+            "reason": "ready for build",
+            "artifacts": ["specs/7/spec.md"],
+            "source_run_id": "specrun",
+        }
     ]
     events = {e["kind"] for e in store.read_events("7")}
     assert {"run.collected", "run.waiting_gate", "handoff.proposed"} <= events
@@ -614,32 +839,53 @@ def test_collect_gated_run_may_not_also_cancel(config, taskdefs, store, tmp_path
     """`pending_handoffs` carries a gated run's additions but nothing carries
     its removals, so approving later would apply half the declaration. Rejected
     outright, down the ordinary invalid-control path, rather than half-applied."""
-    _seed(store, _run_dict("specrun", "spec", state="RUNNING",
-                           bindings={"agent-session": "claude-code-headless", "gate": "pr-review"}))
+    _seed(
+        store,
+        _run_dict(
+            "specrun",
+            "spec",
+            state="RUNNING",
+            bindings={"agent-session": "claude-code-headless", "gate": "pr-review"},
+        ),
+    )
     _stage(config, "specrun", "specs/7/spec.md", "the spec")
     _write_execute_result(config, "specrun", cost_usd=2.0, tokens=50)
-    _write_control(config, "specrun", {
-        "outcome": "queue",
-        "queue": [
-            {"key": "build-1", "task": "build", "reason": "ready",
-             "artifacts": ["specs/7/spec.md"]},
-        ],
-        "cancel_pending": True,
-    })
+    _write_control(
+        config,
+        "specrun",
+        {
+            "outcome": "queue",
+            "queue": [
+                {
+                    "key": "build-1",
+                    "task": "build",
+                    "reason": "ready",
+                    "artifacts": ["specs/7/spec.md"],
+                },
+            ],
+            "cancel_pending": True,
+        },
+    )
     adapters = _adapters(
-        tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"),
+        tracker=FakeTracker(_details()),
+        agent=FakeAgent(tmp_path / "work"),
         gate=FakeGate(request_id="42"),
     )
-    run_task("specrun", "collect", config, taskdefs, store,
-             now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
+    run_task(
+        "specrun",
+        "collect",
+        config,
+        taskdefs,
+        store,
+        now_iso="2026-07-18T09:00:00Z",
+        adapter_fn=adapters,
+    )
 
     runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
     assert runs["specrun"]["state"] == "FAILED"
     # Nothing was written by the rejected transaction: no gate wait, no children.
     assert not any(r["state"] == "QUEUED" and r["run_id"] != "specrun" for r in runs.values())
-    assert "may not also cancel" in "".join(
-        e.get("detail") or "" for e in store.read_events("7")
-    )
+    assert "may not also cancel" in "".join(e.get("detail") or "" for e in store.read_events("7"))
 
 
 def test_collect_opens_pr_records_pr_ref(config, taskdefs, store, tmp_path):
@@ -653,15 +899,22 @@ def test_collect_opens_pr_records_pr_ref(config, taskdefs, store, tmp_path):
     _write_control(config, "buildrun", {"outcome": "queue", "queue": []})
     agent = FakeAgent(tmp_path / "work")
     adapters = _adapters(tracker=FakeTracker(_details()), agent=agent)
-    run_task("buildrun", "collect", config, taskdefs, store,
-             now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
+    run_task(
+        "buildrun",
+        "collect",
+        config,
+        taskdefs,
+        store,
+        now_iso="2026-07-18T09:00:00Z",
+        adapter_fn=adapters,
+    )
 
     runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
     assert runs["buildrun"]["state"] == "SUCCEEDED"
-    assert runs["buildrun"]["pr_ref"] == "agentalec/care#1"
+    assert runs["buildrun"]["pr_ref"] == "agentalec/care_fe#1"
     assert len(agent.opened_prs) == 1
     repo, branch, base, _title, body = agent.opened_prs[0]
-    assert repo == "agentalec/care"
+    assert repo == "agentalec/care_fe"
     assert branch == "agent-hq/7"  # stable per-issue branch, not per-run
     assert base == "develop"
     # The PR names the engine-repo ticket it came from -- the work repo has
@@ -678,9 +931,15 @@ def _landed_message(config, taskdefs, store, tmp_path, control, details=None):
     _write_execute_result(config, "buildrun")
     _write_control(config, "buildrun", control)
     agent = FakeAgent(tmp_path / "work")
-    run_task("buildrun", "collect", config, taskdefs, store,
-             now_iso="2026-07-18T09:00:00Z",
-             adapter_fn=_adapters(tracker=FakeTracker(details or _details()), agent=agent))
+    run_task(
+        "buildrun",
+        "collect",
+        config,
+        taskdefs,
+        store,
+        now_iso="2026-07-18T09:00:00Z",
+        adapter_fn=_adapters(tracker=FakeTracker(details or _details()), agent=agent),
+    )
     return agent.landed[0][3]
 
 
@@ -689,30 +948,43 @@ def test_landed_commit_message_is_the_run_s_own_summary(config, taskdefs, store,
     own words -- the agent's per-criterion commits are squashed by
     `materialize_work_patch`, so `control.summary` is the only description
     that survives to the work repo. Ticket and run id are trailers."""
-    message = _landed_message(config, taskdefs, store, tmp_path, {
-        "outcome": "queue", "queue": [],
-        "summary": "feat: add the patient-age formatter\n\nCovers the under-1y case.",
-    })
+    message = _landed_message(
+        config,
+        taskdefs,
+        store,
+        tmp_path,
+        {
+            "outcome": "queue",
+            "queue": [],
+            "summary": "feat: add the patient-age formatter\n\nCovers the under-1y case.",
+        },
+    )
     subject, _, rest = message.partition("\n")
     assert subject == "feat: add the patient-age formatter"
     assert "Covers the under-1y case." in rest
-    assert "Add backend endpoint" not in message  # not the ticket title
+    assert "Add frontend endpoint" not in message  # not the ticket title
     assert "agent-hq-ticket: agentalec/agent_hq#7" in rest
     assert "agent-hq-run: build buildrun" in rest
 
 
-def test_landed_commit_falls_back_to_the_ticket_when_no_summary(
-    config, taskdefs, store, tmp_path
-):
+def test_landed_commit_falls_back_to_the_ticket_when_no_summary(config, taskdefs, store, tmp_path):
     """A run that declares no summary still beats a bare run id."""
     message = _landed_message(config, taskdefs, store, tmp_path, {"outcome": "queue", "queue": []})
-    assert message.partition("\n")[0] == "build: Add backend endpoint"
+    assert message.partition("\n")[0] == "build: Add frontend endpoint"
 
 
 def test_long_commit_subject_is_truncated(config, taskdefs, store, tmp_path):
-    message = _landed_message(config, taskdefs, store, tmp_path, {
-        "outcome": "queue", "queue": [], "summary": "feat: " + "add the patient-age formatter " * 5,
-    })
+    message = _landed_message(
+        config,
+        taskdefs,
+        store,
+        tmp_path,
+        {
+            "outcome": "queue",
+            "queue": [],
+            "summary": "feat: " + "add the patient-age formatter " * 5,
+        },
+    )
     subject = message.partition("\n")[0]
     assert len(subject) <= 72
     assert subject.endswith("...")
@@ -726,31 +998,49 @@ def test_collect_reuses_stable_branch_and_pr_across_tasks(config, taskdefs, stor
     # The next entry is already queued, so the first collect does not drain the
     # queue -- a mid-route run whose queue ran dry would BLOCK the ticket, and
     # then the second collect would (correctly) be a zombie.
-    store.write(lambda txn: txn.put_run(
-        "7", _run_dict("buildrun2", "build", state="QUEUED", parent_run_id="buildrun")
-    ))
+    store.write(
+        lambda txn: txn.put_run(
+            "7", _run_dict("buildrun2", "build", state="QUEUED", parent_run_id="buildrun")
+        )
+    )
     _stage(config, "buildrun", "impl/7.md", "the impl")
     _write_execute_result(config, "buildrun")
     _write_control(config, "buildrun", {"outcome": "queue", "queue": []})
     agent = FakeAgent(tmp_path / "work")
     adapters = _adapters(tracker=FakeTracker(_details()), agent=agent)
-    run_task("buildrun", "collect", config, taskdefs, store,
-             now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
+    run_task(
+        "buildrun",
+        "collect",
+        config,
+        taskdefs,
+        store,
+        now_iso="2026-07-18T09:00:00Z",
+        adapter_fn=adapters,
+    )
 
     store.write(lambda txn: txn.update_run("7", "buildrun2", state="RUNNING"))
     _stage(config, "buildrun2", "impl/7.md", "more impl")
     _write_execute_result(config, "buildrun2")
     _write_control(config, "buildrun2", {"outcome": "queue", "queue": []})
-    run_task("buildrun2", "collect", config, taskdefs, store,
-             now_iso="2026-07-18T10:00:00Z", adapter_fn=adapters)
+    run_task(
+        "buildrun2",
+        "collect",
+        config,
+        taskdefs,
+        store,
+        now_iso="2026-07-18T10:00:00Z",
+        adapter_fn=adapters,
+    )
 
     work_repos = [
-        wr for wr in store.read_state("7")["work_repos"] if wr["repo"] == "agentalec/care"
+        wr
+        for wr in store.read_state("7")["work_repos"]
+        if wr["repo"] == "agentalec/care_fe"
     ]
     assert len(work_repos) == 1  # one branch/PR record, not two
     assert work_repos[0]["branch"] == "agent-hq/7"
     assert work_repos[0]["recorded_head"] == "commit-buildrun2"
-    assert work_repos[0]["pr_ref"] == "agentalec/care#1"
+    assert work_repos[0]["pr_ref"] == "agentalec/care_fe#1"
     assert len(agent.opened_prs) == 1  # the second task never opens a second PR
 
 
@@ -761,13 +1051,24 @@ def test_collect_handoff_ungated_applies_immediately(config, taskdefs, store, tm
     _seed(store, _run_dict("buildrun", "build", state="RUNNING"))
     _stage(config, "buildrun", "impl/7.md", "the impl")
     _write_execute_result(config, "buildrun")
-    _write_control(config, "buildrun", {
-        "outcome": "queue",
-        "queue": [{"key": "final-1", "task": "finalize", "reason": "done building"}],
-    })
+    _write_control(
+        config,
+        "buildrun",
+        {
+            "outcome": "queue",
+            "queue": [{"key": "final-1", "task": "finalize", "reason": "done building"}],
+        },
+    )
     adapters = _adapters(tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"))
-    run_task("buildrun", "collect", config, taskdefs, store,
-             now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
+    run_task(
+        "buildrun",
+        "collect",
+        config,
+        taskdefs,
+        store,
+        now_iso="2026-07-18T09:00:00Z",
+        adapter_fn=adapters,
+    )
 
     runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
     assert runs["buildrun"]["state"] == "SUCCEEDED"
@@ -784,8 +1085,15 @@ def test_collect_blocked_outcome_blocks_ticket_and_escalates(config, taskdefs, s
     _write_execute_result(config, "buildrun")
     _write_control(config, "buildrun", {"outcome": "blocked", "reason": "missing credentials"})
     adapters = _adapters(tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"))
-    run_task("buildrun", "collect", config, taskdefs, store,
-             now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
+    run_task(
+        "buildrun",
+        "collect",
+        config,
+        taskdefs,
+        store,
+        now_iso="2026-07-18T09:00:00Z",
+        adapter_fn=adapters,
+    )
 
     state = store.read_state("7")
     assert state["status"] == "BLOCKED"
@@ -796,13 +1104,24 @@ def test_collect_blocked_outcome_blocks_ticket_and_escalates(config, taskdefs, s
 
 
 def test_collect_invalid_control_fails_and_retries(config, taskdefs, store, tmp_path):
-    _seed(store, _run_dict("buildrun", "build", state="RUNNING", attempt=0,
-                           source_event_id="evt", enqueue_index=0))
+    _seed(
+        store,
+        _run_dict(
+            "buildrun", "build", state="RUNNING", attempt=0, source_event_id="evt", enqueue_index=0
+        ),
+    )
     _write_execute_result(config, "buildrun")
     _write_control(config, "buildrun", {"outcome": "nonsense"})
     adapters = _adapters(tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"))
-    run_task("buildrun", "collect", config, taskdefs, store,
-             now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
+    run_task(
+        "buildrun",
+        "collect",
+        config,
+        taskdefs,
+        store,
+        now_iso="2026-07-18T09:00:00Z",
+        adapter_fn=adapters,
+    )
 
     runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
     assert runs["buildrun"]["state"] == "FAILED"
@@ -810,20 +1129,90 @@ def test_collect_invalid_control_fails_and_retries(config, taskdefs, store, tmp_
     assert len(retries) == 1
     rejected = [e for e in store.read_events("7") if e["kind"] == "handoff.rejected"]
     assert rejected and "schema" in rejected[0]["detail"]
+    # Retry learns why: engine writes run.rework on the NEW run so prepare's
+    # "## Requested changes" channel carries the predecessor rejection.
+    new_id = retries[0]["run_id"]
+    rework = [
+        e for e in store.read_events("7") if e["kind"] == "run.rework" and e["run_id"] == new_id
+    ]
+    assert len(rework) == 1
+    assert rework[0]["actor"] == "engine"
+    assert rework[0]["source"] == "buildrun:handoff_rejected"
+    assert "Previous attempt rejected:" in rework[0]["detail"]
+    assert "schema" in rework[0]["detail"]
+
+
+def test_invalid_control_retry_prepare_prompt_contains_rejection(config, taskdefs, store, tmp_path):
+    """Regression (ticket 4): blind retries after handoff.rejected burned
+    budget repeating the same missing-`outcome` mistake. Prepare must surface
+    the rejection under ## Requested changes."""
+    _seed(
+        store,
+        _run_dict(
+            "buildrun", "build", state="RUNNING", attempt=0, source_event_id="evt", enqueue_index=0
+        ),
+    )
+    _write_execute_result(config, "buildrun")
+    # Missing required `outcome` -- the live failure mode on tickets 4/8/11.
+    _write_control(config, "buildrun", {"queue": []})
+    adapters = _adapters(tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"))
+    run_task(
+        "buildrun",
+        "collect",
+        config,
+        taskdefs,
+        store,
+        now_iso="2026-07-18T09:00:00Z",
+        adapter_fn=adapters,
+    )
+
+    retries = [
+        r
+        for r in store.read_state("7")["runs"]
+        if r["task_id"] == "build" and r["attempt"] == 1 and r["state"] == "QUEUED"
+    ]
+    assert len(retries) == 1
+    new_id = retries[0]["run_id"]
+
+    out = run_task(
+        new_id,
+        "prepare",
+        config,
+        taskdefs,
+        store,
+        now_iso="2026-07-18T09:05:00Z",
+        adapter_fn=adapters,
+    )
+    assert out["claimed"] is True
+    prompt = out["bundle"]["prompt"]
+    assert "## Requested changes" in prompt
+    assert "Previous attempt rejected:" in prompt
+    assert "outcome" in prompt.lower() or "schema" in prompt.lower()
 
 
 def test_collect_patch_apply_failure_fails_run_never_lands(config, taskdefs, store, tmp_path):
     """Task 12: a work patch that fails to `git apply` fails the run --
     never a partial land, never a push/PR."""
-    _seed(store, _run_dict("buildrun", "build", state="RUNNING", attempt=0,
-                           source_event_id="evt", enqueue_index=0))
+    _seed(
+        store,
+        _run_dict(
+            "buildrun", "build", state="RUNNING", attempt=0, source_event_id="evt", enqueue_index=0
+        ),
+    )
     _stage(config, "buildrun", "impl/7.md", "the impl")
     _write_execute_result(config, "buildrun")
     _write_control(config, "buildrun", {"outcome": "queue", "queue": []})
     agent = FakeAgent(tmp_path / "work", apply_patch_error="patch does not apply")
     adapters = _adapters(tracker=FakeTracker(_details()), agent=agent)
-    run_task("buildrun", "collect", config, taskdefs, store,
-             now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
+    run_task(
+        "buildrun",
+        "collect",
+        config,
+        taskdefs,
+        store,
+        now_iso="2026-07-18T09:00:00Z",
+        adapter_fn=adapters,
+    )
 
     runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
     assert runs["buildrun"]["state"] == "FAILED"
@@ -847,7 +1236,9 @@ def test_collect_finalize_marks_pr_ready_and_waits_for_the_merge(config, taskdef
     store.write(
         lambda txn: (
             txn.set_ticket(
-                "7", status="ACTIVE", pinned_comment_id=None,
+                "7",
+                status="ACTIVE",
+                pinned_comment_id=None,
                 work_repos=[{"repo": "agentalec/care", "pr_ref": "agentalec/care#11"}],
             ),
             txn.put_run("7", _run_dict("buildrun", "build", state="SUCCEEDED")),
@@ -862,8 +1253,15 @@ def test_collect_finalize_marks_pr_ready_and_waits_for_the_merge(config, taskdef
     agent = FakeAgent(tmp_path / "work")
     tracker = FakeTracker(_details())
     adapters = _adapters(tracker=tracker, agent=agent)
-    run_task("finalrun", "collect", config, taskdefs, store,
-             now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
+    run_task(
+        "finalrun",
+        "collect",
+        config,
+        taskdefs,
+        store,
+        now_iso="2026-07-18T09:00:00Z",
+        adapter_fn=adapters,
+    )
 
     assert agent.ready_prs == ["agentalec/care#11"]
     assert len(tracker.closing_summaries) == 1
@@ -874,7 +1272,9 @@ def test_collect_finalize_marks_pr_ready_and_waits_for_the_merge(config, taskdef
     assert tracker.closed == []  # still open -- the PR has not been merged
     assert store.read_state("7")["status"] == "AWAITING_MERGE"
     assert tracker.label_sets[-1] == (
-        "7", "AWAITING_MERGE", ["hq:awaiting-merge", "hq:intake", "hq:public-safe"]
+        "7",
+        "AWAITING_MERGE",
+        ["hq:awaiting-merge", "hq:intake", "hq:public-safe"],
     )
 
 
@@ -886,9 +1286,7 @@ def test_collect_completion_without_a_pr_closes_the_issue_immediately(
     store.write(
         lambda txn: (
             txn.set_ticket("7", status="ACTIVE", pinned_comment_id=None, work_repos=[]),
-            txn.put_run(
-                "7", _run_dict("finalrun", "finalize", state="RUNNING")
-            ),
+            txn.put_run("7", _run_dict("finalrun", "finalize", state="RUNNING")),
         )
     )
     _stage(config, "finalrun", "specs/7/summary.md", "No code changes were needed.")
@@ -896,8 +1294,15 @@ def test_collect_completion_without_a_pr_closes_the_issue_immediately(
     _write_control(config, "finalrun", {"outcome": "queue", "queue": []})
     tracker = FakeTracker(_details())
     adapters = _adapters(tracker=tracker, agent=FakeAgent(tmp_path / "work"))
-    run_task("finalrun", "collect", config, taskdefs, store,
-             now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
+    run_task(
+        "finalrun",
+        "collect",
+        config,
+        taskdefs,
+        store,
+        now_iso="2026-07-18T09:00:00Z",
+        adapter_fn=adapters,
+    )
 
     assert tracker.closed == ["7"]
     assert store.read_state("7")["status"] == "DONE"
@@ -914,8 +1319,15 @@ def test_queue_running_dry_before_the_final_task_blocks(config, taskdefs, store,
     _write_control(config, "buildrun", {"outcome": "queue", "queue": []})
     tracker = FakeTracker(_details())
     adapters = _adapters(tracker=tracker, agent=FakeAgent(tmp_path / "work"))
-    run_task("buildrun", "collect", config, taskdefs, store,
-             now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
+    run_task(
+        "buildrun",
+        "collect",
+        config,
+        taskdefs,
+        store,
+        now_iso="2026-07-18T09:00:00Z",
+        adapter_fn=adapters,
+    )
 
     state = store.read_state("7")
     assert state["status"] == "BLOCKED"
@@ -952,21 +1364,43 @@ def test_collect_auto_approved_gate_never_waits(config, taskdefs, store, tmp_pat
     evented too: an auto-approved gate is a recorded decision, not an absent
     one."""
     taskdefs["spec"]["gates"]["post"][0]["auto_approve"] = True
-    _seed(store, _run_dict("specrun", "spec", state="RUNNING",
-                           bindings={"agent-session": "claude-code-headless", "gate": "pr-review"}))
+    _seed(
+        store,
+        _run_dict(
+            "specrun",
+            "spec",
+            state="RUNNING",
+            bindings={"agent-session": "claude-code-headless", "gate": "pr-review"},
+        ),
+    )
     _stage(config, "specrun", "specs/7/spec.md", "the spec")
     _write_execute_result(config, "specrun", cost_usd=2.0, tokens=50)
-    _write_control(config, "specrun", {
-        "outcome": "queue",
-        "queue": [
-            {"key": "build-1", "task": "build", "reason": "ready for build",
-             "artifacts": ["specs/7/spec.md"]},
-        ],
-    })
+    _write_control(
+        config,
+        "specrun",
+        {
+            "outcome": "queue",
+            "queue": [
+                {
+                    "key": "build-1",
+                    "task": "build",
+                    "reason": "ready for build",
+                    "artifacts": ["specs/7/spec.md"],
+                },
+            ],
+        },
+    )
     tracker, gate = FakeTracker(_details()), FakeGate(request_id="42")
     adapters = _adapters(tracker=tracker, agent=FakeAgent(tmp_path / "work"), gate=gate)
-    run_task("specrun", "collect", config, taskdefs, store,
-             now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
+    run_task(
+        "specrun",
+        "collect",
+        config,
+        taskdefs,
+        store,
+        now_iso="2026-07-18T09:00:00Z",
+        adapter_fn=adapters,
+    )
 
     runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
     assert runs["specrun"]["state"] == "SUCCEEDED"
@@ -1022,14 +1456,28 @@ def test_execute_discards_the_patch_of_a_task_that_writes_no_code(
     taskdefs["spec"]["writes_code"] = False
     _seed(store, _run_dict("specrun", "spec", state="RUNNING"))
     prepare_dir_for(config, "specrun").mkdir(parents=True, exist_ok=True)
-    (prepare_dir_for(config, "specrun") / "bundle.json").write_text(json.dumps({
-        "prompt": "p", "tools": [], "deadline": None, "repo": "agentalec/care_fe",
-        "base_commit": "abc", "output_paths": [],
-    }))
+    (prepare_dir_for(config, "specrun") / "bundle.json").write_text(
+        json.dumps(
+            {
+                "prompt": "p",
+                "tools": [],
+                "deadline": None,
+                "repo": "agentalec/care_fe",
+                "base_commit": "abc",
+                "output_paths": [],
+            }
+        )
+    )
     agent = FakeAgent(tmp_path / "work")  # its materialize_work_patch returns "fake-patch"
 
-    run_task("specrun", "execute", config, taskdefs, store,
-             adapter_fn=_adapters(tracker=FakeTracker(_details()), agent=agent))
+    run_task(
+        "specrun",
+        "execute",
+        config,
+        taskdefs,
+        store,
+        adapter_fn=_adapters(tracker=FakeTracker(_details()), agent=agent),
+    )
 
     assert (execute_dir_for(config, "specrun") / "work.patch").read_text() == ""
 
@@ -1042,11 +1490,15 @@ def test_run_setup_prepares_the_worktree_and_hides_credentials(tmp_path, monkeyp
     monkeypatch.setenv("COPILOT_GITHUB_TOKEN", "secret-seat")
     monkeypatch.setenv("HARMLESS", "kept")
 
-    assert _run_setup(
-        'printenv AGENT_HQ_TOKEN > leaked.txt; printenv COPILOT_GITHUB_TOKEN >> leaked.txt;'
-        ' printenv HARMLESS > kept.txt; echo ready > .agent-hq/setup-notes.md; true',
-        _mkworktree(tmp_path), None,
-    ) is None
+    assert (
+        _run_setup(
+            "printenv AGENT_HQ_TOKEN > leaked.txt; printenv COPILOT_GITHUB_TOKEN >> leaked.txt;"
+            " printenv HARMLESS > kept.txt; echo ready > .agent-hq/setup-notes.md; true",
+            _mkworktree(tmp_path),
+            None,
+        )
+        is None
+    )
 
     assert (tmp_path / "wt" / "kept.txt").read_text().strip() == "kept"
     assert not (tmp_path / "wt" / "leaked.txt").read_text().strip()
@@ -1079,12 +1531,164 @@ def test_no_setup_configured_is_not_a_failure(tmp_path):
 
 
 def test_resolve_setup_prefers_the_task_over_default(config):
-    config.repos["agentalec/care_fe"]["setup"] = {"default": "npm ci", "qa": "make qa-env"}
+    repo = "agentalec/care_fe"
+    config.repos[repo]["setup"] = {"default": "npm ci", "qa": "make qa-env"}
 
-    assert resolve_setup(config, "agentalec/care_fe", "qa") == "make qa-env"
-    assert resolve_setup(config, "agentalec/care_fe", "implement") == "npm ci"
-    assert resolve_setup(config, "agentalec/care", "qa") is None  # no setup block
+    assert resolve_setup(config, repo, "qa") == "make qa-env"
+    assert resolve_setup(config, repo, "implement") == "npm ci"
+    assert resolve_setup(config, "other/org-repo", "qa") is None  # no setup block
     assert resolve_setup(config, None, "qa") is None
+
+
+def test_resolve_format_prefers_the_task_over_default(config):
+    repo = "agentalec/care_fe"
+    config.repos[repo]["format"] = {
+        "default": "prettier --write .",
+        "implement": "prettier --write src",
+    }
+
+    assert resolve_format(config, repo, "implement") == "prettier --write src"
+    assert resolve_format(config, repo, "review") == "prettier --write ."
+    assert resolve_format(config, "other/org-repo", "implement") is None
+    assert resolve_format(config, None, "implement") is None
+
+
+def test_run_format_failure_is_a_normal_run_failure(tmp_path):
+    result = _run_format("echo 'prettier blew up' >&2; exit 2", _mkworktree(tmp_path), None)
+
+    assert result["outcome"] == "failure"
+    assert result["usage_known"] is True
+    assert "format failed (exit 2)" in result["detail"]
+    assert "prettier blew up" in result["detail"]
+
+
+def test_execute_runs_format_before_materialize_when_writes_code(
+    config, taskdefs, store, tmp_path, monkeypatch
+):
+    """Format is execute-only: after a successful agent, before the work patch,
+    and only when writes_code and repos.yml configures a command."""
+    calls: list[str] = []
+
+    def fake_format(command, worktree, deadline):
+        calls.append(f"format:{command}")
+        (Path(worktree) / "formatted.marker").write_text("ok")
+
+    class TrackingAgent(FakeAgent):
+        def materialize_work_patch(self, worktree, exclude_paths):
+            calls.append("materialize")
+            assert (Path(worktree) / "formatted.marker").exists()
+            return "fake-patch"
+
+    monkeypatch.setattr("engine.runner._run_format", fake_format)
+    _seed(store, _run_dict("specrun", "spec", state="RUNNING"))
+    prepare_dir_for(config, "specrun").mkdir(parents=True, exist_ok=True)
+    (prepare_dir_for(config, "specrun") / "bundle.json").write_text(
+        json.dumps(
+            {
+                "prompt": "p",
+                "tools": [],
+                "deadline": None,
+                "repo": "agentalec/care_fe",
+                "base_commit": "abc",
+                "format": "echo format-me",
+                "output_paths": [],
+            }
+        )
+    )
+    agent = TrackingAgent(tmp_path / "work")
+
+    result = run_task(
+        "specrun",
+        "execute",
+        config,
+        taskdefs,
+        store,
+        adapter_fn=_adapters(tracker=FakeTracker(_details()), agent=agent),
+    )
+
+    assert result["outcome"] == "success"
+    assert calls == ["format:echo format-me", "materialize"]
+    assert (execute_dir_for(config, "specrun") / "work.patch").read_text() == "fake-patch"
+
+
+def test_execute_skips_format_when_writes_code_false(
+    config, taskdefs, store, tmp_path, monkeypatch
+):
+    calls: list[str] = []
+
+    def fake_format(command, worktree, deadline):
+        calls.append("format")
+
+    monkeypatch.setattr("engine.runner._run_format", fake_format)
+    taskdefs["spec"]["writes_code"] = False
+    _seed(store, _run_dict("specrun", "spec", state="RUNNING"))
+    prepare_dir_for(config, "specrun").mkdir(parents=True, exist_ok=True)
+    (prepare_dir_for(config, "specrun") / "bundle.json").write_text(
+        json.dumps(
+            {
+                "prompt": "p",
+                "tools": [],
+                "deadline": None,
+                "repo": "agentalec/care_fe",
+                "base_commit": "abc",
+                "format": "echo should-not-run",
+                "output_paths": [],
+            }
+        )
+    )
+
+    run_task(
+        "specrun",
+        "execute",
+        config,
+        taskdefs,
+        store,
+        adapter_fn=_adapters(tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work")),
+    )
+
+    assert calls == []
+    assert (execute_dir_for(config, "specrun") / "work.patch").read_text() == ""
+
+
+def test_execute_format_failure_fails_the_run(config, taskdefs, store, tmp_path, monkeypatch):
+    def fake_format(command, worktree, deadline):
+        return {
+            "outcome": "failure",
+            "usage_known": True,
+            "cost_usd": 0.0,
+            "tokens": 0,
+            "detail": "format failed (exit 1): boom",
+        }
+
+    monkeypatch.setattr("engine.runner._run_format", fake_format)
+    _seed(store, _run_dict("specrun", "spec", state="RUNNING"))
+    prepare_dir_for(config, "specrun").mkdir(parents=True, exist_ok=True)
+    (prepare_dir_for(config, "specrun") / "bundle.json").write_text(
+        json.dumps(
+            {
+                "prompt": "p",
+                "tools": [],
+                "deadline": None,
+                "repo": "agentalec/care_fe",
+                "base_commit": "abc",
+                "format": "false",
+                "output_paths": [],
+            }
+        )
+    )
+
+    result = run_task(
+        "specrun",
+        "execute",
+        config,
+        taskdefs,
+        store,
+        adapter_fn=_adapters(tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work")),
+    )
+
+    assert result["outcome"] == "failure"
+    assert "format failed" in result["detail"]
+    assert not (execute_dir_for(config, "specrun") / "work.patch").exists()
 
 
 def test_expand_declared_resolves_directory_artifacts(tmp_path):
@@ -1123,14 +1727,23 @@ def test_collect_stores_a_directory_artifact_as_bytes(config, taskdefs, store, t
     _write_control(config, "specrun", {"outcome": "queue", "queue": []})
 
     gate = FakeGate()
-    run_task("specrun", "collect", config, taskdefs, store, now_iso="2026-07-18T09:00:00Z",
-             adapter_fn=_adapters(tracker=FakeTracker(_details()),
-                                  agent=FakeAgent(tmp_path / "work"), gate=gate))
+    run_task(
+        "specrun",
+        "collect",
+        config,
+        taskdefs,
+        store,
+        now_iso="2026-07-18T09:00:00Z",
+        adapter_fn=_adapters(
+            tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), gate=gate
+        ),
+    )
 
     assert store.read_artifact("7", "specrun", "specs/7/shots/desktop.png") == png
     # Recorded as concrete files -- the directory entry itself never leaks out.
     assert store.read_state("7")["runs"][0]["artifacts"] == [
-        "specs/7/spec.md", "specs/7/shots/desktop.png",
+        "specs/7/spec.md",
+        "specs/7/shots/desktop.png",
     ]
 
 
@@ -1159,7 +1772,7 @@ def test_ledger_image_urls_flags_a_screenshot_that_was_never_produced():
 def test_ledger_image_urls_rewrites_only_relative_images():
     """QA writes repo-relative screenshot links; the PR comment needs raw URLs
     into the ledger, or GitHub renders a broken image. Absolute images and
-    ordinary links are left alone."""
+    ordinary (non-video) links are left alone."""
     ledger = {"specs/42/screenshots/a.png", "specs/42/screenshots/b.png"}
     md = (
         "![desktop](specs/42/screenshots/a.png)\n"
@@ -1176,12 +1789,409 @@ def test_ledger_image_urls_rewrites_only_relative_images():
     assert "[not an image](specs/42/screenshots/a.png)" in out
 
 
+def test_ledger_image_urls_rewrites_relative_video_links():
+    """Video evidence is linked as ordinary markdown; collect rewrites to the
+    ledger raw URL (GitHub will not inline-play webm in a PR comment).
+    Without a sibling gif this is the degraded (webm-only) path."""
+    ledger = {"specs/42/videos/flow.webm"}
+    md = (
+        "[flow](specs/42/videos/flow.webm)\n"
+        "[missing](specs/42/videos/gone.webm)\n"
+        "[remote](https://example.com/x.webm)\n"
+    )
+    out = _ledger_image_urls(md, "agentalec/agent_hq", "42", "run7", ledger)
+    prefix = "https://raw.githubusercontent.com/agentalec/agent_hq/agent-hq-state"
+    assert f"[flow]({prefix}/tickets/42/artifacts/run7/specs/42/videos/flow.webm)" in out
+    assert "_[missing video: `specs/42/videos/gone.webm`" in out
+    assert "[remote](https://example.com/x.webm)" in out
+    assert "<details>" not in out
+
+
+def test_ledger_image_urls_wraps_webm_with_sibling_gif_in_details():
+    """When collect derived a sibling .gif, the PR comment gets a blockquoted
+    collapsed details block with an inline GIF plus a full-fidelity webm link."""
+    ledger = {"specs/42/videos/flow.webm", "specs/42/videos/flow.gif"}
+    md = "[dropdown open — desktop](specs/42/videos/flow.webm)\n"
+    out = _ledger_image_urls(md, "agentalec/agent_hq", "42", "run7", ledger)
+    prefix = "https://raw.githubusercontent.com/agentalec/agent_hq/agent-hq-state"
+    gif_url = f"{prefix}/tickets/42/artifacts/run7/specs/42/videos/flow.gif"
+    webm_url = f"{prefix}/tickets/42/artifacts/run7/specs/42/videos/flow.webm"
+    assert "> <details>" in out
+    assert "> <summary><b>Video: dropdown open — desktop</b> (click to expand)</summary>" in out
+    assert f'> <img width="960" alt="flow" src="{gif_url}" />' in out
+    assert f"> [Full recording (webm)]({webm_url})" in out
+    assert "> </details>" in out
+    # The bare markdown webm link must not remain (replaced by the details block).
+    assert f"[dropdown open — desktop]({webm_url})" not in out
+    # Block-level: a blank line must precede the blockquoted <details>.
+    assert "\n\n> <details>" in out
+
+
+def test_ledger_image_urls_strips_evidence_prefix_for_block_details():
+    """Agents often write `**Evidence**: [label](….webm)`. Without stripping
+    that prefix, collect left `**Evidence**: <details>…` on one line and
+    GitHub did not treat it as a collapsible (ticket 13)."""
+    ledger = {"specs/7/videos/x.webm", "specs/7/videos/x.gif"}
+    md = "**Evidence**: [Search input visible on load](specs/7/videos/x.webm)\n"
+    out = _ledger_image_urls(md, "agentalec/agent_hq", "7", "run7", ledger)
+    assert "**Evidence**" not in out
+    assert "Evidence:" not in out
+    assert (
+        "> <summary><b>Video: Search input visible on load</b> (click to expand)</summary>" in out
+    )
+    assert "\n\n> <details>" in out
+    # No same-line junk before the opening tag (blockquote prefix is fine).
+    assert not any(
+        line.strip() and not line.lstrip().startswith((">", "<details>")) and "<details>" in line
+        for line in out.splitlines()
+    )
+    assert all(
+        not line.strip() or line.startswith(">")
+        for line in out.splitlines()
+        if "<details>" in line or "</details>" in line
+    )
+
+
+def test_sibling_gif_path_filename_convention():
+    assert _sibling_gif_path("specs/7/videos/a.webm") == "specs/7/videos/a.gif"
+    assert _sibling_gif_path("specs/7/videos/a.mp4") == "specs/7/videos/a.gif"
+
+
+def test_derive_qa_gifs_adds_missing_siblings_only(monkeypatch):
+    monkeypatch.setattr("engine.runner._webm_to_gif", lambda _content, _max: b"GIF89a-fake")
+    contents = {
+        "specs/7/videos/a.webm": b"webm-a",
+        "specs/7/videos/b.webm": b"webm-b",
+        "specs/7/videos/b.gif": b"already",
+        "specs/7/qa.md": b"# qa",
+    }
+    derived = _derive_qa_gifs(contents, 30)
+    assert derived == {"specs/7/videos/a.gif": b"GIF89a-fake"}
+
+
+def test_derive_qa_gifs_omits_failures_without_raising(monkeypatch):
+    monkeypatch.setattr("engine.runner._webm_to_gif", lambda _c, _m: None)
+    derived = _derive_qa_gifs({"specs/7/videos/a.webm": b"x"}, 30)
+    assert derived == {}
+
+
+@pytest.mark.skipif(
+    shutil.which("ffmpeg") is None,
+    reason="ffmpeg not on PATH (install for local smoke; CI installs it)",
+)
+def test_webm_to_gif_roundtrip_with_ffmpeg(tmp_path):
+    """Smoke: real ffmpeg produces a GIF header from a tiny synthetic webm.
+
+    Skips when ffmpeg is absent so local/dev without it does not hard-fail.
+    CI installs ffmpeg so this still runs there. Production collect already
+    installs ffmpeg in run.yml; missing ffmpeg there degrades to WebM only.
+    """
+    webm = tmp_path / "t.webm"
+    proc = subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=blue:s=320x240:d=0.5",
+            "-c:v",
+            "libvpx",
+            "-deadline",
+            "realtime",
+            str(webm),
+        ],
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        pytest.skip(f"ffmpeg cannot encode libvpx here: {proc.stderr[:200]!r}")
+    gif = _webm_to_gif(webm.read_bytes(), max_seconds=5)
+    assert gif is not None
+    assert gif[:6] in (b"GIF89a", b"GIF87a")
+
+
+def test_qa_setup_notes_and_prompt_require_screencast_show_actions():
+    """Cursor/click overlay is Playwright's showActions — not a custom DOM
+    overlay — and must be called out in both the FE setup-notes and the QA
+    prompt so agents cannot skip it."""
+    repos = Path("config/repos.yml").read_text()
+    prompt = Path("tasks/qa/prompts/qa.md").read_text()
+    needle = 'page.screencast.showActions({ cursor: "pointer" })'
+    assert needle in repos or "screencast.showActions" in repos
+    assert 'cursor: "pointer"' in repos
+    assert "screencast.showActions" in prompt
+    assert 'cursor: "pointer"' in prompt
+
+
+def test_qa_auth_helper_and_recovery_order_pinned():
+    """Ticket 41: refresh can succeed while the SPA still shows login.
+    care_fe setup must emit `.agent-hq/qa-auth.mjs` with openAuthedContext,
+    and the QA prompt must require UI login even after refresh 200 and ban
+    throw-before-login."""
+    repos = Path("config/repos.yml").read_text()
+    prompt = Path("tasks/qa/prompts/qa.md").read_text()
+    checklist = Path("tasks/qa/checklists/qa-coverage.md").read_text()
+
+    assert ".agent-hq/qa-auth.mjs" in repos
+    assert "openAuthedContext" in repos
+    assert "refreshJwt" in repos
+    assert "uiLogin" in repos
+    assert "readAccessToken" in repos
+    assert "qa-auth.mjs" in repos  # setup-notes require the helper import
+
+    assert "even if refresh returned 200" in prompt or "even if refresh" in prompt
+    assert "throw" in prompt.lower() and "before" in prompt.lower()
+    assert "openAuthedContext" in prompt or "qa-auth.mjs" in prompt
+
+    assert "openAuthedContext" in checklist or "qa-auth.mjs" in checklist
+    assert "even if refresh returned" in checklist or "refresh returned 200" in checklist
+
+
+def test_collect_rejects_a_dishonest_qa_report(config, taskdefs, store, tmp_path):
+    """Filename convention: qa-report.json in the ledger is validated at
+    collect; a code-inspection 'pass' fails the run. Evidence is still
+    ledgered and announced on the work PR as rejected (not a pass) — never
+    a green `:pr-qa`. Fixture `spec` has retries: 0, so this also exercises
+    retries-exhausted escalation with the reject detail."""
+    taskdefs["spec"]["outputs"]["artifacts"] = [
+        "specs/{ticket}/qa.md",
+        "specs/{ticket}/qa-report.json",
+        "specs/{ticket}/videos/",
+    ]
+    taskdefs["spec"]["writes_code"] = False
+    dishonest = {
+        "criteria": [
+            {
+                "id": "x",
+                "title": "X",
+                "verdict": "pass",
+                "evidence_kind": "code-inspection",
+                "blocker": None,
+                "blocker_category": None,
+                "plan_steps_run": [],
+                "videos": [],
+                "screenshots": [],
+            }
+        ],
+        "summary": {"all_passed": True, "pass": 1, "fail": 0, "not_exercised": 0},
+    }
+    store.write(
+        lambda txn: (
+            txn.set_ticket(
+                "7",
+                status="ACTIVE",
+                pinned_comment_id=None,
+                work_repos=[
+                    {
+                        "repo": "agentalec/care_fe",
+                        "pr_ref": "agentalec/care_fe#1",
+                    }
+                ],
+            ),
+            txn.put_run(
+                "7",
+                _run_dict(
+                    "qarun",
+                    "spec",
+                    state="RUNNING",
+                    attempt=0,
+                    parent_run_id="p",
+                    source_event_id="evt",
+                    enqueue_index=0,
+                ),
+            ),
+        )
+    )
+    _stage(config, "qarun", "specs/7/qa.md", "# QA\npass via reading code\n")
+    _stage(config, "qarun", "specs/7/qa-report.json", json.dumps(dishonest))
+    _write_execute_result(config, "qarun", cost_usd=1.0, tokens=10)
+    _write_control(config, "qarun", {"outcome": "queue", "queue": []}, patch="")
+
+    agent = FakeAgent(tmp_path / "work")
+    adapters = _adapters(tracker=FakeTracker(_details()), agent=agent)
+    run_task(
+        "qarun",
+        "collect",
+        config,
+        taskdefs,
+        store,
+        adapter_fn=adapters,
+    )
+
+    runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
+    assert runs["qarun"]["state"] == "FAILED"
+    assert runs["qarun"].get("artifacts") == []
+    events = store.read_events("7")
+    assert any(
+        e.get("kind") == "run.artifact_rejected" and "live-flow" in (e.get("detail") or "")
+        for e in events
+    )
+    # Reject retains ledger evidence for tracing without unlocking handoffs.
+    retained = store.read_artifact("7", "qarun", "specs/7/qa-report.json")
+    assert retained is not None
+    assert json.loads(retained) == dishonest
+    assert store.read_artifact("7", "qarun", "specs/7/qa.md") == b"# QA\npass via reading code\n"
+    assert agent.opened_prs == []
+    assert not any(
+        eid.endswith(":pr-qa") and not eid.endswith(":pr-qa-rejected")
+        for _, _, eid in adapters.messaging.calls
+    )
+    rejected_pr = [
+        (aud, msg, eid)
+        for aud, msg, eid in adapters.messaging.calls
+        if eid == "qarun:pr-qa-rejected"
+    ]
+    assert len(rejected_pr) == 1
+    _, body, _ = rejected_pr[0]
+    assert "rejected (not a pass)" in body
+    assert "Reject reason:" in body
+    assert "live-flow" in body
+    assert "1 pass" in body  # summary footer still present
+    escalations = [
+        (aud, msg, eid) for aud, msg, eid in adapters.messaging.calls if eid == "qarun:escalation"
+    ]
+    assert len(escalations) == 1
+    _, esc_msg, _ = escalations[0]
+    assert "exhausted its retry budget" in esc_msg
+    assert "Rejected:" in esc_msg
+    assert "live-flow" in esc_msg
+
+
+def test_collect_rejects_prose_only_missing_test_data_and_retries(
+    config, taskdefs, store, tmp_path
+):
+    """missing-test-data without plan_steps_run / driver / log is prose-only:
+    collect artifact-rejects and the retry gets rework feedback (same channel
+    as dishonest qa-report / handoff.rejected). Uses build (retries: 1); the
+    fixture spec task has retries: 0 so it cannot prove the rework path.
+    Rejected evidence is ledgered + posted on the existing work PR."""
+    taskdefs["build"]["outputs"]["artifacts"] = [
+        "specs/{ticket}/qa.md",
+        "specs/{ticket}/qa-report.json",
+        "specs/{ticket}/videos/",
+        "specs/{ticket}/qa-drivers/",
+        "specs/{ticket}/qa-logs/",
+    ]
+    taskdefs["build"]["writes_code"] = False
+    prose_only = {
+        "criteria": [
+            {
+                "id": "seed-wall",
+                "title": "Needs seeded encounter",
+                "verdict": "not-exercised",
+                "evidence_kind": "unreachable",
+                "blocker": "multi-entity seed is too complex",
+                "blocker_category": "missing-test-data",
+                "plan_steps_run": [],
+                "videos": [],
+                "screenshots": [],
+                "seed_attempt": {
+                    "method": "ui",
+                    "summary": "inspected the form; impractical to seed",
+                },
+            }
+        ],
+        "summary": {"all_passed": False, "pass": 0, "fail": 0, "not_exercised": 1},
+    }
+    store.write(
+        lambda txn: (
+            txn.set_ticket(
+                "7",
+                status="ACTIVE",
+                pinned_comment_id=None,
+                work_repos=[
+                    {
+                        "repo": "agentalec/care_fe",
+                        "pr_ref": "agentalec/care_fe#9",
+                    }
+                ],
+            ),
+            txn.put_run(
+                "7",
+                _run_dict(
+                    "qarun",
+                    "build",
+                    state="RUNNING",
+                    attempt=0,
+                    parent_run_id="p",
+                    source_event_id="evt",
+                    enqueue_index=0,
+                ),
+            ),
+        )
+    )
+    _stage(config, "qarun", "specs/7/qa.md", "# QA\nprose-only missing-test-data\n")
+    _stage(config, "qarun", "specs/7/qa-report.json", json.dumps(prose_only))
+    _write_execute_result(config, "qarun", cost_usd=1.0, tokens=10)
+    _write_control(config, "qarun", {"outcome": "queue", "queue": []}, patch="")
+
+    agent = FakeAgent(tmp_path / "work")
+    adapters = _adapters(tracker=FakeTracker(_details()), agent=agent)
+    run_task(
+        "qarun",
+        "collect",
+        config,
+        taskdefs,
+        store,
+        adapter_fn=adapters,
+    )
+
+    runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
+    assert runs["qarun"]["state"] == "FAILED"
+    assert runs["qarun"].get("artifacts") == []
+    events = store.read_events("7")
+    assert any(
+        e.get("kind") == "run.artifact_rejected" and "plan_steps_run" in (e.get("detail") or "")
+        for e in events
+    )
+    retained = store.read_artifact("7", "qarun", "specs/7/qa-report.json")
+    assert retained is not None
+    assert json.loads(retained) == prose_only
+    retries = [r for r in runs.values() if r["task_id"] == "build" and r["attempt"] == 1]
+    assert len(retries) == 1
+    new_id = retries[0]["run_id"]
+    rework = [e for e in events if e.get("kind") == "run.rework" and e.get("run_id") == new_id]
+    assert len(rework) == 1
+    assert rework[0]["actor"] == "engine"
+    assert rework[0]["source"] == "qarun:artifact_rejected"
+    assert "Previous attempt rejected:" in rework[0]["detail"]
+    assert "plan_steps_run" in rework[0]["detail"]
+    assert agent.opened_prs == []
+    rejected_pr = [
+        (aud, msg, eid)
+        for aud, msg, eid in adapters.messaging.calls
+        if eid == "qarun:pr-qa-rejected"
+    ]
+    assert len(rejected_pr) == 1
+    assert "rejected (not a pass)" in rejected_pr[0][1]
+    assert "plan_steps_run" in rejected_pr[0][1]
+    assert not any(eid == "qarun:pr-qa" for _, _, eid in adapters.messaging.calls)
+    # Retries remain — no exhausted escalation on this attempt.
+    assert not any(eid.endswith(":escalation") for _, _, eid in adapters.messaging.calls)
+
+
 def test_collect_failure_records_spend_then_retries(config, taskdefs, store, tmp_path):
     """A `failure` execute-result never reaches apply/land/push (Task 12)."""
-    _seed(store, _run_dict("buildrun", "build", state="RUNNING", attempt=0,
-                           parent_run_id="p", source_event_id="evt", enqueue_index=0))
+    _seed(
+        store,
+        _run_dict(
+            "buildrun",
+            "build",
+            state="RUNNING",
+            attempt=0,
+            parent_run_id="p",
+            source_event_id="evt",
+            enqueue_index=0,
+        ),
+    )
     _write_execute_result(
-        config, "buildrun", outcome="failure", cost_usd=3.0, tokens=20, usage_known=True,
+        config,
+        "buildrun",
+        outcome="failure",
+        cost_usd=3.0,
+        tokens=20,
+        usage_known=True,
     )
     agent = FakeAgent(tmp_path / "work")
     adapters = _adapters(agent=agent)
@@ -1204,7 +2214,12 @@ def test_collect_failure_exhausted_blocks_and_escalates(config, taskdefs, store,
     been queued", and the only trace was on the state branch."""
     _seed(store, _run_dict("buildrun", "build", state="RUNNING", attempt=1))
     _write_execute_result(
-        config, "buildrun", outcome="failure", cost_usd=3.0, tokens=20, usage_known=True,
+        config,
+        "buildrun",
+        outcome="failure",
+        cost_usd=3.0,
+        tokens=20,
+        usage_known=True,
     )
     adapters = _adapters(tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"))
     run_task("buildrun", "collect", config, taskdefs, store, adapter_fn=adapters)
@@ -1221,7 +2236,12 @@ def test_collect_failure_exhausted_blocks_and_escalates(config, taskdefs, store,
 def test_collect_unknown_usage_blocks_never_retries(config, taskdefs, store, tmp_path):
     _seed(store, _run_dict("buildrun", "build", state="RUNNING", attempt=0))
     _write_execute_result(
-        config, "buildrun", outcome="failure", cost_usd=None, tokens=None, usage_known=False,
+        config,
+        "buildrun",
+        outcome="failure",
+        cost_usd=None,
+        tokens=None,
+        usage_known=False,
     )
     adapters = _adapters(tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"))
     run_task("buildrun", "collect", config, taskdefs, store, adapter_fn=adapters)
@@ -1246,8 +2266,15 @@ def test_collect_ticket_blocked_mid_collect_is_zombie_noop(config, taskdefs, sto
     store.write(lambda txn: txn.set_ticket("7", status="BLOCKED"))
     agent = FakeAgent(tmp_path / "work")
     adapters = _adapters(tracker=FakeTracker(_details()), agent=agent)
-    run_task("buildrun", "collect", config, taskdefs, store,
-             now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters)
+    run_task(
+        "buildrun",
+        "collect",
+        config,
+        taskdefs,
+        store,
+        now_iso="2026-07-18T09:00:00Z",
+        adapter_fn=adapters,
+    )
 
     assert agent.landed == []
     assert agent.opened_prs == []
@@ -1266,10 +2293,19 @@ def test_collect_redriven_lost_run_creates_no_duplicate_side_effects(
     must be a pure no-op -- no duplicate branch push, PR, or state entry --
     even though its own execute-result/control.json look like an ordinary
     success."""
-    _seed(store, _run_dict(
-        "buildrun", "build", state="RUNNING", attempt=0, source_event_id="evt", enqueue_index=0,
-        deadline="2026-07-19T00:00:00Z", attempt_started_at="2026-07-18T08:00:00Z",
-    ))
+    _seed(
+        store,
+        _run_dict(
+            "buildrun",
+            "build",
+            state="RUNNING",
+            attempt=0,
+            source_event_id="evt",
+            enqueue_index=0,
+            deadline="2026-07-19T00:00:00Z",
+            attempt_started_at="2026-07-18T08:00:00Z",
+        ),
+    )
     wf = FakeWorkflowApi()  # no active workflow -- "lost"
     tracker = FakeTracker(_details())
     sweep(config, taskdefs, store, wf, "2026-07-18T09:00:00Z", _adapters(tracker=tracker))
@@ -1284,8 +2320,15 @@ def test_collect_redriven_lost_run_creates_no_duplicate_side_effects(
     _write_execute_result(config, "buildrun")
     _write_control(config, "buildrun", {"outcome": "queue", "queue": []})
     agent = FakeAgent(tmp_path / "work")
-    run_task("buildrun", "collect", config, taskdefs, store,
-             now_iso="2026-07-18T09:05:00Z", adapter_fn=_adapters(tracker=tracker, agent=agent))
+    run_task(
+        "buildrun",
+        "collect",
+        config,
+        taskdefs,
+        store,
+        now_iso="2026-07-18T09:05:00Z",
+        adapter_fn=_adapters(tracker=tracker, agent=agent),
+    )
 
     assert agent.landed == []
     assert agent.opened_prs == []
@@ -1304,13 +2347,23 @@ def _sweep(config, taskdefs, store, wf, adapters, now="2026-07-18T09:00:00Z"):
 
 
 def test_sweep_gate_approved_applies_pending_handoff_and_completes(config, taskdefs, store):
-    _seed(store, _run_dict(
-        "specrun", "spec", state="WAITING_GATE", chain_depth=0,
-        gate_request_id="42", gate_requested_at="2026-07-18T08:00:00Z",
-        pending_handoffs=[{"key": "build-1", "target_task": "build", "reason": "ready"}],
-    ))
+    _seed(
+        store,
+        _run_dict(
+            "specrun",
+            "spec",
+            state="WAITING_GATE",
+            chain_depth=0,
+            gate_request_id="42",
+            gate_requested_at="2026-07-18T08:00:00Z",
+            pending_handoffs=[{"key": "build-1", "target_task": "build", "reason": "ready"}],
+        ),
+    )
     decision = GateDecision(
-        GateStatus.APPROVED, "", comment_id=555, actor="example-alice",
+        GateStatus.APPROVED,
+        "",
+        comment_id=555,
+        actor="example-alice",
         decided_at="2026-07-18T08:30:00Z",
     )
     tracker = FakeTracker(_details())
@@ -1319,9 +2372,7 @@ def test_sweep_gate_approved_applies_pending_handoff_and_completes(config, taskd
     runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
     assert runs["specrun"]["state"] == "SUCCEEDED"
     # The gate is resolved, so the waiting-gate label comes back off.
-    assert tracker.label_sets[-1] == (
-        "7", "ACTIVE", ["hq:active", "hq:intake", "hq:public-safe"]
-    )
+    assert tracker.label_sets[-1] == ("7", "ACTIVE", ["hq:active", "hq:intake", "hq:public-safe"])
     assert runs["specrun"]["pending_handoffs"] == []
     downstream = [r for r in runs.values() if r["task_id"] == "build"]
     assert len(downstream) == 1
@@ -1339,14 +2390,26 @@ def test_sweep_auto_approved_gate_resolves_a_run_already_waiting(config, taskdef
     stranding them behind a flag that says they need no human. Nothing is
     asked: `gate=None` here would raise if any gate adapter were built."""
     taskdefs["spec"]["gates"]["post"][0]["auto_approve"] = True
-    _seed(store, _run_dict(
-        "specrun", "spec", state="WAITING_GATE", chain_depth=0,
-        gate_request_id="42", gate_requested_at="2026-07-18T08:00:00Z",
-        pending_handoffs=[{"key": "build-1", "target_task": "build", "reason": "ready"}],
-    ))
+    _seed(
+        store,
+        _run_dict(
+            "specrun",
+            "spec",
+            state="WAITING_GATE",
+            chain_depth=0,
+            gate_request_id="42",
+            gate_requested_at="2026-07-18T08:00:00Z",
+            pending_handoffs=[{"key": "build-1", "target_task": "build", "reason": "ready"}],
+        ),
+    )
     tracker, messaging = FakeTracker(_details()), FakeMessaging()
-    _sweep(config, taskdefs, store, FakeWorkflowApi(),
-           _adapters(tracker=tracker, gate=None, messaging=messaging))
+    _sweep(
+        config,
+        taskdefs,
+        store,
+        FakeWorkflowApi(),
+        _adapters(tracker=tracker, gate=None, messaging=messaging),
+    )
 
     # Its request comment is already in the thread asking for a decision that
     # will now never come, so the thread gets told why.
@@ -1364,20 +2427,28 @@ def test_sweep_auto_approved_gate_resolves_a_run_already_waiting(config, taskdef
     assert decided[0]["event_id"] == "specrun:auto_approval"
     assert "auto-approved by task config" in decided[0]["detail"]
     # and the waiting-gate label comes off, same as any other decision
-    assert tracker.label_sets[-1] == (
-        "7", "ACTIVE", ["hq:active", "hq:intake", "hq:public-safe"]
-    )
+    assert tracker.label_sets[-1] == ("7", "ACTIVE", ["hq:active", "hq:intake", "hq:public-safe"])
 
 
 def test_sweep_gate_changes_requested_reworks_and_clears_pending_handoffs(config, taskdefs, store):
-    _seed(store, _run_dict(
-        "specrun", "spec", state="WAITING_GATE", attempt=0, source_event_id="evt", enqueue_index=0,
-        gate_request_id="42", gate_requested_at="2026-07-18T08:00:00Z",
-        pending_handoffs=[{"key": "build-1", "target_task": "build", "reason": "ready"}],
-    ))
+    _seed(
+        store,
+        _run_dict(
+            "specrun",
+            "spec",
+            state="WAITING_GATE",
+            attempt=0,
+            source_event_id="evt",
+            enqueue_index=0,
+            gate_request_id="42",
+            gate_requested_at="2026-07-18T08:00:00Z",
+            pending_handoffs=[{"key": "build-1", "target_task": "build", "reason": "ready"}],
+        ),
+    )
     tracker = FakeTracker(_details())
-    adapters = _adapters(tracker=tracker,
-                         gate=FakeGate(decision=GateDecision(GateStatus.CHANGES_REQUESTED, "fix X")))
+    adapters = _adapters(
+        tracker=tracker, gate=FakeGate(decision=GateDecision(GateStatus.CHANGES_REQUESTED, "fix X"))
+    )
     _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
     runs = {r["run_id"]: r for r in store.read_state("7")["runs"]}
     assert runs["specrun"]["state"] == "FAILED"
@@ -1385,25 +2456,33 @@ def test_sweep_gate_changes_requested_reworks_and_clears_pending_handoffs(config
     rework = [r for r in runs.values() if r["task_id"] == "spec" and r["attempt"] == 1]
     assert len(rework) == 1
     # Not just the approve path: any decision takes the label back off.
-    assert tracker.label_sets[-1] == (
-        "7", "ACTIVE", ["hq:active", "hq:intake", "hq:public-safe"]
-    )
+    assert tracker.label_sets[-1] == ("7", "ACTIVE", ["hq:active", "hq:intake", "hq:public-safe"])
     new_id = rework[0]["run_id"]
-    rework_event = [e for e in store.read_events("7")
-                    if e["kind"] == "run.rework" and e["run_id"] == new_id]
+    rework_event = [
+        e for e in store.read_events("7") if e["kind"] == "run.rework" and e["run_id"] == new_id
+    ]
     assert rework_event and rework_event[0]["detail"] == "fix X"
     rejected = [e for e in store.read_events("7") if e["kind"] == "handoff.rejected"]
     assert len(rejected) == 1 and rejected[0]["detail"] == "ready"
 
 
 def test_sweep_gate_changes_requested_maxed_blocks(config, taskdefs, store):
-    _seed(store, _run_dict(
-        "specrun", "spec", state="WAITING_GATE", attempt=2,
-        gate_request_id="42", gate_requested_at="2026-07-18T08:00:00Z",
-        pending_handoffs=[{"key": "build-1", "target_task": "build", "reason": "ready"}],
-    ))
-    adapters = _adapters(tracker=FakeTracker(_details()),
-                         gate=FakeGate(decision=GateDecision(GateStatus.CHANGES_REQUESTED, "again")))
+    _seed(
+        store,
+        _run_dict(
+            "specrun",
+            "spec",
+            state="WAITING_GATE",
+            attempt=2,
+            gate_request_id="42",
+            gate_requested_at="2026-07-18T08:00:00Z",
+            pending_handoffs=[{"key": "build-1", "target_task": "build", "reason": "ready"}],
+        ),
+    )
+    adapters = _adapters(
+        tracker=FakeTracker(_details()),
+        gate=FakeGate(decision=GateDecision(GateStatus.CHANGES_REQUESTED, "again")),
+    )
     _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
     state = store.read_state("7")
     assert state["status"] == "BLOCKED"
@@ -1414,13 +2493,22 @@ def test_sweep_gate_changes_requested_maxed_blocks(config, taskdefs, store):
 def test_sweep_gate_rejected_blocks_immediately_without_rework(config, taskdefs, store):
     """REJECTED is terminal for the proposal (docs/architecture.md) -- unlike
     CHANGES_REQUESTED it never reworks, regardless of attempt count."""
-    _seed(store, _run_dict(
-        "specrun", "spec", state="WAITING_GATE", attempt=0,
-        gate_request_id="42", gate_requested_at="2026-07-18T08:00:00Z",
-        pending_handoffs=[{"key": "build-1", "target_task": "build", "reason": "ready"}],
-    ))
-    adapters = _adapters(tracker=FakeTracker(_details()),
-                         gate=FakeGate(decision=GateDecision(GateStatus.REJECTED, "not needed")))
+    _seed(
+        store,
+        _run_dict(
+            "specrun",
+            "spec",
+            state="WAITING_GATE",
+            attempt=0,
+            gate_request_id="42",
+            gate_requested_at="2026-07-18T08:00:00Z",
+            pending_handoffs=[{"key": "build-1", "target_task": "build", "reason": "ready"}],
+        ),
+    )
+    adapters = _adapters(
+        tracker=FakeTracker(_details()),
+        gate=FakeGate(decision=GateDecision(GateStatus.REJECTED, "not needed")),
+    )
     _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
     state = store.read_state("7")
     assert state["status"] == "BLOCKED"
@@ -1430,13 +2518,21 @@ def test_sweep_gate_rejected_blocks_immediately_without_rework(config, taskdefs,
 
 
 def test_sweep_gate_expired_blocks_and_escalates(config, taskdefs, store):
-    _seed(store, _run_dict(
-        "specrun", "spec", state="WAITING_GATE",
-        gate_request_id="42", gate_requested_at="2026-07-18T08:00:00Z",
-        pending_handoffs=[{"key": "build-1", "target_task": "build", "reason": "ready"}],
-    ))
-    adapters = _adapters(tracker=FakeTracker(_details()),
-                         gate=FakeGate(decision=GateDecision(GateStatus.EXPIRED, "")))
+    _seed(
+        store,
+        _run_dict(
+            "specrun",
+            "spec",
+            state="WAITING_GATE",
+            gate_request_id="42",
+            gate_requested_at="2026-07-18T08:00:00Z",
+            pending_handoffs=[{"key": "build-1", "target_task": "build", "reason": "ready"}],
+        ),
+    )
+    adapters = _adapters(
+        tracker=FakeTracker(_details()),
+        gate=FakeGate(decision=GateDecision(GateStatus.EXPIRED, "")),
+    )
     _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
     state = store.read_state("7")
     assert state["status"] == "BLOCKED"
@@ -1445,10 +2541,19 @@ def test_sweep_gate_expired_blocks_and_escalates(config, taskdefs, store):
 
 
 def test_sweep_runner_lost_fails_and_retries(config, taskdefs, store):
-    _seed(store, _run_dict("buildrun", "build", state="RUNNING", attempt=0,
-                           source_event_id="evt", enqueue_index=0,
-                           deadline="2026-07-19T00:00:00Z",
-                           attempt_started_at="2026-07-18T08:00:00Z"))
+    _seed(
+        store,
+        _run_dict(
+            "buildrun",
+            "build",
+            state="RUNNING",
+            attempt=0,
+            source_event_id="evt",
+            enqueue_index=0,
+            deadline="2026-07-19T00:00:00Z",
+            attempt_started_at="2026-07-18T08:00:00Z",
+        ),
+    )
     wf = FakeWorkflowApi()  # no active workflow -> lost
     adapters = _adapters(tracker=FakeTracker(_details()))
     _sweep(config, taskdefs, store, wf, adapters, now="2026-07-18T09:00:00Z")
@@ -1506,16 +2611,13 @@ def test_sweep_leaves_the_ticket_awaiting_while_a_pr_is_still_open(
         pr_states={"agentalec/care#11": {"state": "closed", "merged": True}},
     )  # care_fe#4 defaults to open
 
-    _sweep(config, taskdefs, store, FakeWorkflowApi(),
-           _adapters(tracker=tracker, agent=agent))
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), _adapters(tracker=tracker, agent=agent))
 
     assert store.read_state("7")["status"] == "AWAITING_MERGE"
     assert tracker.closed == []
 
 
-def test_sweep_blocks_and_escalates_when_a_pr_is_closed_unmerged(
-    config, taskdefs, store, tmp_path
-):
+def test_sweep_blocks_and_escalates_when_a_pr_is_closed_unmerged(config, taskdefs, store, tmp_path):
     """Closed-unmerged is a human declining the work -- it must reach a
     person, not complete silently."""
     _awaiting_merge(store, [{"repo": "agentalec/care", "pr_ref": "agentalec/care#11"}])
@@ -1533,9 +2635,7 @@ def test_sweep_blocks_and_escalates_when_a_pr_is_closed_unmerged(
     assert tracker.closed == []
     assert adapters.messaging.calls, "an abandoned PR has to escalate"
     assert "closed unmerged" in adapters.messaging.calls[0][1]
-    assert tracker.label_sets[-1] == (
-        "7", "BLOCKED", ["hq:blocked", "hq:intake", "hq:public-safe"]
-    )
+    assert tracker.label_sets[-1] == ("7", "BLOCKED", ["hq:blocked", "hq:intake", "hq:public-safe"])
 
 
 def test_sweep_abandoned_pr_outweighs_a_merged_sibling(config, taskdefs, store, tmp_path):
@@ -1555,8 +2655,7 @@ def test_sweep_abandoned_pr_outweighs_a_merged_sibling(config, taskdefs, store, 
     )
     tracker = FakeTracker(_details())
 
-    _sweep(config, taskdefs, store, FakeWorkflowApi(),
-           _adapters(tracker=tracker, agent=agent))
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), _adapters(tracker=tracker, agent=agent))
 
     assert store.read_state("7")["status"] == "BLOCKED"
     assert tracker.closed == []
@@ -1613,7 +2712,9 @@ def test_sweep_pr_request_changes_from_an_approver_queues_rework(config, taskdef
     the engine, and its text reaches the rework prompt."""
     _feedback_config(config)
     _with_pr(store)
-    messaging = FakeMessaging(by_subject={"11": [_comment(101, "/agent-hq request-changes fix the N+1")]})
+    messaging = FakeMessaging(
+        by_subject={"11": [_comment(101, "/agent-hq request-changes fix the N+1")]}
+    )
     adapters = _adapters(
         tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
     )
@@ -1644,7 +2745,9 @@ def test_sweep_pr_command_from_a_non_approver_is_ignored(config, taskdefs, store
     _feedback_config(config)
     _with_pr(store)
     messaging = FakeMessaging(
-        by_subject={"11": [_comment(101, "/agent-hq request-changes ship it", author="random-drive-by")]}
+        by_subject={
+            "11": [_comment(101, "/agent-hq request-changes ship it", author="random-drive-by")]
+        }
     )
     adapters = _adapters(
         tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
@@ -1662,7 +2765,9 @@ def test_sweep_pr_command_from_a_non_approver_is_ignored(config, taskdefs, store
 def test_sweep_pr_ordinary_conversation_queues_nothing(config, taskdefs, store, tmp_path):
     _feedback_config(config)
     _with_pr(store)
-    messaging = FakeMessaging(by_subject={"11": [_comment(101, "nice, wonder if this handles nulls")]})
+    messaging = FakeMessaging(
+        by_subject={"11": [_comment(101, "nice, wonder if this handles nulls")]}
+    )
     adapters = _adapters(
         tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
     )
@@ -1678,7 +2783,9 @@ def test_sweep_pr_feedback_is_idempotent_across_passes(config, taskdefs, store, 
     that already exists."""
     _feedback_config(config)
     _with_pr(store)
-    messaging = FakeMessaging(by_subject={"11": [_comment(101, "/agent-hq request-changes fix it")]})
+    messaging = FakeMessaging(
+        by_subject={"11": [_comment(101, "/agent-hq request-changes fix it")]}
+    )
     adapters = _adapters(
         tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
     )
@@ -1722,9 +2829,11 @@ def test_engine_never_acts_on_its_own_comment(config, taskdefs, store, tmp_path)
     _feedback_config(config)
     config.projects["comment_default_task"] = "build"
     _with_pr(store, status="BLOCKED")
-    messaging = FakeMessaging(by_subject=_issue_comments(
-        _comment(201, "<!--hq:evt:7:somerun:escalation-->\n@example-alice run failed"),
-    ))
+    messaging = FakeMessaging(
+        by_subject=_issue_comments(
+            _comment(201, "<!--hq:evt:7:somerun:escalation-->\n@example-alice run failed"),
+        )
+    )
     adapters = _adapters(
         tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
     )
@@ -1754,14 +2863,16 @@ def test_every_read_comment_gets_an_outcome_reaction(config, taskdefs, store, tm
     # nothing" case to test. That variant is covered below.
     config.projects.pop("comment_default_task", None)
     _with_pr(store, status="ACTIVE")
-    messaging = FakeMessaging(by_subject=_issue_comments(
-        # The engine's own pinned comment: skipped by the marker guard, and
-        # deliberately NOT reacted to -- it was not waiting for an answer.
-        _comment(400, "<!--hq:pinned--> Queue is empty."),
-        _comment(401, "just thinking out loud", author="example-alice"),
-        _comment(402, "not on the allowlist", author="random-drive-by"),
-        _comment(403, "/agent-hq do build please", author="example-alice"),
-    ))
+    messaging = FakeMessaging(
+        by_subject=_issue_comments(
+            # The engine's own pinned comment: skipped by the marker guard, and
+            # deliberately NOT reacted to -- it was not waiting for an answer.
+            _comment(400, "<!--hq:pinned--> Queue is empty."),
+            _comment(401, "just thinking out loud", author="example-alice"),
+            _comment(402, "not on the allowlist", author="random-drive-by"),
+            _comment(403, "/agent-hq do build please", author="example-alice"),
+        )
+    )
     adapters = _adapters(
         tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
     )
@@ -1769,10 +2880,10 @@ def test_every_read_comment_gets_an_outcome_reaction(config, taskdefs, store, tm
     _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
 
     reacted = dict(messaging.reactions)
-    assert 400 not in reacted                 # engine's own comment, untouched
-    assert reacted[401] == "eyes"             # read, asked for nothing
-    assert reacted[402] == "eyes"             # read, not authorized -- the case that was silent
-    assert reacted[403] == "rocket"           # produced the run
+    assert 400 not in reacted  # engine's own comment, untouched
+    assert reacted[401] == "eyes"  # read, asked for nothing
+    assert reacted[402] == "eyes"  # read, not authorized -- the case that was silent
+    assert reacted[403] == "rocket"  # produced the run
 
 
 def test_with_a_default_task_a_bare_approver_comment_counts_as_an_instruction(
@@ -1785,9 +2896,11 @@ def test_with_a_default_task_a_bare_approver_comment_counts_as_an_instruction(
     _feedback_config(config)
     config.projects["comment_default_task"] = "build"
     _with_pr(store, status="ACTIVE")
-    messaging = FakeMessaging(by_subject=_issue_comments(
-        _comment(405, "hmm, the search box is on the wrong page"),
-    ))
+    messaging = FakeMessaging(
+        by_subject=_issue_comments(
+            _comment(405, "hmm, the search box is on the wrong page"),
+        )
+    )
     adapters = _adapters(
         tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
     )
@@ -1805,12 +2918,22 @@ def test_a_refused_comment_is_not_marked_as_queued(config, taskdefs, store, tmp_
     _feedback_config(config)
     config.budgets["max_comment_runs_per_ticket"] = 1
     _with_pr(store, status="ACTIVE")
-    store.write(lambda txn: txn.put_run("7", _run_dict(
-        "spent", "build", state="SUCCEEDED", source_event_id="issue-comment:1",
-    )))
-    messaging = FakeMessaging(by_subject=_issue_comments(
-        _comment(404, "/agent-hq do build again"),
-    ))
+    store.write(
+        lambda txn: txn.put_run(
+            "7",
+            _run_dict(
+                "spent",
+                "build",
+                state="SUCCEEDED",
+                source_event_id="issue-comment:1",
+            ),
+        )
+    )
+    messaging = FakeMessaging(
+        by_subject=_issue_comments(
+            _comment(404, "/agent-hq do build again"),
+        )
+    )
     adapters = _adapters(
         tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
     )
@@ -1829,12 +2952,22 @@ def test_comment_run_budget_refuses_and_blocks(config, taskdefs, store, tmp_path
     config.budgets["max_comment_runs_per_ticket"] = 1
     _with_pr(store, status="ACTIVE")
     # One comment-sourced run already on the ticket.
-    store.write(lambda txn: txn.put_run("7", _run_dict(
-        "spent", "build", state="SUCCEEDED", source_event_id="issue-comment:1",
-    )))
-    messaging = FakeMessaging(by_subject=_issue_comments(
-        _comment(202, "/agent-hq do build please retry"),
-    ))
+    store.write(
+        lambda txn: txn.put_run(
+            "7",
+            _run_dict(
+                "spent",
+                "build",
+                state="SUCCEEDED",
+                source_event_id="issue-comment:1",
+            ),
+        )
+    )
+    messaging = FakeMessaging(
+        by_subject=_issue_comments(
+            _comment(202, "/agent-hq do build please retry"),
+        )
+    )
     adapters = _adapters(
         tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
     )
@@ -1855,12 +2988,19 @@ def test_comment_unblocks_a_blocked_ticket(config, taskdefs, store, tmp_path):
     _feedback_config(config)
     config.projects["comment_default_task"] = "build"
     _with_pr(store, status="ACTIVE")
-    store.write(lambda txn: txn.set_block(
-        "7", reason="queue ran dry after `build`", source="engine", interrupted_run="finalrun",
-    ))
-    messaging = FakeMessaging(by_subject=_issue_comments(
-        _comment(203, "carry on, the spec was fine"),
-    ))
+    store.write(
+        lambda txn: txn.set_block(
+            "7",
+            reason="queue ran dry after `build`",
+            source="engine",
+            interrupted_run="finalrun",
+        )
+    )
+    messaging = FakeMessaging(
+        by_subject=_issue_comments(
+            _comment(203, "carry on, the spec was fine"),
+        )
+    )
     adapters = _adapters(
         tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
     )
@@ -1881,6 +3021,175 @@ def test_comment_unblocks_a_blocked_ticket(config, taskdefs, store, tmp_path):
     assert rework[-1]["source"] == "issue-comment:203"
 
 
+def test_intake_blocked_bare_comment_readmits_when_eligible(config, taskdefs, store, tmp_path):
+    """Intake product-area block: a bare approver comment must re-check
+    eligibility and enqueue initial_task (spec), not burn triage."""
+    _feedback_config(config)
+    config.projects["comment_default_task"] = "build"  # stand-in for triage
+    config.projects["initial_task"] = "spec"
+    store.write(
+        lambda txn: txn.set_block(
+            "7",
+            reason="no product area matches a configured repo",
+            source="intake",
+        )
+    )
+    messaging = FakeMessaging(
+        by_subject=_issue_comments(_comment(301, "fixed the title, please retry"))
+    )
+    # Eligible: title carries product area, body long enough.
+    adapters = _adapters(
+        tracker=FakeTracker(_details(title="Add frontend endpoint")),
+        agent=FakeAgent(tmp_path / "work"),
+        messaging=messaging,
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    state = store.read_state("7")
+    assert state["status"] == "ACTIVE"
+    assert state["block_source"] is None
+    queued = [r for r in state["runs"] if r["state"] == "QUEUED"]
+    assert len(queued) == 1
+    assert queued[0]["task_id"] == "spec"  # initial_task, not comment_default
+    assert queued[0]["repo"] == "agentalec/care_fe"
+    assert any("Re-admitted" in msg for _, msg, _ in messaging.calls)
+    assert dict(messaging.reactions)[301] == "rocket"
+    rework = [e for e in store.read_events("7") if e["kind"] == "run.rework"]
+    assert len(rework) == 1
+    assert rework[0]["run_id"] == queued[0]["run_id"]
+    assert "fixed the title" in rework[0]["detail"]
+    assert "no product area" in rework[0]["detail"]
+    assert rework[0]["actor"] == "example-alice"
+
+
+def test_intake_blocked_bare_comment_acks_when_still_ineligible(config, taskdefs, store, tmp_path):
+    """Still no product area → ack reasons, do not queue triage/default."""
+    _feedback_config(config)
+    config.projects["comment_default_task"] = "build"
+    config.projects["initial_task"] = "spec"
+    store.write(
+        lambda txn: txn.set_block(
+            "7",
+            reason="no product area matches a configured repo",
+            source="intake",
+        )
+    )
+    messaging = FakeMessaging(by_subject=_issue_comments(_comment(302, "please retry")))
+    adapters = _adapters(
+        tracker=FakeTracker(_details(title="do something", body="too short")),
+        agent=FakeAgent(tmp_path / "work"),
+        messaging=messaging,
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    state = store.read_state("7")
+    assert state["status"] == "BLOCKED"
+    assert state["block_source"] == "intake"
+    assert [r for r in state["runs"] if r["state"] == "QUEUED"] == []
+    assert any("Still not eligible" in msg for _, msg, _ in messaging.calls)
+    assert any("product area" in msg for _, msg, _ in messaging.calls)
+    assert dict(messaging.reactions)[302] == "eyes"
+
+
+def test_intake_readmit_refuse_keeps_intake_block_source(config, taskdefs, store, tmp_path):
+    """Comment-cap refuse must not rewrite block_source to engine — otherwise
+    the next bare retry skips intake recovery and burns triage."""
+    _feedback_config(config)
+    config.projects["comment_default_task"] = "build"
+    config.projects["initial_task"] = "spec"
+    config.budgets["max_comment_runs_per_ticket"] = 0
+    store.write(
+        lambda txn: txn.set_block(
+            "7",
+            reason="no product area matches a configured repo",
+            source="intake",
+        )
+    )
+    messaging = FakeMessaging(by_subject=_issue_comments(_comment(304, "retry after fix")))
+    adapters = _adapters(
+        tracker=FakeTracker(_details(title="Add frontend endpoint")),
+        agent=FakeAgent(tmp_path / "work"),
+        messaging=messaging,
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    state = store.read_state("7")
+    assert state["status"] == "BLOCKED"
+    assert state["block_source"] == "intake"
+    assert [r for r in state["runs"] if r["state"] == "QUEUED"] == []
+    assert dict(messaging.reactions)[304] == "eyes"
+
+
+def test_intake_readmit_noop_uses_eyes_not_rocket(config, taskdefs, store, tmp_path):
+    """If the intake block was cleared before apply commits, react eyes —
+    rocket means a run was queued."""
+    from engine.engine import _intake_comment_readmit
+
+    _feedback_config(config)
+    config.projects["initial_task"] = "spec"
+    # No intake block — simulates the race after the gate saw intake.
+    store.write(lambda txn: txn.set_ticket("7", status="ACTIVE"))
+    messaging = FakeMessaging()
+    considered = [_comment(305, "retry")]
+    adapters = _adapters(
+        tracker=FakeTracker(_details(title="Add frontend endpoint")),
+        messaging=messaging,
+    )
+
+    def save_watermark(txn, w):
+        txn.set_ticket("7", comments_polled_at=w)
+
+    _intake_comment_readmit(
+        store,
+        config,
+        taskdefs,
+        adapters,
+        "7",
+        messaging=messaging,
+        considered=considered,
+        qualifying_ids={305},
+        latest_read="2026-07-18T08:00:00Z",
+        save_watermark=save_watermark,
+        ack=lambda *_a, **_k: None,
+        source_event_id="issue-comment:305",
+        rework_detail="@example-alice: retry",
+        rework_actor="example-alice",
+    )
+
+    assert dict(messaging.reactions)[305] == "eyes"
+    assert [r for r in store.read_state("7")["runs"] if r["state"] == "QUEUED"] == []
+
+
+def test_intake_blocked_explicit_do_still_queues_named_task(config, taskdefs, store, tmp_path):
+    """Mid-route steering: `/agent-hq do build` while intake-blocked still
+    queues the named task (recovery path is bare-default only)."""
+    _feedback_config(config)
+    config.projects["comment_default_task"] = "build"
+    store.write(
+        lambda txn: txn.set_block(
+            "7", reason="no product area matches a configured repo", source="intake"
+        )
+    )
+    messaging = FakeMessaging(
+        by_subject=_issue_comments(_comment(303, "/agent-hq do build steer anyway"))
+    )
+    adapters = _adapters(
+        tracker=FakeTracker(_details(title="do something")),
+        agent=FakeAgent(tmp_path / "work"),
+        messaging=messaging,
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    state = store.read_state("7")
+    assert state["status"] == "ACTIVE"
+    queued = [r for r in state["runs"] if r["state"] == "QUEUED"]
+    assert len(queued) == 1 and queued[0]["task_id"] == "build"
+
+
 def test_a_blocked_ticket_with_queued_work_is_still_polled(config, taskdefs, store, tmp_path):
     """Regression: dispatch skips BLOCKED tickets, so a QUEUED run on one is not
     going anywhere and must not veto the poll that would release it. Gating the
@@ -1889,10 +3198,12 @@ def test_a_blocked_ticket_with_queued_work_is_still_polled(config, taskdefs, sto
     _feedback_config(config)
     config.projects["comment_default_task"] = "build"
     _with_pr(store, status="ACTIVE")
-    store.write(lambda txn: (
-        txn.put_run("7", _run_dict("stuck", "build", state="QUEUED")),
-        txn.set_block("7", reason="retries exhausted", source="engine"),
-    ))
+    store.write(
+        lambda txn: (
+            txn.put_run("7", _run_dict("stuck", "build", state="QUEUED")),
+            txn.set_block("7", reason="retries exhausted", source="engine"),
+        )
+    )
     messaging = FakeMessaging(by_subject=_issue_comments(_comment(204, "try again")))
     adapters = _adapters(
         tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
@@ -1910,10 +3221,12 @@ def test_comment_runs_at_the_front_of_the_queue(config, taskdefs, store, tmp_pat
     _feedback_config(config)
     config.projects["comment_default_task"] = "build"
     _with_pr(store, status="ACTIVE")
-    store.write(lambda txn: (
-        txn.put_run("7", _run_dict("planned-a", "build", state="QUEUED", queue_seq=3)),
-        txn.put_run("7", _run_dict("planned-b", "build", state="QUEUED", queue_seq=4)),
-    ))
+    store.write(
+        lambda txn: (
+            txn.put_run("7", _run_dict("planned-a", "build", state="QUEUED", queue_seq=3)),
+            txn.put_run("7", _run_dict("planned-b", "build", state="QUEUED", queue_seq=4)),
+        )
+    )
     messaging = FakeMessaging(by_subject=_issue_comments(_comment(205, "hold on")))
     adapters = _adapters(
         tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
@@ -1934,9 +3247,11 @@ def test_do_command_naming_an_unknown_task_answers_instead_of_ignoring(
     """A typo should not read as "the engine ignored me"."""
     _feedback_config(config)
     _with_pr(store, status="ACTIVE")
-    messaging = FakeMessaging(by_subject=_issue_comments(
-        _comment(206, "/agent-hq do implememt fix it"),
-    ))
+    messaging = FakeMessaging(
+        by_subject=_issue_comments(
+            _comment(206, "/agent-hq do implememt fix it"),
+        )
+    )
     adapters = _adapters(
         tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
     )
@@ -1970,10 +3285,12 @@ def test_issue_and_pr_comment_ids_do_not_collide(config, taskdefs, store, tmp_pa
     than one silently deduped away."""
     _feedback_config(config)
     _with_pr(store, status="ACTIVE")
-    messaging = FakeMessaging(by_subject={
-        "7": [_comment(300, "/agent-hq do build from the issue")],
-        "11": [_comment(300, "/agent-hq request-changes from the PR")],
-    })
+    messaging = FakeMessaging(
+        by_subject={
+            "7": [_comment(300, "/agent-hq do build from the issue")],
+            "11": [_comment(300, "/agent-hq request-changes from the PR")],
+        }
+    )
     adapters = _adapters(
         tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
     )
@@ -1981,8 +3298,7 @@ def test_issue_and_pr_comment_ids_do_not_collide(config, taskdefs, store, tmp_pa
     _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
 
     sources = {
-        r.get("source_event_id") for r in store.read_state("7")["runs"]
-        if r["state"] == "QUEUED"
+        r.get("source_event_id") for r in store.read_state("7")["runs"] if r["state"] == "QUEUED"
     }
     assert sources == {"issue-comment:300", "pr-comment:300"}
 
@@ -1992,10 +3308,18 @@ def test_sweep_pr_multiple_requests_fold_into_one_run(config, taskdefs, store, t
     and no reason is dropped on the floor."""
     _feedback_config(config)
     _with_pr(store)
-    messaging = FakeMessaging(by_subject={"11": [
-        _comment(101, "/agent-hq request-changes fix the N+1", created_at="2026-07-18T08:00:00Z"),
-        _comment(102, "/agent-hq request-changes add a test", created_at="2026-07-18T08:05:00Z"),
-    ]})
+    messaging = FakeMessaging(
+        by_subject={
+            "11": [
+                _comment(
+                    101, "/agent-hq request-changes fix the N+1", created_at="2026-07-18T08:00:00Z"
+                ),
+                _comment(
+                    102, "/agent-hq request-changes add a test", created_at="2026-07-18T08:05:00Z"
+                ),
+            ]
+        }
+    )
     adapters = _adapters(
         tracker=FakeTracker(_details()), agent=FakeAgent(tmp_path / "work"), messaging=messaging
     )
@@ -2039,7 +3363,9 @@ def test_sweep_pr_feedback_waits_while_a_run_is_in_flight(config, taskdefs, stor
             txn.put_run("7", _run_dict("buildrun", "build", state="RUNNING")),
         )
     )
-    messaging = FakeMessaging(by_subject={"11": [_comment(101, "/agent-hq request-changes fix it")]})
+    messaging = FakeMessaging(
+        by_subject={"11": [_comment(101, "/agent-hq request-changes fix it")]}
+    )
     adapters = _adapters(
         tracker=FakeTracker(_details()),
         agent=FakeAgent(tmp_path / "work"),
@@ -2052,3 +3378,97 @@ def test_sweep_pr_feedback_waits_while_a_run_is_in_flight(config, taskdefs, stor
     assert [r for r in state["runs"] if r["state"] == "QUEUED"] == []
     assert messaging.listed == []  # not even read
     assert state["work_repos"][0].get("comments_polled_at") is None
+
+
+# --------------------------------------------------------------------------
+# Missing engine-issue isolation (issue #68).
+# --------------------------------------------------------------------------
+
+
+def _missing_issue_error(ticket_id: str, status: int = 404) -> RuntimeError:
+    return RuntimeError(
+        f"GitHub GET /repos/agentalec/agent_hq/issues/{ticket_id}/comments -> {status}: gone"
+    )
+
+
+def test_sweep_orphans_missing_engine_issue_and_continues(config, taskdefs, store, tmp_path):
+    """A 404 on one ticket's engine issue must not abort the whole sweep."""
+    _feedback_config(config)
+    _seed(store, _run_dict("specrun", "spec", state="QUEUED", ticket_id="7"), ticket_id="7")
+    store.write(lambda txn: txn.set_ticket("38", status="ACTIVE", pinned_comment_id=None))
+
+    tracker = FakeTracker(_details())
+    messaging = FakeMessaging(errors_by_subject={"38": _missing_issue_error("38")})
+    adapters = _adapters(tracker=tracker, agent=FakeAgent(tmp_path / "work"), messaging=messaging)
+    wf = FakeWorkflowApi()
+
+    triggered = dispatch(
+        config, taskdefs, store, wf, now_iso="2026-07-18T09:00:00Z", adapter_fn=adapters
+    )
+
+    orphan = store.read_state("38")
+    assert orphan["status"] == "BLOCKED"
+    assert orphan["block_reason"] == ENGINE_ISSUE_UNAVAILABLE
+    assert orphan["block_source"] == "engine"
+    blocked_events = [
+        e for e in store.read_events("38") if e["event_id"] == "38:engine-issue-unavailable"
+    ]
+    assert len(blocked_events) == 1
+    assert blocked_events[0]["kind"] == "ticket.blocked"
+    # Silent: no status label, no notify -- both would 404 on the same issue.
+    assert not any(tid == "38" for tid, *_ in tracker.label_sets)
+    assert not any((c[0] or {}).get("ticket_id") == "38" for c in messaging.calls)
+
+    assert triggered == ["specrun"]
+    assert wf.triggered == ["specrun"]
+    assert store.read_state("7")["status"] == "ACTIVE"
+
+
+def test_sweep_orphaned_engine_issue_is_idempotent_on_resweep(config, taskdefs, store, tmp_path):
+    """Later sweeps must skip the gone issue so dispatch stays green."""
+    _feedback_config(config)
+    store.write(lambda txn: txn.set_ticket("38", status="ACTIVE", pinned_comment_id=None))
+    messaging = FakeMessaging(errors_by_subject={"38": _missing_issue_error("38", status=410)})
+    adapters = _adapters(
+        tracker=FakeTracker(_details()),
+        agent=FakeAgent(tmp_path / "work"),
+        messaging=messaging,
+    )
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+    assert store.read_state("38")["block_reason"] == ENGINE_ISSUE_UNAVAILABLE
+    listed_after_orphan = list(messaging.listed)
+
+    _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    assert messaging.listed == listed_after_orphan  # no re-poll
+    assert [
+        e for e in store.read_events("38") if e["event_id"] == "38:engine-issue-unavailable"
+    ] == [e for e in store.read_events("38") if e["kind"] == "ticket.blocked"]
+    assert len(store.read_events("38")) == 1
+
+
+def test_sweep_non_missing_comment_errors_still_raise(config, taskdefs, store, tmp_path):
+    """Auth / other GitHub failures must not silently orphan every ticket."""
+    _feedback_config(config)
+    store.write(lambda txn: txn.set_ticket("7", status="ACTIVE", pinned_comment_id=None))
+    messaging = FakeMessaging(
+        errors_by_subject={
+            "7": RuntimeError(
+                "GitHub GET /repos/agentalec/agent_hq/issues/7/comments -> 401: Bad credentials"
+            )
+        }
+    )
+    adapters = _adapters(
+        tracker=FakeTracker(_details()),
+        agent=FakeAgent(tmp_path / "work"),
+        messaging=messaging,
+    )
+
+    with pytest.raises(RuntimeError, match=r"-> 401"):
+        _sweep(config, taskdefs, store, FakeWorkflowApi(), adapters)
+
+    state = store.read_state("7")
+    assert state["status"] == "ACTIVE"
+    assert state.get("block_reason") is None
+    assert store.read_events("7") == []

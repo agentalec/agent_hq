@@ -2,14 +2,19 @@
 # its own prompt queues `finalize`. It stands the app up with the repo's own tooling inside the
 # devcontainer (Node 22 + docker-in-docker) -- the compose-based `qa-env`
 # adapter stays deferred (docs/roadmap.md), so nothing here binds to it.
-# `screenshots/` is a DIRECTORY artifact (trailing slash): its contents cannot
-# be named in advance, so the engine collects whatever is there, zero or more.
-# They are ledger artifacts like every other output -- kept out of the work
-# repo, which is for product code -- and the engine rewrites qa.md's relative
-# image links to their ledger URLs when it posts qa.md to the PR.
+# `videos/`, `screenshots/`, `qa-drivers/`, and `qa-logs/` are DIRECTORY
+# artifacts (trailing slash): their contents cannot be named in advance, so
+# the engine collects whatever is there, zero or more. They are ledger
+# artifacts like every other output -- kept out of the work repo, which is
+# for product code -- and the engine rewrites qa.md's relative media links to
+# their ledger URLs when it posts qa.md to the PR (WebM + sibling
+# collect-derived GIF → collapsed details preview). `qa-report.json` is
+# required; collect validates honesty (filename convention, no task-id
+# special case): pass needs canonical `videos/{id}.webm` plus matching
+# `qa-drivers/{id}.mjs` and non-empty `qa-logs/{id}.log`.
 id: qa
 version: 1
-description: Verify the change in a running app and reflect screenshots onto the PR.
+description: Verify the change in a running app with live-flow video evidence and reflect it onto the PR.
 trigger: enqueued_by
 context:
   - constitution
@@ -24,7 +29,11 @@ writes_code: false
 outputs:
   artifacts:
     - specs/{ticket}/qa.md
+    - specs/{ticket}/qa-report.json
+    - specs/{ticket}/videos/
     - specs/{ticket}/screenshots/
+    - specs/{ticket}/qa-drivers/
+    - specs/{ticket}/qa-logs/
 budget:
   max_cost_usd: 10
   max_runtime_min: 60

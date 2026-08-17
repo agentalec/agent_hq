@@ -379,6 +379,29 @@ def test_resolve_target_repo_still_returns_a_work_repo():
     assert resolve_target_repo(config, details) == "org/product-be"
 
 
+def test_resolve_target_repo_picks_backend_over_frontend_when_keyword_matches():
+    """Pilot order: FE then BE. A ticket that only says 'backend' must not
+    land on the FE repo; one that only says 'frontend' stays on FE."""
+    config = Config(
+        components={},
+        repos={
+            "agentalec/care_fe": {"product_area": "frontend"},
+            "agentalec/care": {"product_area": "backend"},
+        },
+        projects={"engine_repo": "agentalec/agent_hq"},
+        approvers={},
+        budgets={},
+    )
+    be = TicketDetails(
+        ticket_id="1", title="Fix Django serializer", body="backend API change", labels=[]
+    )
+    fe = TicketDetails(
+        ticket_id="2", title="Button layout", body="frontend polish", labels=[]
+    )
+    assert resolve_target_repo(config, be) == "agentalec/care"
+    assert resolve_target_repo(config, fe) == "agentalec/care_fe"
+
+
 class _FakeWorkflowApi:
     def __init__(self):
         self.triggered: list[str] = []

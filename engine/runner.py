@@ -49,10 +49,12 @@ cancel pending entries. See `engine.handoff.validate_queue` and
 
 from __future__ import annotations
 
+import html
 import json
 import os
 import re
 import subprocess
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -67,16 +69,18 @@ from engine.engine import (
     _handle_failure,
     apply_queue,
     check_claim_active,
+    eligibility_reasons,
     enqueue,
+    has_injection,
     intake_repo,
     resolve_target_repo,
     subst,
 )
 from engine.handoff import _check_containment, validate_queue
 from engine.models import Event, RunState, TaskRun
+from engine.qa_report import format_qa_summary_footer, resolve_qa_media, validate_qa_report
 from engine.state import _now_iso, artifact_ledger_path
 
-_INJECTION_PATTERNS = ("ignore previous instructions", "disregard your")
 _EXECUTE_RESULT_SCHEMA_PATH = (
     Path(__file__).resolve().parent.parent / "schemas" / "execute-result.schema.json"
 )
@@ -152,49 +156,223 @@ def _latest_review_round(review_md: str) -> str:
     ticket-thread park comment). Falls back to the whole text if the reviewer
     left no round headers."""
     idx = review_md.rfind("\n## Round ")
-    return review_md[idx + 1:] if idx != -1 else review_md
+    return review_md[idx + 1 :] if idx != -1 else review_md
 
 
 _IMG_LINK = re.compile(r"(!\[[^\]]*\]\()(?!https?://)/?([^)\s]+)(\))")
+# Non-image markdown links to video evidence (GitHub won't inline-play raw
+# webm in comments; a clear ledger URL is enough). Optional same-line
+# `Evidence:` / `Video:` prefix (bold or plain) is captured so a sibling-gif
+# rewrite can strip it -- otherwise `<details>` lands mid-line and GitHub
+# will not treat it as a collapsible block.
+_VIDEO_LINK = re.compile(
+    r"(?:(?:\*\*)?[Ee]vidence(?:\*\*)?\s*:\s*|(?:\*\*)?[Vv]ideo(?:\*\*)?\s*:\s*)?"
+    r"(?<!!)(\[[^\]]*\]\()(?!https?://)/?([^)\s]+\.(?:webm|mp4))(\))",
+    re.IGNORECASE,
+)
 # Where ledger artifacts are readable from (scripts/checkout-state.sh owns the
 # branch name).
 _STATE_BRANCH = "agent-hq-state"
 
 
+def _ledger_raw_url(engine_repo: str, ticket_id: str, run_id: str, rel: str) -> str:
+    path = artifact_ledger_path(ticket_id, run_id, rel)
+    return f"https://raw.githubusercontent.com/{engine_repo}/{_STATE_BRANCH}/{path}"
+
+
+def _sibling_gif_path(video_rel: str) -> str:
+    """Filename convention: `flow.webm` → `flow.gif` (presentation sibling)."""
+    lower = video_rel.lower()
+    if lower.endswith(".webm"):
+        return video_rel[: -len(".webm")] + ".gif"
+    if lower.endswith(".mp4"):
+        return video_rel[: -len(".mp4")] + ".gif"
+    return video_rel + ".gif"
+
+
+def _webm_to_gif(webm: bytes, max_seconds: int) -> bytes | None:
+    """Best-effort lite GIF for PR embeds. Missing ffmpeg / conversion failure
+    returns None — never fails the QA run (WebM remains the pass evidence)."""
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            inp = Path(tmp) / "in.webm"
+            out = Path(tmp) / "out.gif"
+            inp.write_bytes(webm)
+            # Palettegen + bayer dither keeps size small enough for raw.gh embeds.
+            vf = (
+                "fps=12,scale=960:-1:flags=lanczos,"
+                "split[s0][s1];[s0]palettegen=stats_mode=diff[p];"
+                "[s1][p]paletteuse=dither=bayer:bayer_scale=5"
+            )
+            result = subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    str(inp),
+                    "-t",
+                    str(max(1, int(max_seconds))),
+                    "-vf",
+                    vf,
+                    "-loop",
+                    "0",
+                    str(out),
+                ],
+                capture_output=True,
+                check=False,
+                timeout=180,
+            )
+            if result.returncode != 0 or not out.is_file() or out.stat().st_size == 0:
+                return None
+            return out.read_bytes()
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def _derive_qa_gifs(artifact_contents: dict[str, bytes], max_seconds: int) -> dict[str, bytes]:
+    """Derive sibling `.gif` files for every `.webm` in the ledger (filename
+    convention — no task-id special case). Skips paths that already have a
+    gif; conversion failures are omitted, not raised."""
+    derived: dict[str, bytes] = {}
+    for rel, content in list(artifact_contents.items()):
+        if not rel.lower().endswith(".webm"):
+            continue
+        gif_rel = _sibling_gif_path(rel)
+        if gif_rel in artifact_contents or gif_rel in derived:
+            continue
+        gif = _webm_to_gif(content, max_seconds)
+        if gif is not None:
+            derived[gif_rel] = gif
+    return derived
+
+
+def _concise_reject_detail(detail: str, *, limit: int = 500) -> str:
+    """Collapse whitespace and cap length for PR/issue surfaces."""
+    concise = " ".join(str(detail).split())
+    if len(concise) > limit:
+        return concise[: limit - 3] + "..."
+    return concise
+
+
+def _post_qa_pr_comment(
+    config,
+    adapter_fn,
+    *,
+    pr_ref: str,
+    ticket_id: str,
+    run_id: str,
+    artifact_contents: dict[str, bytes],
+    rejected: bool = False,
+    reason: str | None = None,
+) -> None:
+    """Post qa.md (+ summary footer) on the work PR.
+
+    Success uses event `{run_id}:pr-qa`. A collect-rejected report uses
+    `{run_id}:pr-qa-rejected` and a clearly labeled not-a-pass header — still
+    visible on the PR, never a greenwashed pass.
+    """
+    qa_path = subst("specs/{ticket}/qa.md", ticket_id)
+    if qa_path not in artifact_contents:
+        return
+    if rejected:
+        header = "### agent-hq QA — rejected (not a pass)"
+        if reason:
+            header = f"{header}\n\n**Reject reason:** {_concise_reject_detail(reason)}"
+        event_id = f"{run_id}:pr-qa-rejected"
+    else:
+        header = "### agent-hq QA"
+        event_id = f"{run_id}:pr-qa"
+    body = f"{header}\n\n" + _ledger_image_urls(
+        _as_text(artifact_contents.get(qa_path)),
+        intake_repo(config),
+        ticket_id,
+        run_id,
+        set(artifact_contents),
+    )
+    qa_report_path = subst("specs/{ticket}/qa-report.json", ticket_id)
+    footer = format_qa_summary_footer(artifact_contents.get(qa_report_path))
+    if footer:
+        body = f"{body}\n\n**{footer}**"
+    eng.post_pr_comment(config, adapter_fn, pr_ref, body, event_id)
+
+
 def _ledger_image_urls(
     md: str, engine_repo: str, ticket_id: str, run_id: str, ledger: set[str]
 ) -> str:
-    """Rewrite repo-relative markdown image paths to raw URLs for their copy
-    in this run's ledger namespace on the state branch -- what makes QA's
-    screenshots render when `qa.md` is posted as a PR comment (a relative path
-    renders as a broken image there). Absolute URLs are left alone.
+    """Rewrite repo-relative markdown image (and video) paths to raw URLs for
+    their copy in this run's ledger namespace on the state branch -- what makes
+    QA's screenshots render and video links resolve when `qa.md` is posted as
+    a PR comment (a relative path renders broken there). Absolute URLs are
+    left alone.
 
-    Screenshots live in the ledger with the rest of a run's evidence, not in
-    the work repo: they are QA output, not product code, and committing them
-    to the PR branch would merge them into the product's history. The path is
-    namespaced by producing run, so the link keeps showing what THAT QA pass
-    saw even after a later round.
+    Evidence lives in the ledger with the rest of a run's outputs, not in the
+    work repo: it is QA output, not product code, and committing it to the PR
+    branch would merge it into the product's history. The path is namespaced
+    by producing run, so the link keeps showing what THAT QA pass saw even
+    after a later round.
 
-    An image the run referenced but never produced becomes an explicit
-    "missing" note instead of a URL -- `ledger` is what actually reached the
-    ledger, so the check is against what exists, not what the agent claimed. A
+    A file the run referenced but never produced becomes an explicit "missing"
+    note instead of a URL -- `ledger` is what actually reached the ledger, so
+    the check is against what exists, not what the agent claimed. A
     broken-image icon would read as an infrastructure glitch rather than as
-    what it is: a screenshot that was never taken.
+    what it is: evidence that was never captured.
+
+    When a sibling `.gif` exists for a referenced `.webm` (collect-derived
+    presentation copy), the rewrite emits a blockquoted collapsed `<details>`
+    block with an inline GIF plus a full-fidelity WebM link (the `>` prefix
+    is engine-owned so evidence reads as an aside in PR comments). Without
+    the gif, today's plain WebM markdown link is kept (degraded, still
+    usable — no blockquote).
 
     ponytail: assumes a public engine repo -- raw URLs on a private one need a
     token GitHub's image proxy doesn't have."""
 
-    def rewrite(m: re.Match) -> str:
+    def rewrite_img(m: re.Match) -> str:
         rel = m[2]
         if rel not in ledger:
             return f"_[missing screenshot: `{rel}` — referenced but never produced]_"
-        path = artifact_ledger_path(ticket_id, run_id, rel)
-        return (
-            f"{m[1]}https://raw.githubusercontent.com/{engine_repo}"
-            f"/{_STATE_BRANCH}/{path}{m[3]}"
-        )
+        return f"{m[1]}{_ledger_raw_url(engine_repo, ticket_id, run_id, rel)}{m[3]}"
 
-    return _IMG_LINK.sub(rewrite, md)
+    def rewrite_video(m: re.Match) -> str:
+        rel = m[2]
+        if rel not in ledger:
+            return f"_[missing video: `{rel}` — referenced but never produced]_"
+        webm_url = _ledger_raw_url(engine_repo, ticket_id, run_id, rel)
+        gif_rel = _sibling_gif_path(rel)
+        if gif_rel in ledger:
+            label = html.escape(m[1][1:-2] or Path(rel).stem)
+            slug = html.escape(Path(rel).stem)
+            gif_url = _ledger_raw_url(engine_repo, ticket_id, run_id, gif_rel)
+            # Standalone blockquoted HTML: leading/trailing blank lines so
+            # GitHub treats `<details>` as a collapsible (mid-line prefixes
+            # break it), and `>` so the evidence reads as an aside. The regex
+            # already consumed any same-line Evidence:/Video: prefix.
+            return (
+                f"\n\n> <details>\n"
+                f"> <summary><b>Video: {label}</b> (click to expand)</summary>\n"
+                f">\n"
+                f'> <img width="960" alt="{slug}" src="{gif_url}" />\n'
+                f">\n"
+                f"> [Full recording (webm)]({webm_url})\n"
+                f">\n"
+                f"> </details>\n\n"
+            )
+        return f"{m[1]}{webm_url}{m[3]}"
+
+    out = _IMG_LINK.sub(rewrite_img, md)
+    return _VIDEO_LINK.sub(rewrite_video, out)
+
+
+def _ledger_artifacts(
+    txn, ticket_id: str, run_id: str, artifact_contents: dict[str, bytes]
+) -> None:
+    """Persist staged artifact bytes under tickets/<id>/artifacts/<run_id>/.
+
+    Shared by the success path and the artifact_rejected fail path (reject
+    keeps evidence on the state branch for tracing without setting
+    `run.artifacts`, which would unlock `_inputs_ready` handoff children)."""
+    for rel_path, content in artifact_contents.items():
+        txn.write_artifact(ticket_id, run_id, rel_path, content)
 
 
 def _pr_body(config, ticket_id: str, ticket_body: str) -> str:
@@ -251,7 +429,7 @@ def _write_parent_diff(worktree: Path, base: str | None, tip: str) -> bool:
     base..tip. Computed in EXECUTE's own clone -- prepare has no clone, so it
     only passes these commit ids via bundle.json's `diff_base`/`diff_head`.
     Best-effort — a missing commit or non-git worktree just skips the file."""
-    args = ["git", "-C", str(worktree), "diff", *( [f"{base}..{tip}"] if base else [tip] )]
+    args = ["git", "-C", str(worktree), "diff", *([f"{base}..{tip}"] if base else [tip])]
     try:
         result = subprocess.run(args, capture_output=True, text=True, check=False)
     except OSError:
@@ -265,8 +443,14 @@ def _write_parent_diff(worktree: Path, base: str | None, tip: str) -> bool:
 
 
 def _assemble_prompt(
-    taskdef, details, rework: str | None, parent: dict | None = None, run: dict | None = None,
-    has_setup: bool = False, taskdefs: dict | None = None, config: Config | None = None,
+    taskdef,
+    details,
+    rework: str | None,
+    parent: dict | None = None,
+    run: dict | None = None,
+    has_setup: bool = False,
+    taskdefs: dict | None = None,
+    config: Config | None = None,
 ) -> str:
     parts = [
         f"# Task: {taskdef['id']}",
@@ -310,13 +494,29 @@ def _assemble_prompt(
         parts.append("## Context\n" + "\n\n".join(context))
 
     outputs = [
-        subst(path, details.ticket_id)
-        for path in taskdef.get("outputs", {}).get("artifacts", [])
+        subst(path, details.ticket_id) for path in taskdef.get("outputs", {}).get("artifacts", [])
     ]
     if outputs:
         parts.append(
             "## Required outputs\nCreate every file below before finishing:\n"
             + "\n".join(f"- `{path}`" for path in outputs)
+        )
+    # Filename convention: a run that must produce qa-report.json also gets
+    # the repo's evidence-media policy (defaults: video on, screenshots off).
+    if (
+        any(p.endswith("qa-report.json") for p in outputs)
+        and config is not None
+        and run is not None
+    ):
+        media = resolve_qa_media((config.repos or {}).get(run.get("repo") or "", {}))
+        video_dir = subst("specs/{ticket}/videos/", details.ticket_id)
+        parts.append(
+            "## Evidence media policy\n"
+            f"- `video`: {str(media['video']).lower()} — when true, every `pass` needs "
+            f"a live-flow clip under `{video_dir}`\n"
+            f"- `screenshots`: {str(media['screenshots']).lower()} — optional stills; "
+            "required for pass only when video is false\n"
+            f"- `video_max_seconds`: {media['video_max_seconds']} — soft cap per clip"
         )
     if parent:
         lineage = [f"- parent task: {parent.get('task_id')}"]
@@ -340,10 +540,12 @@ def _assemble_prompt(
         # menu has to say what a task IS, or an agent picking off it is guessing
         # from a name. Generated from the library, so adding a task lists it.
         queueable = [
-            subst(f"`{tid}` -- {taskdefs[tid].get('description', '')}", details.ticket_id).rstrip(" -")
+            subst(f"`{tid}` -- {taskdefs[tid].get('description', '')}", details.ticket_id).rstrip(
+                " -"
+            )
             for tid in sorted(taskdefs or {})
         ]
-        max_entries = (config.budgets.get("max_queue_length", 8) if config else 8)
+        max_entries = config.budgets.get("max_queue_length", 8) if config else 8
         control_lines = [
             "Before finishing, write `.agent-hq/control.json` -- exactly one JSON object:",
             (
@@ -497,7 +699,8 @@ def _expand_declared(root: Path, declared: list[str]) -> list[str]:
             continue  # absent or unsafe: an empty directory artifact is fine
         base = root / rel
         paths.extend(
-            str(p.relative_to(root)) for p in sorted(base.rglob("*"))
+            str(p.relative_to(root))
+            for p in sorted(base.rglob("*"))
             if p.is_file() and p.resolve().is_relative_to(root)
         )
     return paths
@@ -524,7 +727,10 @@ def _stage_files(worktree: Path, candidates: list[str], staging: Path) -> None:
 def _prepare(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskdef) -> dict:
     run_id = run["run_id"]
     claimed = store.claim_run(
-        ticket_id, run_id, now_iso, taskdef["budget"]["max_runtime_min"],
+        ticket_id,
+        run_id,
+        now_iso,
+        taskdef["budget"]["max_runtime_min"],
         in_flight_cap=config.budgets["in_flight_cap"],
     )
     if not claimed:
@@ -533,7 +739,9 @@ def _prepare(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskd
     # Re-read the just-claimed run (deadline is now set).
     _, run, _ = _find_run(store, taskdefs, run_id)
 
-    tracker = adapter_fn("tracker", config.components["tracker"]["adapter"], repo=intake_repo(config))
+    tracker = adapter_fn(
+        "tracker", config.components["tracker"]["adapter"], repo=intake_repo(config)
+    )
     details = tracker.fetch_ticket(ticket_id)
     repo = run.get("repo") or resolve_target_repo(config, details) or next(iter(config.repos))
 
@@ -543,9 +751,7 @@ def _prepare(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskd
     }
     gate_post = taskdef.get("gates", {}).get("post")
     if gate_post:
-        bindings["gate"] = resolve_binding(
-            config, "gate", gate_post[0]["adapter"], details.labels
-        )
+        bindings["gate"] = resolve_binding(config, "gate", gate_post[0]["adapter"], details.labels)
 
     ticket_doc = store.read_state(ticket_id) or {}
     # base_commit resolution (Task 12): the first task on a repo branches
@@ -572,21 +778,33 @@ def _prepare(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskd
     parent = None
     if input_from:
         parent = next(
-            (r for r in ticket_doc.get("runs", []) if r["run_id"] == input_from), None,
+            (r for r in ticket_doc.get("runs", []) if r["run_id"] == input_from),
+            None,
         )
 
     # A ROOT run had no declaring queue entry to choose its inputs, so it
-    # inherits whatever its input source recorded. A queued entry's
-    # `input_artifacts` is its declarer's decision -- including a deliberately
-    # empty one -- and is never overridden here.
+    # inherits everything in its input source's ledger namespace -- declared
+    # outputs *plus* files collect snapshotted there when that run forwarded
+    # them in an accepted handoff (e.g. review's ledger holds review.md and
+    # the forwarded spec.md / qa-plan.md). `parent.artifacts` alone is too
+    # narrow: a comment-queued qa would see only review.md and miss the
+    # criteria it must execute. A queued entry's `input_artifacts` is its
+    # declarer's decision -- including a deliberately empty one -- and is
+    # never overridden here.
     inherited = run.get("input_artifacts") or []
     if parent and not run.get("parent_run_id") and not inherited:
-        inherited = list(parent.get("artifacts") or [])
+        inherited = store.list_artifacts(ticket_id, parent["run_id"])
+        if not inherited:
+            inherited = list(parent.get("artifacts") or [])
 
     store.write(
         lambda txn: txn.update_run(
-            ticket_id, run_id, bindings=bindings, base_commit=base_commit,
-            input_from_run_id=input_from, input_artifacts=list(inherited),
+            ticket_id,
+            run_id,
+            bindings=bindings,
+            base_commit=base_commit,
+            input_from_run_id=input_from,
+            input_artifacts=list(inherited),
         )
     )
     run = {**run, "input_from_run_id": input_from, "input_artifacts": list(inherited)}
@@ -594,16 +812,24 @@ def _prepare(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskd
     rework = _rework_comments(store, ticket_id, run_id)
     declared = [subst(a, ticket_id) for a in taskdef.get("outputs", {}).get("artifacts", [])]
     setup_cmd = eng.resolve_setup(config, repo, taskdef["id"])
+    format_cmd = eng.resolve_format(config, repo, taskdef["id"])
     bundle = {
         "prompt": _assemble_prompt(
-            taskdef, details, rework, parent, run={**run, "repo": repo},
-            has_setup=bool(setup_cmd), taskdefs=taskdefs, config=config,
+            taskdef,
+            details,
+            rework,
+            parent,
+            run={**run, "repo": repo},
+            has_setup=bool(setup_cmd),
+            taskdefs=taskdefs,
+            config=config,
         ),
         "tools": taskdef.get("tools", []),
         "deadline": run.get("deadline"),
         "repo": repo,
         "base_commit": base_commit,
         "setup": setup_cmd,
+        "format": format_cmd,
         "output_paths": declared,
     }
     # Only when the immediate parent left a commit -- the parent's diff,
@@ -622,13 +848,52 @@ def _prepare(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskd
     return {"claimed": True, "prepare_dir": str(prep_dir), "bundle": bundle}
 
 
-# Never handed to a setup command. It is operator-authored config, not agent
-# output, so it is trusted further than the agent child -- but it has no
+# Never handed to a setup/format command. It is operator-authored config, not
+# agent output, so it is trusted further than the agent child -- but it has no
 # business holding the engine's own credentials either, and in execute those
 # are absent anyway (`permissions: {}`). Deliberately duplicated rather than
 # imported from an adapter: engine code names no concrete adapter (CLAUDE.md).
 _SETUP_FORBIDDEN_ENV = ("AGENT_HQ_TOKEN", "GITHUB_TOKEN", "GH_TOKEN", "COPILOT_GITHUB_TOKEN")
 _SETUP_LOG_TAIL = 2000
+
+
+def _run_worktree_shell(
+    command: str | None, worktree: Path, deadline: str | None, *, kind: str
+) -> dict | None:
+    """Run an operator-authored shell command in the worktree. Returns None on
+    success, else a normalized execute-result `failure`. Used for setup
+    (before the agent) and format (after a successful agent run, before the
+    work patch). Credentials stripped; bounded by the run's deadline."""
+    if not command:
+        return None
+
+    env = {k: v for k, v in os.environ.items() if k not in _SETUP_FORBIDDEN_ENV}
+    timeout = _seconds_until(deadline)
+    try:
+        proc = subprocess.run(
+            ["bash", "-lc", command],
+            cwd=worktree,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        detail = f"{kind} timed out after {timeout:.0f}s: {command}"
+    else:
+        if proc.returncode == 0:
+            return None
+        tail = (proc.stderr or proc.stdout or "")[-_SETUP_LOG_TAIL:]
+        detail = f"{kind} failed (exit {proc.returncode}): {command}\n{tail}"
+
+    return {
+        "outcome": "failure",
+        "usage_known": True,
+        "cost_usd": 0.0,
+        "tokens": 0,
+        "detail": detail,
+    }
 
 
 def _run_setup(command: str | None, worktree: Path, deadline: str | None) -> dict | None:
@@ -643,36 +908,21 @@ def _run_setup(command: str | None, worktree: Path, deadline: str | None) -> dic
     fails in a different way each time, and is exactly the part that never
     needed judgment. Bounded by the run's own deadline -- a hanging
     `docker compose up` must not consume the whole run silently."""
-    if not command:
-        return None
+    return _run_worktree_shell(command, worktree, deadline, kind="setup")
 
-    env = {k: v for k, v in os.environ.items() if k not in _SETUP_FORBIDDEN_ENV}
-    timeout = _seconds_until(deadline)
-    try:
-        proc = subprocess.run(
-            ["bash", "-lc", command], cwd=worktree, env=env,
-            capture_output=True, text=True, timeout=timeout, check=False
-)
-    except subprocess.TimeoutExpired:
-        detail = f"setup timed out after {timeout:.0f}s: {command}"
-    else:
-        if proc.returncode == 0:
-            return None
-        tail = (proc.stderr or proc.stdout or "")[-_SETUP_LOG_TAIL:]
-        detail = f"setup failed (exit {proc.returncode}): {command}\n{tail}"
 
-    return {
-        "outcome": "failure", "usage_known": True, "cost_usd": 0.0, "tokens": 0,
-        "detail": detail,
-    }
+def _run_format(command: str | None, worktree: Path, deadline: str | None) -> dict | None:
+    """Run the repo's configured format command after a successful agent run
+    and before the work patch is materialized. Same failure shape as setup:
+    non-zero exit fails the run through ordinary retry accounting."""
+    return _run_worktree_shell(command, worktree, deadline, kind="format")
 
 
 def _seconds_until(deadline: str | None) -> float | None:
     if not deadline:
         return None
     remaining = (
-        datetime.strptime(deadline, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
-        - datetime.now(UTC)
+        datetime.strptime(deadline, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC) - datetime.now(UTC)
     ).total_seconds()
     return max(remaining, 1.0)
 
@@ -704,6 +954,17 @@ def _execute(config, store, adapter_fn, run, taskdef) -> dict:
     (out_dir / "execute-result.json").write_text(json.dumps(result, indent=2) + "\n")
 
     if result.get("outcome") == "success":
+        # Format after the agent and before the work patch, only for tasks that
+        # write product code and only when repos.yml configures a command.
+        # Collect must not reinstall or reformat -- this is execute-only.
+        if taskdef.get("writes_code", True) and bundle.get("format"):
+            format_failure = _run_format(bundle.get("format"), worktree, bundle.get("deadline"))
+            if format_failure is not None:
+                (out_dir / "execute-result.json").write_text(
+                    json.dumps(format_failure, indent=2) + "\n"
+                )
+                return format_failure
+
         control_src = worktree / ".agent-hq" / "control.json"
         if control_src.exists():
             (out_dir / "control.json").write_text(control_src.read_text())
@@ -757,14 +1018,20 @@ def _collect(
     out_dir = execute_dir_for(config, run_id)
     result_path = out_dir / "execute-result.json"
     default_result = {
-        "outcome": execute_outcome or "failure", "usage_known": False, "cost_usd": None, "tokens": None,
+        "outcome": execute_outcome or "failure",
+        "usage_known": False,
+        "cost_usd": None,
+        "tokens": None,
     }
     result = json.loads(result_path.read_text()) if result_path.exists() else default_result
 
     schema_reason = _validate_execute_result(result)
     if schema_reason is not None:
         result = {
-            "outcome": "failure", "usage_known": False, "cost_usd": None, "tokens": None,
+            "outcome": "failure",
+            "usage_known": False,
+            "cost_usd": None,
+            "tokens": None,
             "detail": schema_reason,
         }
 
@@ -804,14 +1071,18 @@ def _collect(
     if outcome != "success":
         eng._mark_failed(store, ticket_id, run_id, "run.failed", "failed")
         _handle_failure(
-            store, config, taskdefs, taskdef, ticket_id, {**run, "state": "FAILED"}, adapter_fn,
+            store,
+            config,
+            taskdefs,
+            taskdef,
+            ticket_id,
+            {**run, "state": "FAILED"},
+            adapter_fn,
             block_on_unknown_usage=True,
         )
         return result
 
-    _collect_success(
-        config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskdef, out_dir
-    )
+    _collect_success(config, taskdefs, store, adapter_fn, now_iso, ticket_id, run, taskdef, out_dir)
     return result
 
 
@@ -841,30 +1112,64 @@ def _validate_staged_declared(staging_dir: Path, declared: list[str]) -> str | N
     return None
 
 
-def _fail_execute_artifact(store, config, taskdefs, taskdef, ticket_id, run, adapter_fn, reason: str) -> None:
+def _fail_execute_artifact(
+    store,
+    config,
+    taskdefs,
+    taskdef,
+    ticket_id,
+    run,
+    adapter_fn,
+    reason: str,
+    artifact_contents: dict[str, bytes] | None = None,
+) -> None:
     """A transport-boundary failure discovered AFTER a trustworthy
-    execute-result (a declared output didn't survive transport, or the work
-    patch failed to `git apply`): same retry-per-budget/BLOCK policy as any
-    other run failure, audited distinctly from `handoff.rejected` since
-    control.json's handoffs were never even reached."""
+    execute-result (a declared output didn't survive transport, a dishonest
+    qa-report.json, or the work patch failed to `git apply`): same
+    retry-per-budget/BLOCK policy as any other run failure, audited
+    distinctly from `handoff.rejected` since control.json's handoffs were
+    never even reached.
+
+    When `artifact_contents` is non-empty, those bytes are still written to
+    the failed run's ledger namespace in the same transaction as
+    `run.artifact_rejected` — tracing evidence without setting
+    `run.artifacts` (which stays `[]` so reject evidence cannot unlock
+    handoff children via `_inputs_ready`). Does not land, post PR comments,
+    or mark SUCCEEDED."""
     run_id = run["run_id"]
+    contents = artifact_contents or {}
     eng._mark_failed(store, ticket_id, run_id, "run.failed", "failed")
-    store.write(
-        lambda txn: txn.append_event(
+
+    def fn(txn) -> None:
+        if contents:
+            _ledger_artifacts(txn, ticket_id, run_id, contents)
+        txn.append_event(
             ticket_id,
             Event(
-                event_id=f"{run_id}:artifact_rejected", kind="run.artifact_rejected",
-                ticket_id=ticket_id, run_id=run_id, detail=reason,
+                event_id=f"{run_id}:artifact_rejected",
+                kind="run.artifact_rejected",
+                ticket_id=ticket_id,
+                run_id=run_id,
+                detail=reason,
             ).to_dict(),
         )
-    )
+
+    store.write(fn)
     _handle_failure(
-        store, config, taskdefs, taskdef, ticket_id, {**run, "state": "FAILED"}, adapter_fn,
+        store,
+        config,
+        taskdefs,
+        taskdef,
+        ticket_id,
+        {**run, "state": "FAILED"},
+        adapter_fn,
         block_on_unknown_usage=True,
     )
 
 
-def _fail_control_invalid(store, config, taskdefs, taskdef, ticket_id, run, adapter_fn, reason: str) -> None:
+def _fail_control_invalid(
+    store, config, taskdefs, taskdef, ticket_id, run, adapter_fn, reason: str
+) -> None:
     """A control.json that the pure validator (or apply_queue' state-
     dependent guards) rejected: same retry-per-budget/BLOCK policy as any
     other run failure, plus one generic handoff.rejected audit event (no
@@ -875,13 +1180,22 @@ def _fail_control_invalid(store, config, taskdefs, taskdef, ticket_id, run, adap
         lambda txn: txn.append_event(
             ticket_id,
             Event(
-                event_id=f"{run_id}:handoff_rejected", kind="handoff.rejected", ticket_id=ticket_id,
-                run_id=run_id, detail=reason,
+                event_id=f"{run_id}:handoff_rejected",
+                kind="handoff.rejected",
+                ticket_id=ticket_id,
+                run_id=run_id,
+                detail=reason,
             ).to_dict(),
         )
     )
     _handle_failure(
-        store, config, taskdefs, taskdef, ticket_id, {**run, "state": "FAILED"}, adapter_fn,
+        store,
+        config,
+        taskdefs,
+        taskdef,
+        ticket_id,
+        {**run, "state": "FAILED"},
+        adapter_fn,
         block_on_unknown_usage=True,
     )
 
@@ -892,8 +1206,12 @@ def _block_from_control(store, config, adapter_fn, ticket_id, run_id, reason: st
         txn.append_event(
             ticket_id,
             Event(
-                event_id=f"{run_id}:blocked", kind="run.blocked", ticket_id=ticket_id,
-                run_id=run_id, state=RunState.BLOCKED, detail=reason,
+                event_id=f"{run_id}:blocked",
+                kind="run.blocked",
+                ticket_id=ticket_id,
+                run_id=run_id,
+                state=RunState.BLOCKED,
+                detail=reason,
             ).to_dict(),
         )
         txn.set_block(ticket_id, reason=reason, source="task", interrupted_run=run_id)
@@ -920,7 +1238,9 @@ def _collect_success(
     if not check_claim_active(store.read_state(ticket_id), run_id):
         return
 
-    tracker = adapter_fn("tracker", config.components["tracker"]["adapter"], repo=intake_repo(config))
+    tracker = adapter_fn(
+        "tracker", config.components["tracker"]["adapter"], repo=intake_repo(config)
+    )
     details = tracker.fetch_ticket(ticket_id)
     repo = run.get("repo") or resolve_target_repo(config, details) or next(iter(config.repos))
     base_commit = run.get("base_commit")
@@ -930,7 +1250,11 @@ def _collect_success(
 
     control = _read_control(out_dir / "control.json")
     accepted, reason = validate_queue(
-        control, taskdef=taskdef, taskdefs=taskdefs, config=config, worktree=staging_dir,
+        control,
+        taskdef=taskdef,
+        taskdefs=taskdefs,
+        config=config,
+        worktree=staging_dir,
         run=TaskRun.from_dict(run),
     )
     if reason is not None:
@@ -949,7 +1273,24 @@ def _collect_success(
     declared = [subst(a, ticket_id) for a in taskdef.get("outputs", {}).get("artifacts", [])]
     bad = _validate_staged_declared(staging_dir, declared)
     if bad is not None:
-        _fail_execute_artifact(store, config, taskdefs, taskdef, ticket_id, run, adapter_fn, bad)
+        # Best-effort: keep whatever did arrive so reject evidence is
+        # inspectable on the state branch (may be empty).
+        partial = {
+            rel_path: (staging_dir / rel_path).read_bytes()
+            for rel_path in _expand_declared(staging_dir.resolve(), declared)
+            if (staging_dir / rel_path).is_file()
+        }
+        _fail_execute_artifact(
+            store,
+            config,
+            taskdefs,
+            taskdef,
+            ticket_id,
+            run,
+            adapter_fn,
+            bad,
+            artifact_contents=partial,
+        )
         return
 
     # Ledger for THIS run: every declared output, plus any inherited
@@ -968,6 +1309,81 @@ def _collect_success(
         if (staging_dir / rel_path).is_file()
     }
 
+    # Filename convention (like review.md / qa.md posting): when a run produced
+    # qa-report.json, collect refuses a dishonest report before SUCCEEDED /
+    # green `:pr-qa`. Rejected evidence is still ledgered and announced on the
+    # PR as `:pr-qa-rejected` (not a pass).
+    qa_report_path = subst("specs/{ticket}/qa-report.json", ticket_id)
+    media = resolve_qa_media(config.repos.get(repo, {}))
+    if qa_report_path in artifact_contents:
+        bad_report = validate_qa_report(
+            artifact_contents[qa_report_path],
+            ledger=set(artifact_contents),
+            media=media,
+            ticket_id=ticket_id,
+            contents=artifact_contents,
+        )
+        if bad_report is not None:
+            # Retain evidence + announce on the PR before failing: a near-miss
+            # (e.g. 6/7 pass with one dishonest criterion) must not vanish —
+            # but the run stays FAILED (no soft-pass, no SUCCEEDED, no :pr-qa).
+            for gif_rel, gif_bytes in _derive_qa_gifs(
+                artifact_contents, media["video_max_seconds"]
+            ).items():
+                artifact_contents[gif_rel] = gif_bytes
+                if gif_rel not in declared:
+                    declared.append(gif_rel)
+
+            def retain_rejected(txn) -> None:
+                # Ledger only — do not set run.artifacts (must stay [] so
+                # reject evidence cannot unlock `_inputs_ready` handoffs).
+                _ledger_artifacts(txn, ticket_id, run_id, artifact_contents)
+
+            store.write(retain_rejected)
+
+            existing_work_repo = next(
+                (
+                    wr
+                    for wr in (store.read_state(ticket_id) or {}).get("work_repos", [])
+                    if wr["repo"] == repo
+                ),
+                None,
+            )
+            pr_ref = (existing_work_repo or {}).get("pr_ref")
+            if pr_ref:
+                _post_qa_pr_comment(
+                    config,
+                    adapter_fn,
+                    pr_ref=pr_ref,
+                    ticket_id=ticket_id,
+                    run_id=run_id,
+                    artifact_contents=artifact_contents,
+                    rejected=True,
+                    reason=bad_report,
+                )
+            _fail_execute_artifact(
+                store,
+                config,
+                taskdefs,
+                taskdef,
+                ticket_id,
+                run,
+                adapter_fn,
+                bad_report,
+                artifact_contents=artifact_contents,
+            )
+            return
+
+    # Filename convention: any `.webm` in the ledger gets a lite sibling `.gif`
+    # for PR embeds (GitHub raw image proxy animates GIF reliably; WebM stays
+    # the pass evidence). Best-effort — missing ffmpeg must not fail the run.
+    for gif_rel, gif_bytes in _derive_qa_gifs(
+        artifact_contents, media["video_max_seconds"]
+    ).items():
+        artifact_contents[gif_rel] = gif_bytes
+        if gif_rel not in declared:
+            declared.append(gif_rel)
+
     # -- Land the work patch on the ticket's stable per-issue branch. This
     # is the ONLY place a work-repo clone/push happens (Task 12: execute
     # never holds a push credential) -- a fresh clone, `git apply` the
@@ -985,12 +1401,22 @@ def _collect_success(
             agent.apply_patch(collect_clone, patch_text)
         except RuntimeError as exc:
             _fail_execute_artifact(
-                store, config, taskdefs, taskdef, ticket_id, run, adapter_fn,
+                store,
+                config,
+                taskdefs,
+                taskdef,
+                ticket_id,
+                run,
+                adapter_fn,
                 f"work patch failed to apply: {exc}",
+                artifact_contents=artifact_contents,
             )
             return
     land = agent.land_branch(
-        run_id, collect_clone, branch, base_branch,
+        run_id,
+        collect_clone,
+        branch,
+        base_branch,
         _commit_message(
             config, taskdef["id"], ticket_id, control.get("summary", ""), details.title, run_id
         ),
@@ -1001,13 +1427,20 @@ def _collect_success(
     # second one -- at most one PR per repo per ticket, opened only once the
     # work has actually landed.
     existing_work_repo = next(
-        (wr for wr in (store.read_state(ticket_id) or {}).get("work_repos", []) if wr["repo"] == repo),
+        (
+            wr
+            for wr in (store.read_state(ticket_id) or {}).get("work_repos", [])
+            if wr["repo"] == repo
+        ),
         None,
     )
     pr_ref = (existing_work_repo or {}).get("pr_ref")
     if land["landed"] and taskdef.get("opens_pr") and not pr_ref:
         pr_ref = agent.open_draft_pr(
-            repo, branch, base_branch, details.title or f"hq: {ticket_id}",
+            repo,
+            branch,
+            base_branch,
+            details.title or f"hq: {ticket_id}",
             _pr_body(config, ticket_id, details.body),
         )
 
@@ -1030,21 +1463,30 @@ def _collect_success(
             txn.append_event(
                 ticket_id,
                 Event(
-                    event_id=f"{run_id}:branch_conflict", kind="run.blocked", ticket_id=ticket_id,
-                    run_id=run_id, state=RunState.BLOCKED, detail="branch_conflict",
+                    event_id=f"{run_id}:branch_conflict",
+                    kind="run.blocked",
+                    ticket_id=ticket_id,
+                    run_id=run_id,
+                    state=RunState.BLOCKED,
+                    detail="branch_conflict",
                 ).to_dict(),
             )
-            txn.set_block(ticket_id, reason="branch_conflict", source="task", interrupted_run=run_id)
+            txn.set_block(
+                ticket_id, reason="branch_conflict", source="task", interrupted_run=run_id
+            )
             result["blocked"] = True
             return
 
         output_commit = land["head"]
         txn.upsert_work_repo(
-            ticket_id, repo, branch=branch, base_branch=base_branch, recorded_head=output_commit,
+            ticket_id,
+            repo,
+            branch=branch,
+            base_branch=base_branch,
+            recorded_head=output_commit,
             pr_ref=pr_ref,
         )
-        for rel_path, content in artifact_contents.items():
-            txn.write_artifact(ticket_id, run_id, rel_path, content)
+        _ledger_artifacts(txn, ticket_id, run_id, artifact_contents)
 
         # A declared gate always posts its request comment, auto-approved or
         # not -- that comment is where the run's artifacts become readable to
@@ -1099,7 +1541,8 @@ def _collect_success(
 
         if accepted and gate_entry and not auto_approved:
             txn.update_run(
-                ticket_id, run_id,
+                ticket_id,
+                run_id,
                 artifacts=declared,
                 output_commit=output_commit,
                 pr_ref=pr_ref,
@@ -1123,8 +1566,11 @@ def _collect_success(
                 txn.append_event(
                     ticket_id,
                     Event(
-                        event_id=f"{run_id}:{h.key}:proposed", kind="handoff.proposed",
-                        ticket_id=ticket_id, run_id=run_id, detail=h.reason,
+                        event_id=f"{run_id}:{h.key}:proposed",
+                        kind="handoff.proposed",
+                        ticket_id=ticket_id,
+                        run_id=run_id,
+                        detail=h.reason,
                     ).to_dict(),
                 )
             result["gated"] = True
@@ -1134,8 +1580,10 @@ def _collect_success(
             txn.append_event(
                 ticket_id,
                 Event(
-                    event_id=f"{run_id}:auto_approval", kind="gate.decided",
-                    ticket_id=ticket_id, run_id=run_id,
+                    event_id=f"{run_id}:auto_approval",
+                    kind="gate.decided",
+                    ticket_id=ticket_id,
+                    run_id=run_id,
                     detail=(
                         f"auto-approved by task config (would have asked "
                         f"{gate_entry.get('approvers')})"
@@ -1150,21 +1598,31 @@ def _collect_success(
             txn.append_event(
                 ticket_id,
                 Event(
-                    event_id=f"{run_id}:{h.key}:proposed", kind="handoff.proposed",
-                    ticket_id=ticket_id, run_id=run_id, detail=h.reason,
+                    event_id=f"{run_id}:{h.key}:proposed",
+                    kind="handoff.proposed",
+                    ticket_id=ticket_id,
+                    run_id=run_id,
+                    detail=h.reason,
                 ).to_dict(),
             )
         if accepted or cancel_keys or cancel_pending:
             applied_ids, apply_reason = apply_queue(
-                txn, config, taskdefs, ticket_id, run, accepted,
-                cancel_keys=cancel_keys, cancel_pending=cancel_pending,
+                txn,
+                config,
+                taskdefs,
+                ticket_id,
+                run,
+                accepted,
+                cancel_keys=cancel_keys,
+                cancel_pending=cancel_pending,
             )
             result["applied_ids"] = applied_ids
             result["apply_reason"] = apply_reason
             if apply_reason is not None:
                 return
         txn.update_run(
-            ticket_id, run_id,
+            ticket_id,
+            run_id,
             artifacts=declared,
             output_commit=output_commit,
             pr_ref=pr_ref,
@@ -1189,7 +1647,13 @@ def _collect_success(
         # so this takes the ordinary invalid-control path (retry per budget,
         # then block), same as a schema violation.
         _fail_control_invalid(
-            store, config, taskdefs, taskdef, ticket_id, run, adapter_fn,
+            store,
+            config,
+            taskdefs,
+            taskdef,
+            ticket_id,
+            run,
+            adapter_fn,
             result["reject_reason"],
         )
         return
@@ -1206,7 +1670,11 @@ def _collect_success(
     if result.get("blocked"):
         eng.set_status_label(config, adapter_fn, ticket_id, "BLOCKED")
         _escalate(
-            store, config, adapter_fn, ticket_id, run_id,
+            store,
+            config,
+            adapter_fn,
+            ticket_id,
+            run_id,
             "Work branch conflict: agent-hq/"
             f"{ticket_id} moved unexpectedly since this run started; blocked pending operator review.",
         )
@@ -1220,14 +1688,23 @@ def _collect_success(
                 txn.append_event(
                     ticket_id,
                     Event(
-                        event_id=f"{run_id}:{h.key}:rejected", kind="handoff.rejected",
-                        ticket_id=ticket_id, run_id=run_id, detail=h.reason,
+                        event_id=f"{run_id}:{h.key}:rejected",
+                        kind="handoff.rejected",
+                        ticket_id=ticket_id,
+                        run_id=run_id,
+                        detail=h.reason,
                     ).to_dict(),
                 )
 
         store.write(reject_txn)
         _handle_failure(
-            store, config, taskdefs, taskdef, ticket_id, {**run, "state": "FAILED"}, adapter_fn,
+            store,
+            config,
+            taskdefs,
+            taskdef,
+            ticket_id,
+            {**run, "state": "FAILED"},
+            adapter_fn,
             block_on_unknown_usage=True,
         )
         return
@@ -1241,25 +1718,27 @@ def _collect_success(
     review_path = subst("specs/{ticket}/review.md", ticket_id)
     if pr_ref and review_path in declared:
         eng.post_pr_comment(
-            config, adapter_fn, pr_ref,
+            config,
+            adapter_fn,
+            pr_ref,
             "### agent-hq review\n\n"
             + _latest_review_round(_as_text(artifact_contents.get(review_path))),
             f"{run_id}:pr-review",
         )
 
     # Same convention for qa.md, whole file rather than a single round -- its
-    # screenshots landed in this run's own patch, so their repo-relative links
-    # are rewritten to raw URLs on the commit that just landed them.
+    # evidence landed in this run's ledger, so repo-relative image/video links
+    # are rewritten to raw state-branch URLs. A qa-report.json footer (when
+    # present) adds honest pass/fail/not-exercised counts.
     qa_path = subst("specs/{ticket}/qa.md", ticket_id)
     if pr_ref and qa_path in declared:
-        eng.post_pr_comment(
-            config, adapter_fn, pr_ref,
-            "### agent-hq QA\n\n"
-            + _ledger_image_urls(
-                _as_text(artifact_contents.get(qa_path)),
-                intake_repo(config), ticket_id, run_id, set(artifact_contents),
-            ),
-            f"{run_id}:pr-qa",
+        _post_qa_pr_comment(
+            config,
+            adapter_fn,
+            pr_ref=pr_ref,
+            ticket_id=ticket_id,
+            run_id=run_id,
+            artifact_contents=artifact_contents,
         )
 
     _complete_if_queue_empty(
@@ -1284,7 +1763,9 @@ def intake_ticket(issue_ref: str, event_key: str, config, taskdefs, store, adapt
     rejection happens before any state/artifact write."""
     adapter_fn = adapter_fn or eng._default_adapter_fn(config)
 
-    tracker = adapter_fn("tracker", config.components["tracker"]["adapter"], repo=intake_repo(config))
+    tracker = adapter_fn(
+        "tracker", config.components["tracker"]["adapter"], repo=intake_repo(config)
+    )
     details = tracker.fetch_ticket(issue_ref.rsplit("#", 1)[-1])
     ticket_id = details.ticket_id
 
@@ -1295,7 +1776,7 @@ def intake_ticket(issue_ref: str, event_key: str, config, taskdefs, store, adapt
     if existing and any(r["state"] in eng.NON_TERMINAL for r in existing.get("runs", [])):
         return "skipped"
 
-    reasons = _eligibility_reasons(config, details)
+    reasons = eligibility_reasons(config, details)
     event_id = f"intake:{event_key}"
     if reasons:
         body = "This ticket cannot be picked up automatically:\n" + "\n".join(
@@ -1322,7 +1803,7 @@ def intake_ticket(issue_ref: str, event_key: str, config, taskdefs, store, adapt
         eng.set_status_label(config, adapter_fn, ticket_id, "BLOCKED")
         return "blocked"
 
-    if _has_injection(details):
+    if has_injection(details):
         body = (
             "This ticket cannot be picked up automatically: possible "
             "prompt-injection patterns were detected in the ticket text. A "
@@ -1363,8 +1844,12 @@ def intake_ticket(issue_ref: str, event_key: str, config, taskdefs, store, adapt
     # a reason for a ticket that is no longer blocked.
     store.write(
         lambda txn: txn.set_ticket(
-            ticket_id, status="ACTIVE", pinned_comment_id=pinned_id,
-            block_reason=None, block_source=None, interrupted_run_id=None,
+            ticket_id,
+            status="ACTIVE",
+            pinned_comment_id=pinned_id,
+            block_reason=None,
+            block_source=None,
+            interrupted_run_id=None,
         )
     )
     eng.set_status_label(config, adapter_fn, ticket_id, "ACTIVE")
@@ -1388,25 +1873,3 @@ def intake_ticket(issue_ref: str, event_key: str, config, taskdefs, store, adapt
     # inherits a repo (never null for a wired task).
     store.write(lambda txn: txn.update_run(ticket_id, run_id, repo=repo))
     return "enqueued"
-
-
-def _eligibility_reasons(config, details) -> list[str]:
-    intake_cfg = config.projects.get("intake", {})
-    reasons: list[str] = []
-    min_words = intake_cfg.get("min_body_words", 0)
-    if len(details.body.split()) < min_words:
-        reasons.append(f"description too short (needs >= {min_words} words)")
-    for label in intake_cfg.get("excluded_labels", []):
-        if label in details.labels:
-            reasons.append(f"excluded label '{label}'")
-    if resolve_target_repo(config, details) is None:
-        reasons.append("no product area matches a configured repo")
-    public_safe_label = config.projects.get("public_safe_label")
-    if config.projects.get("public") and public_safe_label not in details.labels:
-        reasons.append(f"missing required label '{public_safe_label}' (public deployment)")
-    return reasons
-
-
-def _has_injection(details) -> bool:
-    text = f"{details.title} {details.body}".lower()
-    return any(pattern in text for pattern in _INJECTION_PATTERNS)

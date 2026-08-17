@@ -110,6 +110,11 @@ jobs:
         with:
           name: execute-out-${{ inputs.run_id }}
           path: _execute/${{ inputs.run_id }}
+      # QA collect derives lite GIFs from ledger WebMs for PR comment embeds
+      # (engine/runner._derive_qa_gifs). Missing ffmpeg degrades to a WebM
+      # link — install it so the happy path works on ubuntu-latest.
+      - name: Install ffmpeg (QA webm→gif)
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Collect (failure/timeout stops here; success applies + lands + pushes)
         run: >
           bash scripts/run-phases.sh "${{ inputs.run_id }}" collect

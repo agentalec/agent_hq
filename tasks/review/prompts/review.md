@@ -43,9 +43,28 @@ Never edit the implementation — your tools are read-only.
 ## Decide what runs next (see Control output below)
 
 - **No blockers remain** (only should-fix / nits, or clean): queue `qa`,
-  forwarding `specs/{ticket}/spec.md` and `specs/{ticket}/review.md`. QA
-  exercises the change in a running app and screenshots it onto the PR before
-  `finalize` — you do not queue `finalize` yourself.
+  forwarding `specs/{ticket}/spec.md`, `specs/{ticket}/review.md`, and
+  `specs/{ticket}/qa-plan.md` (when you were given it — QA executes that
+  traversal plan with live-flow video before `finalize`). Suite/CI /
+  "Playwright must pass" notes belong in Test plan / notes, not as live
+  Action/Expect criteria; if the plan mixed them in, flag that as a
+  should-fix so the next implement round keeps them out of the live list.
+
+  **Data setup is a review gate (blocker, not should-fix).** For every live
+  criterion that needs non-default data, `qa-plan.md` must include a concrete,
+  provenance-backed **Data setup**: fixtures (with IDs when known), ordered
+  UI recipe, and — when the entity graph is deep — facility-scoped API paths
+  from `src/types/**/*Api.ts` plus proven bodies. Missing, vague, or unproven
+  Data setup (no citation to fixture / existing test seed / form schema /
+  valueset; invented LOINC/SNOMED; “QA may UI-create” without numbered steps)
+  is a **blocker**. Compare the plan against seed logic in changed or nearby
+  `tests/**` (`beforeAll`, `apiSetup`, helpers): payload or coded-value
+  mismatches with a known-working test seed are **blockers**. Fixture-
+  independent acceptance criteria must remain independently executable in the
+  plan — one blocked seed graph must not suppress sibling criteria that
+  fixtures already satisfy.
+
+  You do not queue `finalize` yourself.
 - **Blockers remain and N < 3**: queue `implement`, forwarding
   `specs/{ticket}/spec.md` and `specs/{ticket}/review.md`; the entry's
   `reason` must name the blockers to fix.

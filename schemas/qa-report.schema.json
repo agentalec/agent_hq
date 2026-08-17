@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-hq.dev/schemas/qa-report.schema.json",
+  "title": "QA structured report",
+  "description": "Machine-checkable honesty record for a QA run. Collect validates this when specs/{ticket}/qa-report.json is present (filename convention, no task-id special case).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["criteria", "summary"],
+  "properties": {
+    "criteria": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "title",
+          "verdict",
+          "evidence_kind",
+          "blocker",
+          "blocker_category",
+          "plan_steps_run",
+          "videos",
+          "screenshots"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Short slug matching the criterion section"
+          },
+          "title": { "type": "string" },
+          "verdict": {
+            "type": "string",
+            "enum": ["pass", "fail", "not-exercised"]
+          },
+          "evidence_kind": {
+            "type": "string",
+            "enum": [
+              "live-flow",
+              "code-inspection",
+              "emulator-limit",
+              "device-limit",
+              "unreachable"
+            ]
+          },
+          "blocker": {
+            "type": ["string", "null"],
+            "description": "Human-readable blocker; required non-empty for not-exercised and blocked fail"
+          },
+          "blocker_category": {
+            "anyOf": [
+              { "type": "null" },
+              {
+                "type": "string",
+                "enum": [
+                  "app-not-loading",
+                  "auth-failure",
+                  "missing-facility-context",
+                  "missing-permission",
+                  "missing-test-data",
+                  "navigation-mismatch",
+                  "video-failure",
+                  "screenshot-failure",
+                  "validation-error",
+                  "emulator-limit",
+                  "device-limit",
+                  "no-qa-plan",
+                  "other"
+                ]
+              }
+            ]
+          },
+          "plan_steps_run": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "videos": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "screenshots": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "seed_attempt": {
+            "description": "Required by validate_qa_report when verdict is not-exercised and blocker_category is missing-test-data. method none (or empty summary) is rejected at collect.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["method", "summary"],
+            "properties": {
+              "method": {
+                "type": "string",
+                "enum": ["ui", "api", "both", "none"]
+              },
+              "summary": {
+                "type": "string",
+                "description": "What was tried (routes, entities, errors)"
+              }
+            }
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["all_passed", "pass", "fail", "not_exercised"],
+      "properties": {
+        "all_passed": { "type": "boolean" },
+        "pass": { "type": "integer", "minimum": 0 },
+        "fail": { "type": "integer", "minimum": 0 },
+        "not_exercised": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

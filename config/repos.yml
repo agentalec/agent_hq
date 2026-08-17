@@ -9,17 +9,30 @@
 # every run should not cost agent requests to perform. A non-zero exit fails
 # the run through the ordinary retry path; leave the agent anything it needs
 # to know at `.agent-hq/setup-notes.md`.
-agentalec/care:
-  role: be
-  branch_prefix: agent-hq
-  product_area: backend
-  base_branch: develop
+#
+# `format` is the same shape, run AFTER a successful agent and BEFORE the work
+# patch is materialized (execute only; collect does not reformat). Only used
+# when the task `writes_code`.
 agentalec/care_fe:
   role: fe
   branch_prefix: agent-hq
   product_area: frontend
   base_branch: develop
+  # Evidence media for QA (defaults if omitted: video true, screenshots false).
+  # Escape hatch for stills-only: video: false, screenshots: true.
+  qa:
+    video: true
+    screenshots: false
+    video_max_seconds: 120
   setup:
+    # Install deps so implement can run tools and so format's prettier resolves.
+    # HUSKY=0: git hooks have no business installing in a throwaway worktree.
+    # Do not set NODE_ENV=production here -- that skips devDependencies and
+    # breaks husky's prepare script the same way it would without HUSKY=0.
+    implement: |
+      set -euo pipefail
+      export CI=1 HUSKY=0
+      npm ci --prefer-offline
     # Mirrors care_fe's own .github/workflows/playwright.yaml -- the recipe
     # the repo already maintains for E2E, not one invented here. Everything
     # lands under .agent-hq/ (excluded from the work patch) so none of it can
@@ -44,18 +57,389 @@ agentalec/care_fe:
       NODE_ENV=production npm run build
       npx playwright install --with-deps chromium
       NODE_ENV=production npx playwright test --project=setup --workers=1
+      cat > .agent-hq/qa-auth.mjs <<'QAAUTH'
+      import fs from "node:fs";
+      import path from "node:path";
+
+      const ACCESS_TOKEN_KEY = "care_access_token";
+      const REFRESH_TOKEN_KEY = "care_refresh_token";
+      const DEFAULT_ORIGIN = "http://localhost:4000";
+      const SIZE = { width: 1440, height: 900 };
+
+      function _readState(authFile) {
+        return JSON.parse(fs.readFileSync(authFile, "utf-8"));
+      }
+
+      function _originLocalStorage(state, origin = DEFAULT_ORIGIN) {
+        if (!Array.isArray(state.origins)) state.origins = [];
+        let entry = state.origins.find((o) => o.origin === origin);
+        if (!entry) {
+          entry = { origin, localStorage: [] };
+          state.origins.push(entry);
+        }
+        if (!Array.isArray(entry.localStorage)) entry.localStorage = [];
+        return entry.localStorage;
+      }
+
+      function _getToken(localStorage, name) {
+        return localStorage.find((item) => item.name === name)?.value ?? null;
+      }
+
+      function _setToken(localStorage, name, value) {
+        const idx = localStorage.findIndex((item) => item.name === name);
+        if (idx === -1) localStorage.push({ name, value });
+        else localStorage[idx].value = value;
+      }
+
+      /** Read Bearer access token from a Playwright storageState file. */
+      export function readAccessToken(authFile = "tests/.auth/user.json") {
+        const state = _readState(authFile);
+        const ls = _originLocalStorage(state);
+        const token = _getToken(ls, ACCESS_TOKEN_KEY);
+        if (!token) throw new Error(`No ${ACCESS_TOKEN_KEY} in ${authFile}`);
+        return token;
+      }
+
+      /**
+       * POST /api/v1/auth/token/refresh/ and rewrite care_access_token /
+       * care_refresh_token in origins[].localStorage for localhost:4000.
+       * Logs status only — never tokens. Returns { ok, status }.
+       */
+      export async function refreshJwt({
+        authFile = "tests/.auth/user.json",
+        apiBase = process.env.REACT_CARE_API_URL || "http://localhost:9000",
+      } = {}) {
+        const state = _readState(authFile);
+        const ls = _originLocalStorage(state);
+        const refresh = _getToken(ls, REFRESH_TOKEN_KEY);
+        if (!refresh) {
+          console.log("[qa-auth] refreshJwt: no refresh token in storageState");
+          return { ok: false, status: 0 };
+        }
+        const res = await fetch(`${apiBase}/api/v1/auth/token/refresh/`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refresh }),
+        });
+        console.log(`[qa-auth] refreshJwt: status ${res.status}`);
+        if (!res.ok) return { ok: false, status: res.status };
+        const data = await res.json();
+        if (data.access) _setToken(ls, ACCESS_TOKEN_KEY, data.access);
+        if (data.refresh) _setToken(ls, REFRESH_TOKEN_KEY, data.refresh);
+        fs.writeFileSync(authFile, JSON.stringify(state, null, 2));
+        return { ok: true, status: res.status };
+      }
+
+      /**
+       * Mirror tests/setup/auth.setup.ts: /login → fill → wait for Hey …
+       * then persist context.storageState({ path }).
+       */
+      export async function uiLogin(
+        page,
+        {
+          username = "admin",
+          password = "admin",
+          authFile = "tests/.auth/user.json",
+          baseUrl = DEFAULT_ORIGIN,
+        } = {},
+      ) {
+        console.log("[qa-auth] uiLogin: starting UI login");
+        await page.goto(`${baseUrl}/login`);
+        await page.getByRole("textbox", { name: /username/i }).fill(username);
+        await page.getByLabel(/password/i).fill(password);
+        await page.getByRole("button", { name: /login/i }).click();
+        await page.waitForURL((url) => !url.pathname.includes("/login"), {
+          timeout: 15000,
+        });
+        const hey = page.getByRole("heading", { name: /^Hey .+/ });
+        const sidebar = page.locator('[data-sidebar="sidebar"]');
+        await Promise.race([
+          hey.waitFor({ state: "visible", timeout: 15000 }),
+          sidebar.waitFor({ state: "visible", timeout: 15000 }),
+        ]);
+        await page.context().storageState({ path: authFile });
+        console.log("[qa-auth] uiLogin: storageState saved");
+      }
+
+      async function _looksLikeLogin(page) {
+        const staffTab = page.getByText(/Log in as Staff/i);
+        const username = page.getByRole("textbox", { name: /username/i });
+        const password = page.getByLabel(/^password$/i);
+        return (
+          (await staffTab.isVisible().catch(() => false)) ||
+          ((await username.isVisible().catch(() => false)) &&
+            (await password.isVisible().catch(() => false)))
+        );
+      }
+
+      async function _shellReady(page) {
+        const spinner = page.locator(".animate-spin, [data-loading='true']");
+        if (await spinner.first().isVisible().catch(() => false)) {
+          await spinner
+            .first()
+            .waitFor({ state: "hidden", timeout: 15000 })
+            .catch(() => {});
+        }
+        if (await _looksLikeLogin(page)) return false;
+        const sidebar = page.locator('[data-sidebar="sidebar"]');
+        const hey = page.getByRole("heading", { name: /^Hey .+/ });
+        const nav = page.getByRole("link", {
+          name: /^(Overview|Patients)$/i,
+        });
+        return (
+          (await sidebar.isVisible().catch(() => false)) ||
+          (await hey.isVisible().catch(() => false)) ||
+          (await nav.first().isVisible().catch(() => false))
+        );
+      }
+
+      async function _injectTokens(context, authFile) {
+        const state = _readState(authFile);
+        const ls = _originLocalStorage(state);
+        const access = _getToken(ls, ACCESS_TOKEN_KEY);
+        const refresh = _getToken(ls, REFRESH_TOKEN_KEY);
+        await context.addInitScript(
+          ({ access, refresh, ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY }) => {
+            if (access) localStorage.setItem(ACCESS_TOKEN_KEY, access);
+            if (refresh) localStorage.setItem(REFRESH_TOKEN_KEY, refresh);
+          },
+          { access, refresh, ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY },
+        );
+      }
+
+      /**
+       * Ordered auth recovery for every care_fe QA driver:
+       * refreshJwt → newContext(storageState) → initScript tokens → goto →
+       * if login UI, uiLogin even when refresh was 200 → fresh context →
+       * shell proof. Throws auth-failure only after both were attempted.
+       */
+      export async function openAuthedContext(
+        browser,
+        {
+          authFile = "tests/.auth/user.json",
+          apiBase = process.env.REACT_CARE_API_URL || "http://localhost:9000",
+          baseUrl = DEFAULT_ORIGIN,
+          gotoPath,
+          facilityId,
+          credentials = { username: "admin", password: "admin" },
+          videoDir = ".agent-hq/pw-videos",
+          size = SIZE,
+        } = {},
+      ) {
+        const targetPath =
+          gotoPath ||
+          (facilityId
+            ? `/facility/${facilityId}/overview`
+            : (() => {
+                const idFile = path.resolve("tests/.auth/facilityMeta.json");
+                if (fs.existsSync(idFile)) {
+                  const meta = JSON.parse(fs.readFileSync(idFile, "utf-8"));
+                  const fid =
+                    typeof meta === "string"
+                      ? meta
+                      : meta.id || meta.facilityId;
+                  if (fid) return `/facility/${fid}/overview`;
+                }
+                throw new Error(
+                  "openAuthedContext: pass gotoPath or facilityId (or seed tests/.auth/facilityMeta.json)",
+                );
+              })());
+
+        const refreshResult = await refreshJwt({ authFile, apiBase });
+        console.log(
+          `[qa-auth] openAuthedContext: refresh ok=${refreshResult.ok} status=${refreshResult.status}`,
+        );
+
+        async function openOnce() {
+          const context = await browser.newContext({
+            storageState: authFile,
+            viewport: size,
+            recordVideo: { dir: videoDir, size },
+          });
+          await _injectTokens(context, authFile);
+          const page = await context.newPage();
+          await page.goto(`${baseUrl}${targetPath}`);
+          return { context, page };
+        }
+
+        let { context, page } = await openOnce();
+        let didUiLogin = false;
+
+        if (await _looksLikeLogin(page)) {
+          console.log(
+            "[qa-auth] openAuthedContext: login UI visible after refresh — running uiLogin",
+          );
+          await uiLogin(page, { ...credentials, authFile, baseUrl });
+          didUiLogin = true;
+          await context.close();
+          ({ context, page } = await openOnce());
+        }
+
+        if (!(await _shellReady(page))) {
+          if (!didUiLogin) {
+            console.log(
+              "[qa-auth] openAuthedContext: shell not ready — attempting uiLogin",
+            );
+            await uiLogin(page, { ...credentials, authFile, baseUrl });
+            didUiLogin = true;
+            await context.close();
+            ({ context, page } = await openOnce());
+          }
+        }
+
+        if (!(await _shellReady(page))) {
+          const msg =
+            `auth-failure: shell unauthenticated after refresh ` +
+            `(ok=${refreshResult.ok}, status=${refreshResult.status}) ` +
+            `and uiLogin (attempted=${didUiLogin})`;
+          console.log(`[qa-auth] ${msg}`);
+          await context.close().catch(() => {});
+          throw new Error(msg);
+        }
+
+        console.log("[qa-auth] openAuthedContext: authenticated shell proven");
+        return { context, page, size };
+      }
+      QAAUTH
       cat > .agent-hq/setup-notes.md <<'NOTES'
       # Environment (prepared for you -- do not rebuild it)
 
       - care backend: http://localhost:9000, seeded via `make load-fixtures`
       - Start the frontend with `npm run preview` -> http://localhost:4000
         (already built; do NOT point it at any non-localhost API)
-      - Signed-in browser state: `tests/.auth/user.json`. Load it with
-        `browser.newContext({ storageState: 'tests/.auth/user.json' })` --
-        the login and a seeded facility/patient/questionnaire already exist.
+      - **Auth helper (required):** import from setup-emitted
+        `.agent-hq/qa-auth.mjs` (path from `specs/<ticket>/qa-drivers/`):
+          `import { openAuthedContext, readAccessToken } from '../../../.agent-hq/qa-auth.mjs';`
+        Use `openAuthedContext(browser, { facilityId | gotoPath })` to open
+        the recorded context — it already does JWT refresh, matching
+        viewport/`recordVideo` size `{ width: 1440, height: 900 }`,
+        storageState, initScript token inject, facility goto, and UI login
+        when the SPA still shows login even after refresh 200. Use
+        `readAccessToken(...)` for API seed Bearer headers.
+        **Ban:** throw / `auth-failure` on first login-tab sighting without
+        going through `openAuthedContext` recovery. **Ban:** treating
+        facility URL or “refresh 200” as shell proof (ticket 41: refresh
+        success + login UI ⇒ still UI login). Do not reimplement a weaker
+        refresh-only path.
+      - Signed-in browser state: `tests/.auth/user.json`. Prefer the helper
+        above; if you must open a context yourself, load it with a shared
+        size so viewport and recordVideo match exactly (mismatched sizes
+        grey-letterbox the clip — do not set video size with a smaller or
+        default viewport):
+          const size = { width: 1440, height: 900 };
+          browser.newContext({
+            storageState: 'tests/.auth/user.json',
+            viewport: size,
+            recordVideo: { dir: '.agent-hq/pw-videos', size },
+          })
+        -- sidebar is md+; 1440×900 is the standard. The login and a
+        seeded facility/patient/questionnaire already exist.
+        After `page = await context.newPage()`, and **before driving** each
+        recorded flow, enable the native cursor/click overlay (Playwright
+        1.61+; this repo resolves 1.61.1):
+          `await page.screencast.showActions({ cursor: "pointer" });`
+        Do not inject a custom DOM cursor. After each criterion, copy the
+        finished `.webm` into `specs/<ticket>/videos/<criterion-id>.webm`
+        (basename must equal the criterion `id` in qa-report.json; keep
+        clips under ~30s). Collect may derive a sibling lite `.gif` for
+        the PR comment; you only need the WebM.
+      - Auth shell readiness (hard gate before facility criteria): after
+        `openAuthedContext` (or storageState + navigate to a facility route
+        from getFacilityId() / fixtures), wait for spinner gone AND
+        (facility nav label like Overview/Patients OR
+        `[data-sidebar="sidebar"]` OR `Hey …` visible) and login tabs
+        absent. Ban: treating "URL has no /login" or title "CARE" as auth.
+        If Username / Password / “Log in as Staff” appears on a facility
+        URL → run helper UI login recovery before scoring — do not throw
+        yet.
+      - Mid-session token recovery (before any auth-failure): prefer
+        `.agent-hq/qa-auth.mjs` (`openAuthedContext` / `refreshJwt` /
+        `uiLogin`). Trigger on login UI **or** API `token_not_valid` /
+        expired — not only API expiry. After refresh: open a **new**
+        context before retrying UI. Refresh success + login UI still visible
+        ⇒ still UI login (ticket 41). Ban filing auth-failure without
+        refresh + UI re-login attempts (log status codes, not secrets).
+        Ban PR/report claims of UI login without matching `qa-logs` lines.
       - Chromium is installed. Drive it with Playwright directly; you do not
-        need to add tests to the repo's suite.
+        need to add tests to the repo's suite. Screenshots are optional; video
+        is the required pass evidence unless the repo disables it.
+      - Seed ladder: fixtures → execute numbered qa-plan UI Data setup steps
+        → facility-scoped API escape. Start qa-drivers/{id}.mjs +
+        qa-logs/{id}.log before seeding; append fixture/UI/API/auth attempts.
+      - Discovery (thin): prefer qa-plan Data setup; then
+        `tests/PLAYWRIGHT_GUIDE.md` + `rg` under `tests/` for beforeAll /
+        apiSetup / helpers; then `src/types/**/*Api.ts` (verbatim paths).
+        Valueset codes via UI picker — never invent LOINC. On API 4xx, retry
+        from a known-working test payload before missing-test-data;
+        proven-plan validation reject → validation-error.
+      - API seed (escape hatch): auth via `readAccessToken` from
+        `.agent-hq/qa-auth.mjs` (or `getApiUrl` / `getApiHeaders` from
+        `tests/helper/utils.ts`) with `tests/.auth/user.json`. Facility-scoped
+        paths live in `src/types/**/*Api.ts` — prefer paths pasted in
+        qa-plan Data setup; else see the QA prompt discovery recipe. Never
+        invent unscoped `/api/v1/<resource>/` routes.
       NOTES
+  format:
+    # Prettier only the files this run changed vs agent-hq-base (the clone tip
+    # tagged at prepare_worktree). Exclude .agent-hq; --ignore-unknown skips
+    # binaries and anything prettier has no parser for.
+    implement: |
+      set -euo pipefail
+      mapfile -t files < <(
+        {
+          git diff --name-only --diff-filter=ACMR agent-hq-base || true
+          git ls-files --others --exclude-standard || true
+        } | grep -v '^\.agent-hq/' | sort -u
+      )
+      if ((${#files[@]})); then
+        npx prettier --write --ignore-unknown -- "${files[@]}"
+      fi
+
+# Care Django backend (API). Intake routes tickets whose title/body/labels
+# contain the product_area keyword (first match wins across this file).
+# Spec/breakdown may also pin this repo on a queue entry's `repo` field.
+agentalec/care:
+  role: be
+  branch_prefix: agent-hq
+  product_area: backend
+  base_branch: develop
+  # No setup.qa: do not copy care_fe's Playwright/npm stack onto an API repo.
+  # Live QA for BE needs its own recipe later (API tests / fixtures), not FE E2E.
+  setup:
+    # Install ruff only so format.implement can run. Full pipenv is skipped:
+    # care requires Python 3.13 and the execute container is 3.11, so a full
+    # install would fail or lie. Implement edits the tree; do not assume
+    # manage.py/tests are runnable here.
+    implement: |
+      set -euo pipefail
+      python -m pip install --quiet "ruff==0.14.14"
+      cat > .agent-hq/setup-notes.md <<'NOTES'
+      # Environment (prepared for you -- do not rebuild it)
+
+      - Formatter: `ruff` is installed (format.implement runs after you on
+        changed `.py` files). Prefer writing code that already matches
+        care's ruff config in `pyproject.toml`.
+      - Full pipenv / Django deps are NOT installed. The execute image is
+        Python 3.11; this repo requires 3.13. Do not run `pipenv install`,
+        `manage.py`, or the test suite expecting a live DB -- edit against
+        the checked-out tree and let CI exercise the stack.
+      NOTES
+  format:
+    # Ruff format + autofix only the files this run changed vs agent-hq-base.
+    # Mirrors care's ruff-fix-all / format workflow; scoped like FE prettier.
+    implement: |
+      set -euo pipefail
+      mapfile -t files < <(
+        {
+          git diff --name-only --diff-filter=ACMR agent-hq-base || true
+          git ls-files --others --exclude-standard || true
+        } | grep -E '\.py$' | grep -v '^\.agent-hq/' | sort -u
+      )
+      if ((${#files[@]})); then
+        python -m ruff format -- "${files[@]}"
+        python -m ruff check --fix -- "${files[@]}"
+      fi
+
 agentalec/care_docs:
   role: docs
   branch_prefix: agent-hq

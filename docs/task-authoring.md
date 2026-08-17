@@ -171,8 +171,9 @@ There is exactly one artifact namespace and one input source:
 - **Directory artifacts.** An `outputs.artifacts` entry ending in `/` is a
   directory: the engine collects whatever files it holds, recursively, zero
   or more (`engine.runner._expand_declared`). Use it for output a task cannot
-  name in advance -- `qa` writes one screenshot per acceptance criterion it
-  managed to exercise, which is not a list anyone can write into `task.yml`.
+  name in advance -- `qa` writes one video (and optional screenshots) per
+  acceptance criterion it managed to exercise, which is not a list anyone can
+  write into `task.yml`.
   Unlike a plain entry they are never *required*: an empty or absent
   directory is a valid run. They expand to concrete paths before anything is
   recorded, so `run.artifacts`, handoff forwarding, and `_inputs_ready` only
@@ -186,13 +187,25 @@ There is exactly one artifact namespace and one input source:
   own, credential-free Actions job, hardening plan Task 12) then
   materializes them into its worktree (`engine.runner._materialize_inputs`),
   so a child reads exactly what its handoff accepted, never a sibling's
-  file.
+  file. A **root** run (intake's first task, or a comment inserted with no
+  declaring handoff) has no such list: prepare inherits every file in the
+  input source's ledger namespace (`GitJsonStateStore.list_artifacts`) --
+  declared outputs plus anything that run forwarded into its own directory
+  -- not only `run.artifacts`, which omits the forwarded set.
 - The **work patch** excludes both: execute's `materialize_work_patch`
   diffs out every declared output path and every inherited
   `input_artifacts` path before handing the patch to collect, which
   `git apply`s it to a fresh clone and lands it on the target branch
   (`engine.runner._collect_success`). Neither is code; both live only in
   the ledger.
+- **Reject-time retention.** When collect emits `run.artifact_rejected`
+  (missing declared outputs, dishonest `qa-report.json`, or a work patch
+  that failed to apply) and staged artifact bytes exist, those bytes are
+  still written under `tickets/<id>/artifacts/<run_id>/` for tracing.
+  The failed run keeps `artifacts: []` so reject evidence cannot unlock
+  handoff children via `_inputs_ready`. GIF derive, landing, and green
+  `:pr-qa` posting remain success-only; a rejected `qa-report.json` may
+  still announce `:pr-qa-rejected` when a work PR already exists.
 
 Every artifact path a handoff proposes is **containment-checked** against
 the worktree root before it's trusted anywhere (absolute paths, `..`
@@ -255,12 +268,19 @@ agentalec/care_fe:
     qa: |
       make -C .agent-hq/care up load-fixtures
       npm ci && npm run build
+  format:
+    implement: |
+      # prettier --write on git-changed files only (exclude .agent-hq)
 ```
 
-The engine runs it in the worktree before the agent starts
+The engine runs setup in the worktree before the agent starts
 (`engine.runner._run_setup`), and resolution is
 `setup[task_id] or setup["default"] or None`
-(`engine.engine.resolve_setup`). It lives in config, not in a prompt or in
+(`engine.engine.resolve_setup`). An optional `format` map has the same shape
+and resolution (`engine.engine.resolve_format`): after a successful agent run
+on a task with `writes_code: true`, execute runs it before
+`materialize_work_patch` (`engine.runner._run_format`). Collect does not
+reinstall deps or reformat. Both live in config, not in a prompt or in
 engine code, so a different project configures a different command without
 touching either.
 
@@ -277,8 +297,8 @@ The command runs with the engine's credentials stripped
 (`AGENT_HQ_TOKEN`/`GITHUB_TOKEN`/`GH_TOKEN`/`COPILOT_GITHUB_TOKEN`): it is
 operator-authored config and so trusted further than agent output, but it has
 no business holding tokens. It is bounded by the run's own deadline — note
-that deadline starts at *claim* time, so setup time comes out of the task's
-`budget.max_runtime_min`.
+that deadline starts at *claim* time, so setup (and format) time comes out of
+the task's `budget.max_runtime_min`.
 
 Anything the agent needs to know goes in `.agent-hq/setup-notes.md` (URLs,
 credentials, paths). When a setup command is configured, the assembled prompt
@@ -358,13 +378,13 @@ somewhere unexpected.
 | arch-plan | Defined; **no prompt queues it**. Nothing to activate beyond a prompt that names it -- any task in the library is queueable. |
 | arch-approval | Defined; **no prompt queues it**. Confirms the plan artifacts, no changes; gated (`default`). |
 | breakdown | Defined; **no prompt queues it**. Would queue one `implement` entry per affected repo. |
-| implement | Routed through. `opens_pr: true`; its prompt queues `review`. |
-| review | Routed through. Its prompt loops back to `implement` while blockers remain (prompt-capped at 3 rounds; on the cap it queues nothing and the engine posts the accumulated `review.md` findings to the thread, parking awaiting-human with the PR left in draft), else queues `qa`. Round memory is `review.md` forwarded around the loop as an input artifact. Every review round also reflects its latest-round findings onto the work-repo PR as a comment (`engine.engine.post_pr_comment`, in the credentialed collect phase -- the read-only agent can't, PD-5). |
+| implement | Routed through. `opens_pr: true`; its prompt queues `review`. Writes required `specs/{ticket}/qa-plan.md` (research map + Action/Expect/Record steps per user-facing criterion) and forwards it with `spec.md` so QA never invents a click path from scratch. |
+| review | Routed through. Its prompt loops back to `implement` while blockers remain (prompt-capped at 3 rounds; on the cap it emits `outcome: blocked` and the engine posts the accumulated `review.md` findings to the thread, parking awaiting-human with the PR left in draft), else queues `qa`, forwarding `spec.md`, `review.md`, and `qa-plan.md`. Round memory is `review.md` forwarded around the loop as an input artifact. Every review round also reflects its latest-round findings onto the work-repo PR as a comment (`engine.engine.post_pr_comment`, in the credentialed collect phase -- the read-only agent can't, PD-5). |
 | finalize | Routed through, and named by `config.projects.final_task`: writes `summary.md`, queues nothing, and its completion is what finishes the ticket (see "Where the route ends"). Still no task-name special case in the engine -- the name lives in config, and pointing `final_task` elsewhere moves the endpoint. |
 | clinical | Defined; **no prompt queues it**. Gated (`clinical-reviewers`, `default` adapter). |
 | poll | Converted, defined, **unwired** -- needs the P1 reaction-based `poll` adapter (`docs/roadmap.md`); no task currently hands off to it. |
 | docs | Defined; **no prompt queues it** -- it belongs between `qa` and `finalize`, so `qa`'s prompt would name it. |
-| qa | Routed through. Its prompt always queues `finalize` -- `qa` reports, it never gates. `writes_code: false`, so the engine discards its work patch outright: everything it leaves in the worktree is scratch, and an instruction to keep scratch under `.agent-hq/` is advisory where discarding is not. Stands the app up with the work repo's own tooling inside the devcontainer and screenshots each acceptance criterion; it declares **no** `components` port, so the deferred `qa-env` binding (`docs/ports/qa-env.md`) is still not required. Screenshots are ledger artifacts under the **directory artifact** `specs/{ticket}/screenshots/` -- kept out of the work repo, which is for product code -- and collect rewrites `qa.md`'s relative image links to their state-branch URLs before posting it to the PR (`engine.runner._ledger_image_urls`). |
+| qa | Routed through. Its prompt always queues `finalize` -- `qa` reports, it never gates. `writes_code: false`, so the engine discards its work patch outright: everything it leaves in the worktree is scratch (including throwaway drivers), and an instruction to keep scratch under `.agent-hq/` is advisory where discarding is not. Stands the app up with the work repo's own tooling inside the devcontainer and executes `qa-plan.md` **serially** — one isolated Playwright driver per criterion (`node specs/{ticket}/qa-drivers/{id}.mjs`), never parallel workers or a shared recording across ACs — with `recordVideo` (default evidence; `viewport` must equal `recordVideo.size`, care_fe 1440×900 — mismatched sizes grey-letterbox) plus `page.screencast.showActions({ cursor: "pointer" })` so clicks are visible; it declares **no** `components` port, so the deferred `qa-env` binding (`docs/ports/qa-env.md`) is still not required. Required `qa-report.json` is validated at collect (`engine.qa_report.validate_qa_report`, filename convention — no task-id special case): a `pass` needs `live-flow` + canonical `specs/{ticket}/videos/{id}.webm` (exclusive ownership), matching ledgered `qa-drivers/{id}.mjs`, and non-empty `qa-logs/{id}.log` (repo `qa.video`, default true); screenshots stay optional (`qa.screenshots`). `not-exercised` + `missing-test-data` also requires `seed_attempt` (`method` `ui`\|`api`\|`both` + non-empty `summary` of the seed ladder), **non-empty `plan_steps_run`**, and the same canonical driver + non-empty log receipts; a prose-only claim (empty steps / missing receipts) fails collect so retry gets rework feedback. Any `fail` / `not-exercised` with non-empty `plan_steps_run` needs those receipts too; a true pre-execution blocker (e.g. `no-qa-plan`) may stay log-free. Auth readiness is prompt/setup-notes only — care_fe setup emits `.agent-hq/qa-auth.mjs` (`openAuthedContext`: refresh → new context → UI login even when refresh was 200 if login UI remains → shell proof); ban throw-before-login and URL/refresh-as-auth; the engine does not special-case CARE login paths. Seed recipes and selectors come from per-ticket `qa-plan.md` plus worktree discovery (`tests/PLAYWRIGHT_GUIDE.md`, `tests/**`, `src/types/**/*Api.ts`), not a static CARE routes encyclopedia under checklists. Directory artifacts `videos/`, `screenshots/`, `qa-drivers/`, and `qa-logs/` are kept out of the work repo (ledger only); collect best-effort derives a lite sibling `.gif` per WebM (`ffmpeg`, presentation-only — missing gif does not fail the run), rewrites `qa.md`'s relative media links into **blockquoted** collapsed `<details>` GIF previews (or a plain WebM link when no gif), and appends summary counts (`3 pass / 2 not-exercised`) before posting to the PR (`engine.runner._ledger_image_urls`). On `artifact_rejected`, staged bytes (report/videos/drivers/logs) are still ledgered under the failed run for tracing while `run.artifacts` stays empty. A dishonest/incomplete report still fails the run (no soft-pass), but collect ledgers the evidence and posts a clearly labeled **rejected (not a pass)** PR comment (`:pr-qa-rejected`) when a work PR already exists. |
 
 None of the above is a name the engine special-cases; every row describes a
 task-graph state (wired vs. defined-but-unwired), not an engine code path.

@@ -17,6 +17,32 @@
         "type": "object",
         "description": "Shell commands run in the worktree before the agent starts, per task id. 'default' applies to any task without its own entry; a task id overrides it. Structured setup belongs here, not in a prompt: it costs no agent requests, fails loudly, and is the same every run. The command may leave notes for the agent at .agent-hq/setup-notes.md.",
         "additionalProperties": { "type": "string" }
+      },
+      "format": {
+        "type": "object",
+        "description": "Shell commands run in the worktree after a successful agent run and before the work patch is materialized, per task id. Same resolution as setup (task id, else 'default', else none). Only runs when the task writes_code. Use this for repo formatters (e.g. prettier on changed files) so CI lint does not fail the PR for style the agent skipped.",
+        "additionalProperties": { "type": "string" }
+      },
+      "qa": {
+        "type": "object",
+        "description": "Evidence media policy for QA runs against this repo. Defaults when omitted: video=true, screenshots=false, video_max_seconds=120. At least one of video or screenshots must be true after defaults (enforced at config load).",
+        "additionalProperties": false,
+        "properties": {
+          "video": {
+            "type": "boolean",
+            "description": "When true (default), a pass requires live-flow video in the ledger"
+          },
+          "screenshots": {
+            "type": "boolean",
+            "description": "When true, optional stills are encouraged; when video is false, screenshots become the required evidence mode"
+          },
+          "video_max_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 120,
+            "description": "Soft cap for Playwright recordVideo clips"
+          }
+        }
       }
     }
   }
