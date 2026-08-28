@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-11T13:14:26Z",
+  "generated_at": "2026-08-28T07:02:30Z",
   "tickets": [
     {
       "ticket_id": "11",
@@ -7584,6 +7584,15 @@
       "block_source": "intake",
       "interrupted_run_id": null,
       "comments_polled_at": "2026-08-03T20:01:17Z"
+    },
+    {
+      "ticket_id": "92",
+      "pinned_comment_id": 5449489959,
+      "status": "BLOCKED",
+      "runs": [],
+      "block_reason": "description too short (needs >= 30 words)",
+      "block_source": "intake",
+      "interrupted_run_id": null
     }
   ],
   "health": {

@@ -1,0 +1,1 @@
+{"event_id": "intake:92:labeled:2026-08-28T07:02:11Z:blocked", "kind": "intake.blocked", "ticket_id": "92", "run_id": "", "detail": "description too short (needs >= 30 words)", "source": "intake:92:labeled:2026-08-28T07:02:11Z"}

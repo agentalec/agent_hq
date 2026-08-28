@@ -1,0 +1,9 @@
+{
+  "ticket_id": "92",
+  "pinned_comment_id": 5449489959,
+  "status": "BLOCKED",
+  "runs": [],
+  "block_reason": "description too short (needs >= 30 words)",
+  "block_source": "intake",
+  "interrupted_run_id": null
+}
