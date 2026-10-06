@@ -164,3 +164,30 @@ def test_task_yml_headers_do_not_describe_the_retired_route_model():
         f"task.yml headers describe the retired handoff model: {offenders}. "
         'A task declares no route; "unwired" now means no prompt queues it.'
     )
+
+
+def test_a_prompt_citing_the_constitution_gets_it_injected():
+    """A prompt saying "read constitution.md" is only true if its task declares
+    `context: constitution` -- that is the ONLY thing that inlines the file
+    (`engine/runner.py:_assemble_prompt`). The worktree is a clone of the WORK
+    repo, which has no `constitution.md`, so without the declaration the
+    instruction points at a file that does not exist and the run silently
+    proceeds without the rules.
+
+    `implement` shipped this way: the one task that writes product code told
+    every agent to read the conventions and was never given them. Nothing
+    failed -- which is the point of pinning it here.
+    """
+    taskdefs = load_all(TASKS_DIR, SCHEMAS_DIR)
+    offenders = []
+    for tid, taskdef in sorted(taskdefs.items()):
+        task_dir = TASKS_DIR / tid
+        prompts = sorted(task_dir.glob("prompts/*.md")) + sorted(task_dir.glob("checklists/*.md"))
+        if not any("constitution" in p.read_text() for p in prompts):
+            continue
+        if "constitution" not in taskdef.get("context", []):
+            offenders.append(tid)
+    assert not offenders, (
+        f"prompts cite constitution.md but their task never receives it: {offenders}. "
+        "Add `context: [constitution]` to the task.yml, or stop citing the file."
+    )

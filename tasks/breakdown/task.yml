@@ -1,10 +1,11 @@
-# Staged: activated with the arch-plan -> arch-approval chain (its in-edges);
-# see arch-plan's header for the activation edit. In the minimal route spec
-# fans out to implement directly.
+# Staged: nothing queues it yet -- there is no activation edit, any task in the
+# library is queueable. The pilot's spec prompt fans out to implement directly.
 id: breakdown
 version: 1
 description: Break the plan into ordered, per-repo implementation tasks with acceptance-criteria coverage.
 trigger: enqueued_by
+context:
+  - constitution
 skills:
   - prompts/breakdown.md
 outputs:

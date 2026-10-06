@@ -2,6 +2,8 @@ id: implement
 version: 1
 description: Implement the ticket per specs/{ticket}/spec.md, committing as you go.
 trigger: enqueued_by
+context:
+  - constitution
 skills:
   - prompts/implement.md
 opens_pr: true

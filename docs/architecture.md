@@ -24,9 +24,12 @@
    repo for code and PRs.
 2. State lives on an orphan `agent-hq-state` branch (`engine.state.GitJsonStateStore`,
    plain JSON files, one fixed implementation per PD-7 — not a port, no
-   adapter to swap). All state-writing workflows share the
-   `agent-hq-state` Actions `concurrency` group (`cancel-in-progress: false`),
-   so writes serialize instead of racing (D5).
+   adapter to swap). Concurrent writers are serialized by the store's own
+   bounded fetch/reset/replay on a confirmed non-fast-forward push rejection
+   (D5, deviation 5) — **not** by an Actions concurrency group. No shared
+   `agent-hq-state` group exists: `run.yml`/`intake.yml` are keyed per
+   run/issue, because one shared group made bursts cancel each other's
+   pending runs (`docs/operations.md` §11).
 3. `dispatch.yml` runs on a 15-minute schedule (plus `repository_dispatch`/
    `workflow_dispatch`). It sweeps the state store for queued runs, gate
    timeouts, and orphaned/stale running work, then triggers `run.yml` via
@@ -52,13 +55,13 @@
    records adapter health).
 5. A task's own transition is driven entirely by its validated
    `.agent-hq/control.json` outcome (`schemas/control.schema.json` --
-   "Control outcomes" below), not a static `on_success` list. A `handoff`
-   outcome on a task with a `gates.post` entry (e.g. `spec`'s
-   `spec-approval`) stores the proposed handoffs pending and stops the run
-   at `WAITING_GATE` until the gate's adapter reports `APPROVED`;
-   `dispatch.yml`'s sweep polls gate status, applies the stored handoffs on
-   approval, and completes the run. Merge is always a human action — no task
-   auto-merges a PR.
+   "Control outcomes" below), not a static `on_success` list. A `queue`
+   outcome on a task with a `gates.post` entry stores the declared entries
+   pending (`run.pending_handoffs`) and stops the run at `WAITING_GATE`
+   until the gate's adapter reports `APPROVED`; `dispatch.yml`'s sweep polls
+   gate status, applies the stored entries on approval, and completes the
+   run. A gate declaring `auto_approve: true` skips the waiting, not the
+   comment. Merge is always a human action — no task auto-merges a PR.
 6. The operator dashboard (`dashboard/`) is static source and no Actions
    workflow deploys it: Pages serves the orphan `gh-pages` branch, whose root
    is a copy of `dashboard/`, published by an explicit `git subtree split`
@@ -93,15 +96,17 @@ recorded head (`ticket.work_repos[].recorded_head`). A PR is more selective:
 only `implement` opens one, because it declares `opens_pr: true`, and only
 the first task to do so on a given repo/ticket actually calls
 `open_draft_pr` -- every later task reuses the recorded `pr_ref`. Every
-other task -- including `spec` and `arch-approval`, which carry human gates
--- still lands on that same durable branch with no separate PR of its own;
-their gates are authorized comments on the parent engine issue
-(`github-issue-comment`, `docs/ports/gate.md`), not PR reviews. `finalize`
-writes `specs/<ticket>/summary.md` and emits `complete`; queue-empty
-completion (`engine.engine._complete_if_queue_empty`) is what then posts the
-closing summary to the issue, marks every recorded work-repo PR ready
+other task -- including any that carries a human gate -- still lands on that
+same durable branch with no separate PR of its own; those gates are
+authorized comments on the parent engine issue (`github-issue-comment`,
+`docs/ports/gate.md`), not PR reviews. Queue-empty completion
+(`engine.engine._complete_if_queue_empty`) fires when a run declares an empty
+queue with nothing else in flight: if that run's task is
+`config.projects["final_task"]` it posts the closing summary (read from that
+run's `specs/<ticket>/summary.md`), marks every recorded work-repo PR ready
 (`ticket.work_repos[].pr_ref` -- i.e. `implement`'s PR, if any), and closes
-the issue. Merge remains human-only.
+the issue; if it is any other task the queue stopped early, so the ticket
+BLOCKs and escalates instead. Merge remains human-only.
 
 The state branch is the engine's durable memory, stored as:
 
@@ -126,7 +131,7 @@ vector store, transcript archive, or session checkpoint/resume mechanism.
 
 Frozen by Phase 0 of the hardening plan
 (`.hyperclaude/plans/20260721-2056-harden-the-existing-plan-at.md`, Task 1).
-The control-outcome/handoff mechanics, gate-approval completion, queue-empty
+The control-outcome/queue mechanics, gate-approval completion, queue-empty
 completion, and the isolated-job/stable-per-issue-branch cutover below are
 **live** as of Tasks 9 and 12; the mid-flight close/operator-block/reopen
 edges are still **planned** (Tasks 14, 16, 18 of that plan) and marked as
@@ -201,16 +206,30 @@ Every completed task run emits exactly one control outcome
 transition — a schema-invalid control document rejects the run; it is never
 silently ignored:
 
-- **`handoff`** — `handoffs` required (non-empty). With no post-gate, accepted
-  handoffs enqueue as `QUEUED` runs and this run finishes `SUCCEEDED`. With a
-  post-gate, the proposals are stored pending (`run.pending_handoffs`) and the
-  run stops at `WAITING_GATE`; a gate `APPROVED` applies the stored handoffs
-  and completes the run `SUCCEEDED`.
-- **`complete`** — `handoffs` forbidden; the run finishes `SUCCEEDED` with no
-  children, feeding the `ACTIVE -> DONE` queue-empty check above.
-- **`blocked`** — `handoffs` forbidden, `reason` required; the run is
-  recorded blocked and the ticket moves to `BLOCKED` with that reason,
-  escalating to a human with no auto-retry.
+- **`queue`** — `queue` required, and it is the ticket's remaining route, not
+  just a next hop: entries are added in the order declared. With no
+  post-gate, accepted entries enqueue as `QUEUED` runs and this run finishes
+  `SUCCEEDED`. With a post-gate, they are stored pending
+  (`run.pending_handoffs`) and the run stops at `WAITING_GATE`; a gate
+  `APPROVED` applies them and completes the run `SUCCEEDED`. An **empty**
+  `queue` is how a run says "nothing further from me" — there is no separate
+  `complete` outcome — and feeds the queue-empty check above, which finishes
+  the ticket only if that run's task is `projects.final_task`.
+
+  Removal is explicit and never implied: `cancel: ["<key>"]` drops named
+  `QUEUED` entries, `cancel_pending: true` clears the whole remaining queue
+  first. **Omission never cancels**, so one branch of a fan-out cannot drop
+  its sibling by finishing without mentioning it; a removed entry becomes a
+  `CANCELLED` run with a `run.cancelled` event, never a deletion, and does
+  not count against `loop_guard.max_runs`.
+- **`blocked`** — `reason` required; `queue`/`cancel`/`cancel_pending`
+  forbidden. The run is recorded blocked and the ticket moves to `BLOCKED`
+  with that reason, escalating to a human with no auto-retry. "I gave up" and
+  "I am done" are different facts; only the latter is an empty `queue`.
+
+Any outcome may carry `summary` — a Conventional Commits description of what
+the run changed in the work repo, whose first line becomes the landed
+commit's subject.
 
 ### Work branches [live, Task 12]
 
@@ -401,7 +420,7 @@ Summarized here so this doc is self-contained:
    token counts as an end-of-session trailer on **stderr** — so
    `copilot_cli._parse_usage` records the *billed* USD per run, not an
    estimate, and the per-ticket USD caps in `budgets.yml` bind normally
-   alongside `budget.retries`, the loop guard (25 runs / depth 12), the
+   alongside `budget.retries`, the loop guard (25 runs; no depth ceiling), the
    in-flight cap, and runtime deadlines. Two consequences worth knowing: the
    adapter must not pass `-s` (silent mode suppresses that trailer), and a
    run whose trailer never appears (kill, or a future format change) records

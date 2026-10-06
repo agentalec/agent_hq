@@ -41,13 +41,13 @@ that plus a checklist (see "Prompts are the behavior" below).
 A route is what runs actually queue; nothing else
 wires tasks together. Sketch the edges first, then write the nodes.
 
-- Default to a linear chain with `max: 1`. Every wired task except
-  `breakdown` is `max: 1`, and a linear chain is the easiest route to
-  reason about, gate, and debug.
-- Fan out only where one run genuinely yields per-repo work. `breakdown` is
-  the model: a prompt fans out per repo because `config/repos.yml` configures
-  repos, and each `implement` handoff carries its `repo` field. Set `max`
-  to the number of configured repos, not a round number.
+- Default to a linear route: one entry per declaration. A linear route is the
+  easiest thing to reason about, gate, and debug, and a task declares no
+  successors, so the only place a route exists is a prompt.
+- Fan out only where one run genuinely yields per-repo work. `spec` is the
+  model: its prompt queues one `implement` entry per repo that has real work,
+  each carrying that repo as the entry's `repo` field. The bound is the
+  global `budgets.max_queue_length`, not a per-task cap.
 - Do not design for parallelism inside a ticket — it doesn't exist. The
   engine holds one run per ticket in an exclusive state
   (`RUNNING`/`WAITING_GATE`, `engine.engine.EXCLUSIVE_STATES`); queued
@@ -61,10 +61,12 @@ actually does. Keep the yaml thin and put all the judgment in the prompt.
 
 Two things are injected into every prompt automatically by
 `engine.runner._assemble_prompt`: the control-output contract (the
-`.agent-hq/control.json` outcome shapes, this task's own
-and the output path) and the run's repo scoping.
-Never restate either in a prompt — a stale restatement that drifts from the
-real contract is worse than silence.
+`.agent-hq/control.json` outcome shapes, the queueable-task menu with each
+task's `description`, `max_queue_length`, and this task's own required output
+paths) and the run's repo scoping. Never restate either in a prompt — a stale
+restatement that drifts from the real contract is worse than silence, and is
+exactly how five prompts ended up teaching `outcome: "handoff"` after the
+schema stopped accepting it.
 
 What a prompt should say: which artifact to produce, what goes in it, and
 what quality bar applies. `tasks/spec/prompts/spec.md` plus
@@ -80,21 +82,29 @@ checkable ("every acceptance criterion is testable"); skip them otherwise.
   `specs/{ticket}/` paths (`{ticket}` is substituted). Declared outputs are
   ledger artifacts, not work-repo commits — see
   [task-authoring.md](task-authoring.md) "Artifact namespace".
-- In a handoff, pass exactly what the child needs in `artifacts[]` — the
-  child's `input_artifacts` are its only input source. The provenance rule
+- In a queue entry, pass exactly what that run needs in `artifacts[]` — its
+  `input_artifacts` are its only input source. The provenance rule
   (`engine.handoff.validate_queue`): a run may forward only artifacts it
   inherited as inputs or declared as its own outputs, never an arbitrary
   worktree file.
 - Never write outside the worktree. Every proposed artifact path is
   containment-checked (`engine.handoff._check_containment`) — absolute
-  paths, `..` segments, and symlink escapes reject the whole handoff set.
+  paths, `..` segments, and symlink escapes reject the whole declaration.
+- Anything a task leaves under `specs/{ticket}/` that it did **not** declare
+  lands in the work repo as product code: only declared outputs and inherited
+  inputs are excluded from the patch (`engine/runner.py:_execute`). A task
+  that produces no code at all should say `writes_code: false` rather than
+  rely on a prompt asking politely.
 
 ## Gates
 
 Gate the tasks whose downstream work is expensive or irreversible: a spec
 before implementation burns agent runs on it, an approval before anything
-merge-ready. The pilot gates `spec` and `arch-approval`; `implement` and
-`review` run ungated because their output is still reviewable later.
+merge-ready. On the pilot's route only `spec` declares a gate, and it carries
+`auto_approve: true` — the request comment is still posted with the spec
+inlined, as a record rather than a request, so staffing the gate later is
+deleting one line. `implement` and `review` run ungated because their output
+is still reviewable later, and merge is human regardless.
 
 Prefer a named gate variant per audience over a new adapter. `spec` binds
 `adapter: spec-approval`; `components.yml` resolves it via the `gate.named`
@@ -137,9 +147,11 @@ the route ending in the wrong place.
 
 ## Staged tasks are normal
 
-It is fine — expected, even — to define a task nobody hands off to yet.
-`clinical`, `poll`, `docs`, and `qa` are all valid library members that
-stay unqueued until some prompt names them; `agent-hq tasks validate` checks
+It is fine — expected, even — to define a task nothing queues yet.
+`arch-plan`, `arch-approval`, `breakdown`, `clinical`, `poll` and `docs` are
+all valid library members that stay unqueued until some prompt names them —
+there is no activation edit, since every library task is already queueable by
+every other. `agent-hq tasks validate` checks
 each task in isolation and never asks whether anything queues it. Record that
 it is staged as a header comment in the task's own `task.yml`, the way
 `clinical` does, so using it
@@ -147,10 +159,15 @@ later is a documented one-liner rather than archaeology.
 
 ## Budgets and retries
 
-Under the default `copilot-cli` executor, per-run cost is not metered
-(runs record `cost_usd: 0.0`), so `max_cost_usd` and `ticket_cap_usd` do
-not bind — see [architecture.md](architecture.md) deviation 9. The knobs
-that actually constrain a task:
+Under the default `copilot-cli` executor cost **is** metered: Copilot bills
+tokens as AI credits and prints the session's total on stderr, which
+`copilot_cli._parse_usage` records as the run's billed `cost_usd` (1 credit =
+$0.01), so `max_cost_usd` and `ticket_cap_usd` bind normally — see
+[architecture.md](architecture.md) deviation 9. The one gap: a run whose
+trailer never appears (a kill, or a CLI format change) records
+`cost_usd: 0.0`, deliberately understating rather than blocking the ticket on
+every transient failure. So size the USD caps, and do not rely on them alone.
+The other knobs:
 
 - `budget.retries` — how many times a failed or schema-invalid run
   re-attempts. This is the per-task knob that matters; size it to how
@@ -158,9 +175,10 @@ that actually constrain a task:
 - `budget.max_runtime_min` — size to the task's real work, not a default:
   `implement` gets 90, document-producing tasks get 30, `finalize` 15. Too
   small kills healthy runs; too large delays lost-run detection.
-- `loop_guard.max_runs` in `config/budgets.yml` is the
-  ticket-level backstop, checked both before handoffs apply and at
-  dispatch; `in_flight_cap` is a global concurrent-ticket cap, checked at
+- `loop_guard.max_runs` in `config/budgets.yml` is the only structural
+  ceiling (there is no depth guard), checked both before a queue applies and
+  at dispatch; `CANCELLED` runs are excluded.
+  `in_flight_cap` is a global concurrent-ticket cap, checked at
   dispatch/claim only. Leave them alone when adding a task unless
   your route legitimately exceeds them (a long chain plus retries can
   approach `max_runs`).
@@ -170,10 +188,11 @@ that actually constrain a task:
 1. `agent-hq tasks validate` — schema, on-disk skill files, every
    declared `components` ports exist in
    `components.yml`.
-2. If the task introduces a new graph shape (a new fan-out, a new gate
-   binding), extend `tests/test_task_library.py` — its checks are generic
-   (handoff targets resolve, gate bindings construct, no concrete adapter
-   names), so add the new shape to those, never a task-name special case.
+2. If the task introduces a new shape (a new fan-out, a new gate binding),
+   extend `tests/test_task_library.py` — its checks are generic (no task
+   declares a route, gate bindings construct, no concrete adapter names, no
+   prompt teaches retired control vocabulary), so add the new shape to those,
+   never a task-name special case.
 3. Dry-run the route on a sandbox ticket before trusting it — see
    [local-testing.md](local-testing.md) §3 for the live sandbox setup.
 
@@ -192,8 +211,13 @@ that actually constrain a task:
 - Forwarding an artifact outside your provenance set (not inherited, not
   your own declared output) — rejected by `validate_queue`.
 - Emitting `"outcome": "queue"` with no `queue` key at all —
-  schema-invalid (`control.schema.json` requires `minItems: 1`); an empty
-  set of next steps is `"complete"`.
-- Relying on `max_cost_usd`/`ticket_cap_usd` for safety under the Copilot
-  binding — cost is unmetered there; use `retries`, runtime, and the loop
-  guard ([architecture.md](architecture.md) deviation 9).
+  schema-invalid. An empty **array** (`"queue": []`) is the way to say
+  "nothing further"; there is no `"complete"` outcome.
+- Declaring an empty queue from a task that is not `projects.final_task` —
+  the engine reads that as a route that stopped early and BLOCKs the ticket
+  (`engine/engine.py:_complete_if_queue_empty`). A task that means "I gave
+  up" says `"outcome": "blocked"` with a reason.
+- Leaving an undeclared file under `specs/{ticket}/` — only declared outputs
+  and inherited inputs are excluded from the work patch
+  (`engine/runner.py:_execute`), so anything else there lands in the work
+  repo as product code. Scratch goes in `.agent-hq/`.

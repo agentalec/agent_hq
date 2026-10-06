@@ -386,9 +386,9 @@ def _assemble_prompt(
             )
         if run.get("input_artifacts"):
             parts.append(
-                "## Available inputs\nThese files were handed to you by the task that handed "
-                "off to you and are present in your worktree; you may forward any of them in a "
-                "handoff's `artifacts`:\n"
+                "## Available inputs\nThese files came from the run whose output you read and "
+                "are present in your worktree; you may forward any of them in a queue entry's "
+                "`artifacts`:\n"
                 + "\n".join(f"- `{path}`" for path in run["input_artifacts"])
             )
 
